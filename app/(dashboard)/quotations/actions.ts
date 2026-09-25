@@ -8,6 +8,38 @@ import { z } from "zod";
 
 export type ActionResult = { success: boolean; error?: string; data?: { id: string } };
 
+const optText = (max: number) => z.string().trim().max(max).optional().transform((v) => (v ? v : null));
+const contactSchema = z.object({
+  kindAttn: optText(120),
+  customerPhone: optText(40),
+  customerEmail: z.string().trim().max(200).optional().transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), "Enter a valid email"),
+  customerGstin: z.string().trim().toUpperCase().max(15).optional().transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^[0-9]{2}[A-Z0-9]{13}$/.test(v), "GSTIN should be 15 characters"),
+  customerAddress: optText(300),
+  projectName: optText(200),
+});
+
+function readContact(formData: FormData) {
+  return contactSchema.safeParse({
+    kindAttn: formData.get("kindAttn") ?? undefined,
+    customerPhone: formData.get("customerPhone") ?? undefined,
+    customerEmail: formData.get("customerEmail") ?? undefined,
+    customerGstin: formData.get("customerGstin") ?? undefined,
+    customerAddress: formData.get("customerAddress") ?? undefined,
+    projectName: formData.get("projectName") ?? undefined,
+  });
+}
+
+/** Only non-empty values, so the lead's details (filled by the database) are not overwritten with blanks. */
+function contactColumns(c: z.infer<typeof contactSchema>) {
+  const cols = {
+    kind_attn: c.kindAttn, customer_phone: c.customerPhone, customer_email: c.customerEmail,
+    customer_gstin: c.customerGstin, customer_address: c.customerAddress, project_name: c.projectName,
+  };
+  return Object.fromEntries(Object.entries(cols).filter(([, v]) => v !== null)) as Partial<typeof cols>;
+}
+
 const createQuotationSchema = z.object({
   quotationCode: z.string().min(1, "Quotation code required"),
   customerName: z.string().min(1, "Customer name required"),
@@ -32,6 +64,8 @@ export async function createQuotation(formData: FormData): Promise<ActionResult>
   });
 
   if (!parsed.success) return { success: false, error: "Please check the form and try again." };
+  const contact = readContact(formData);
+  if (!contact.success) return { success: false, error: Object.values(contact.error.flatten().fieldErrors)[0]?.[0] ?? "Check the customer details." };
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -48,6 +82,7 @@ export async function createQuotation(formData: FormData): Promise<ActionResult>
     quotation_type: "detailed",
     formwork_type: parsed.data.formworkType,
     area_basis: parsed.data.formworkType === "monolithic" ? "floor_plate" : "vertical_face",
+    ...contactColumns(contact.data),
   }).select("id").single();
 
   if (error) {
@@ -90,6 +125,8 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
     const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
     return { success: false, error: firstError ?? "Please check the form and try again." };
   }
+  const contact = readContact(formData);
+  if (!contact.success) return { success: false, error: Object.values(contact.error.flatten().fieldErrors)[0]?.[0] ?? "Check the customer details." };
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("create_quick_quote", {
@@ -110,6 +147,9 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
       error: isDuplicate ? "A quotation with that code already exists." : isNoRate ? error.message.replace(/^.*ERROR:\s*/i, "") : "Could not create quick quote. Please try again.",
     };
   }
+
+  const extra = contactColumns(contact.data);
+  if (Object.keys(extra).length > 0) await supabase.from("quotations").update(extra).eq("id", data as string);
 
   revalidatePath("/quotations");
   return { success: true, data: { id: data as string } };

@@ -66,6 +66,9 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
             {isQuick && <span className="rounded-full bg-purple-900/30 px-2.5 py-1 text-xs capitalize text-purple-300">Quick · {quotation.formwork_type}</span>}
           </div>
           <p className="mt-1 text-sm text-graphite-400">{quotation.customer_name}</p>
+          <p className="mt-0.5 text-xs text-graphite-500">
+            {[quotation.kind_attn, quotation.customer_phone, quotation.customer_email, quotation.project_name].filter(Boolean).join(" · ") || "Add contact person, phone and email under Customer & proposal details"}
+          </p>
         </div>
         <div className="flex flex-col items-end gap-2">
           <a href={`/quotations/${id}/pdf`} target="_blank" rel="noopener" className="rounded-md bg-signal-amber px-4 py-2 text-sm font-semibold text-graphite-950 hover:opacity-90">Download PDF</a>

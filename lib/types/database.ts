@@ -1536,7 +1536,10 @@ export type Database = {
           created_by: string | null
           currency: string
           customer_address: string | null
+          customer_email: string | null
+          customer_gstin: string | null
           customer_name: string
+          customer_phone: string | null
           formwork_type: string | null
           gst_percentage: number
           id: string
@@ -1545,6 +1548,7 @@ export type Database = {
           nalco_rate_date: string | null
           nalco_rate_per_kg: number | null
           payment_terms: string[] | null
+          project_name: string | null
           quick_rate_per_sqm: number | null
           quotation_code: string
           quotation_date: string
@@ -1569,7 +1573,10 @@ export type Database = {
           created_by?: string | null
           currency?: string
           customer_address?: string | null
+          customer_email?: string | null
+          customer_gstin?: string | null
           customer_name: string
+          customer_phone?: string | null
           formwork_type?: string | null
           gst_percentage?: number
           id?: string
@@ -1578,6 +1585,7 @@ export type Database = {
           nalco_rate_date?: string | null
           nalco_rate_per_kg?: number | null
           payment_terms?: string[] | null
+          project_name?: string | null
           quick_rate_per_sqm?: number | null
           quotation_code: string
           quotation_date?: string
@@ -1602,7 +1610,10 @@ export type Database = {
           created_by?: string | null
           currency?: string
           customer_address?: string | null
+          customer_email?: string | null
+          customer_gstin?: string | null
           customer_name?: string
+          customer_phone?: string | null
           formwork_type?: string | null
           gst_percentage?: number
           id?: string
@@ -1611,6 +1622,7 @@ export type Database = {
           nalco_rate_date?: string | null
           nalco_rate_per_kg?: number | null
           payment_terms?: string[] | null
+          project_name?: string | null
           quick_rate_per_sqm?: number | null
           quotation_code?: string
           quotation_date?: string

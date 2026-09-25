@@ -6,6 +6,7 @@ import { DEFAULT_PAYMENT_TERMS, formworkKind } from "@/lib/quotations/document-c
 
 type Q = {
   id: string; customer_name: string; kind_attn: string | null; customer_address: string | null;
+  customer_phone: string | null; customer_email: string | null; customer_gstin: string | null; project_name: string | null;
   schedule_description: string | null; quotation_date: string; validity_days: number;
   nalco_rate_per_kg: number | null; nalco_rate_date: string | null; payment_terms: string[] | null;
   quotation_type: string; formwork_type: string | null; total_area_sqm: number | null;
@@ -33,7 +34,7 @@ export function DocumentDetails({ q, editable }: { q: Q; editable: boolean }) {
   return (
     <div className="mt-6 rounded-lg border border-graphite-800 bg-graphite-900">
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between px-4 py-3 text-left">
-        <span className="text-sm font-medium text-graphite-200">Proposal details (printed on the PDF)</span>
+        <span className="text-sm font-medium text-graphite-200">Customer & proposal details (printed on the PDF)</span>
         <span className="text-xs text-graphite-500">{open ? "Hide" : editable ? "Edit" : "View"}</span>
       </button>
       {open && (
@@ -42,9 +43,13 @@ export function DocumentDetails({ q, editable }: { q: Q; editable: boolean }) {
           {state?.error && <p className="mb-3 rounded-md border border-signal-red/30 bg-signal-red/10 px-3 py-2 text-sm text-signal-red">{state.error}</p>}
           {state?.ok && <p className="mb-3 rounded-md border border-signal-green/30 bg-signal-green/10 px-3 py-2 text-sm text-signal-green">Saved.</p>}
           <div className="grid gap-4 md:grid-cols-2">
-            <L label="Customer (To)"><input name="customerName" defaultValue={q.customer_name} required disabled={d} className={input} /></L>
-            <L label="Kind Attn"><input name="kindAttn" defaultValue={q.kind_attn ?? ""} placeholder="Mr. …" disabled={d} className={input} /></L>
-            <L label="Customer city / address" wide><input name="customerAddress" defaultValue={q.customer_address ?? ""} placeholder="Ahmedabad, Gujarat" disabled={d} className={input} /></L>
+            <L label="Company name (To)"><input name="customerName" defaultValue={q.customer_name} required disabled={d} className={input} /></L>
+            <L label="Contact person (Kind Attn)"><input name="kindAttn" defaultValue={q.kind_attn ?? ""} placeholder="Mr. …" disabled={d} className={input} /></L>
+            <L label="Phone"><input name="customerPhone" type="tel" defaultValue={q.customer_phone ?? ""} disabled={d} className={input} /></L>
+            <L label="Email"><input name="customerEmail" type="email" defaultValue={q.customer_email ?? ""} disabled={d} className={input} /></L>
+            <L label="Customer GSTIN"><input name="customerGstin" defaultValue={q.customer_gstin ?? ""} disabled={d} className={input} /></L>
+            <L label="Project / site name"><input name="projectName" defaultValue={q.project_name ?? ""} disabled={d} className={input} /></L>
+            <L label="City / address" wide><input name="customerAddress" defaultValue={q.customer_address ?? ""} placeholder="Ahmedabad, Gujarat" disabled={d} className={input} /></L>
             <L label="Price schedule description" wide>
               <input name="scheduleDescription" defaultValue={q.schedule_description ?? ""} placeholder="Acoform Aluminium Formwork – A Wing" disabled={d} className={input} />
             </L>

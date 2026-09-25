@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { CustomerFields } from "./customer-fields";
 import { createQuickQuote } from "./actions";
 
 type Lead = { id: string; lead_code: string; customer_name: string };
@@ -40,13 +41,10 @@ export function QuickQuoteForm({ leads, rates, nextCode }: { leads: Lead[]; rate
       {error && <p className="mb-4 rounded-md border border-signal-red/30 bg-signal-red/10 px-3.5 py-2.5 text-sm text-signal-red">{error}</p>}
 
       <div className="grid grid-cols-2 gap-4">
+        <CustomerFields />
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Quotation code</label>
           <input name="quotationCode" required defaultValue={nextCode} className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Customer name</label>
-          <input name="customerName" required className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none" />
         </div>
         {leads.length > 0 && (
           <div className="flex flex-col gap-1.5">

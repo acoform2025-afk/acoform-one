@@ -21,9 +21,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-graphite-800 bg-graphite-900/40 p-4 md:flex">
         <div className="mb-6 px-3">
-          <p className="text-lg font-bold tracking-tight">
-            <span className="text-signal-amber">ACOFORM</span> <span className="text-graphite-300">ONE</span>
-          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/acoform-logo.png" alt="ACOFORM" className="h-7 w-auto" />
+          <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-graphite-500">One · ERP</p>
         </div>
         <SidebarNav items={NAV} />
         <div className="mt-auto border-t border-graphite-800 px-3 pt-4">
@@ -37,7 +37,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-graphite-800 px-4 py-3 md:hidden">
-          <p className="font-bold"><span className="text-signal-amber">ACOFORM</span> ONE</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/acoform-logo.png" alt="ACOFORM" className="h-6 w-auto" />
           <details className="relative">
             <summary className="cursor-pointer list-none text-sm text-graphite-400">Menu</summary>
             <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-graphite-800 bg-graphite-900 p-2">
