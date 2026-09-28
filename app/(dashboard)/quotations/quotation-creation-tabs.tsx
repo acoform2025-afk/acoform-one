@@ -3,12 +3,17 @@
 import { useState } from "react";
 import { NewQuotationForm } from "./new-quotation-form";
 import { QuickQuoteForm } from "./quick-quote-form";
+import type { CustomerDefaults } from "./customer-fields";
 
 type Lead = { id: string; lead_code: string; customer_name: string; project_name: string | null };
 type Rate = { formwork_type: string; rate_per_sqm: number };
 
-export function QuotationCreationTabs({ leads, rates, nextCode }: { leads: Lead[]; rates: Rate[]; nextCode: string }) {
-  const [mode, setMode] = useState<"detailed" | "quick" | null>(null);
+export type LeadPrefill = { leadId: string; label: string; customer: CustomerDefaults; areaSqm?: string };
+
+export function QuotationCreationTabs({ leads, rates, nextCode, initialMode, fromLead }: {
+  leads: Lead[]; rates: Rate[]; nextCode: string; initialMode?: "detailed" | "quick"; fromLead?: LeadPrefill;
+}) {
+  const [mode, setMode] = useState<"detailed" | "quick" | null>(initialMode ?? null);
 
   if (!mode) {
     return (
@@ -21,8 +26,16 @@ export function QuotationCreationTabs({ leads, rates, nextCode }: { leads: Lead[
 
   return (
     <div>
-      <button onClick={() => setMode(null)} className="mb-3 text-xs text-graphite-500 hover:text-graphite-300">← Back</button>
-      {mode === "detailed" ? <NewQuotationForm leads={leads} nextCode={nextCode} /> : <QuickQuoteForm leads={leads} rates={rates} nextCode={nextCode} />}
+      <div className="mb-3 flex items-center gap-4">
+        <button onClick={() => setMode(null)} className="text-xs text-graphite-500 hover:text-graphite-300">← Back</button>
+        {fromLead ? <span className="text-xs text-graphite-400">From lead <span className="font-mono text-aluminium-300">{fromLead.label}</span></span> : null}
+        <button onClick={() => setMode(mode === "detailed" ? "quick" : "detailed")} className="text-xs text-graphite-500 hover:text-signal-amber">
+          Switch to {mode === "detailed" ? "quick quote" : "detailed quotation"}
+        </button>
+      </div>
+      {mode === "detailed"
+        ? <NewQuotationForm key="d" leads={leads} nextCode={nextCode} leadId={fromLead?.leadId} prefill={fromLead?.customer} />
+        : <QuickQuoteForm key="q" leads={leads} rates={rates} nextCode={nextCode} leadId={fromLead?.leadId} prefill={fromLead?.customer} areaDefault={fromLead?.areaSqm} />}
     </div>
   );
 }

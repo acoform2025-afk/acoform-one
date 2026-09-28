@@ -15,6 +15,8 @@ to the live Supabase project `hxlkinnosgckehogtpgb` (do not re-apply).
 ## Database changes after the rebuild
 - 00033 (28 Sep): `leads.project_name` added; lead numbers assigned automatically by trigger
   `trg_leads_assign_code` as `ACOFORM/LEAD/<FY>/001` (FY Apr–Mar). The app no longer sends `lead_code`.
+- 00034 (28 Sep): `fill_quotation_from_lead` also copies `project_name`, and moves the lead to `quoted` when a
+  quotation is created from it. Lead page has Create quotation / Quick quote (opens /quotations?lead=<id>[&mode=quick]).
 
 ## Built so far
 Login, dashboard, settings (company, bank, engineering parameters, users), leads, quotations
