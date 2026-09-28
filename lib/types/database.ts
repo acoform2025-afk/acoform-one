@@ -644,6 +644,65 @@ export type Database = {
           },
         ]
       }
+      engineering_parameters: {
+        Row: {
+          certification_note: string | null
+          certified_by: string | null
+          concrete_density_kn_m3: number
+          deflection_limit_wall: number
+          is_certified: boolean
+          min_safety_factor: number
+          panel_e_mpa: number
+          panel_i_mm4_per_mm: number
+          tenant_id: string
+          tie_capacity_kn: number
+          tie_spacing_h_mm: number
+          tie_spacing_v_mm: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          certification_note?: string | null
+          certified_by?: string | null
+          concrete_density_kn_m3?: number
+          deflection_limit_wall?: number
+          is_certified?: boolean
+          min_safety_factor?: number
+          panel_e_mpa?: number
+          panel_i_mm4_per_mm?: number
+          tenant_id: string
+          tie_capacity_kn?: number
+          tie_spacing_h_mm?: number
+          tie_spacing_v_mm?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          certification_note?: string | null
+          certified_by?: string | null
+          concrete_density_kn_m3?: number
+          deflection_limit_wall?: number
+          is_certified?: boolean
+          min_safety_factor?: number
+          panel_e_mpa?: number
+          panel_i_mm4_per_mm?: number
+          tenant_id?: string
+          tie_capacity_kn?: number
+          tie_spacing_h_mm?: number
+          tie_spacing_v_mm?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engineering_parameters_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_ledger: {
         Row: {
           actor_user_id: string | null
@@ -1998,6 +2057,7 @@ export type Database = {
         }
         Returns: string
       }
+      assert_design_editable: { Args: { p_design_id: string }; Returns: string }
       assert_quotation_editable: {
         Args: { p_quotation_id: string }
         Returns: string
@@ -2065,6 +2125,7 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
+      next_design_code: { Args: { p_project_id: string }; Returns: string }
       next_quotation_code: { Args: never; Returns: string }
       pass_work_order_qc: {
         Args: { p_checklist: Json; p_notes?: string; p_work_order_id: string }
@@ -2114,6 +2175,15 @@ export type Database = {
       }
       return_panel: {
         Args: { p_condition?: string; p_notes?: string; p_panel_id: string }
+        Returns: undefined
+      }
+      run_engineering_check: { Args: { p_design_id: string }; Returns: number }
+      save_design_layouts: {
+        Args: { p_design_id: string; p_options: Json }
+        Returns: number
+      }
+      select_layout_option: {
+        Args: { p_design_id: string; p_option_id: string }
         Returns: undefined
       }
       update_quick_quote_area: {

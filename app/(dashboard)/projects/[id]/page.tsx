@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { date, inr, num, titleCase } from "@/lib/format";
+import { hasPermission } from "@/lib/auth/permissions";
+import { ActionButton } from "@/components/action-button";
+import { createDesign } from "../../designs/actions";
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,6 +23,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const { data: boms } = designs && designs.length
     ? await supabase.from("bom_headers").select("id, design_id, version, status, total_panel_count, total_weight_kg").in("design_id", designs.map((d) => d.id)).order("version")
     : { data: [] as { id: string; design_id: string; version: number; status: string; total_panel_count: number; total_weight_kg: number }[] };
+
+  const canDesign = await hasPermission("designs", "create");
 
   return (
     <div className="fade-in max-w-4xl">
@@ -41,7 +46,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       )}
 
       <section className="mt-8">
-        <h2 className="mb-2 text-sm font-medium text-graphite-200">Designs</h2>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-graphite-200">Designs</h2>
+          {canDesign && <ActionButton small variant="primary" label="+ New design" action={createDesign.bind(null, id)} />}
+        </div>
         <div className="overflow-hidden rounded-lg border border-graphite-800">
           <table className="w-full text-left text-sm">
             <tbody className="divide-y divide-graphite-800">
@@ -50,10 +58,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
                 const dBoms = (boms ?? []).filter((b) => b.design_id === d.id);
                 return (
                   <tr key={d.id} className="bg-graphite-950">
-                    <td className="px-4 py-3 font-mono text-xs text-aluminium-300">{d.design_code}</td>
+                    <td className="px-4 py-3 font-mono text-xs"><Link href={`/designs/${d.id}`} className="text-aluminium-300 hover:underline">{d.design_code}</Link></td>
                     <td className="px-4 py-3 text-xs text-graphite-300">{titleCase(d.status)}</td>
                     <td className="px-4 py-3 text-xs text-graphite-400">
-                      {dBoms.length ? dBoms.map((b) => `BOM v${b.version} (${titleCase(b.status)}, ${b.total_panel_count} panels, ${num(b.total_weight_kg, 1)} kg)`).join(" · ") : "No BOM"}
+                      {dBoms.length ? dBoms.map((b) => (
+                        <Link key={b.id} href={`/boms/${b.id}`} className="mr-3 hover:text-signal-amber">BOM v{b.version} ({titleCase(b.status)}, {b.total_panel_count} panels, {num(b.total_weight_kg, 1)} kg)</Link>
+                      )) : "No BOM"}
                     </td>
                   </tr>
                 );
@@ -71,7 +81,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
               {(orders ?? []).length === 0 && <tr><td className="px-4 py-6 text-center text-graphite-600">No production orders yet.</td></tr>}
               {(orders ?? []).map((o) => (
                 <tr key={o.id} className="bg-graphite-950">
-                  <td className="px-4 py-3 font-mono text-xs text-aluminium-300">{o.order_code}</td>
+                  <td className="px-4 py-3 font-mono text-xs"><Link href={`/production/${o.id}`} className="text-aluminium-300 hover:underline">{o.order_code}</Link></td>
                   <td className="px-4 py-3 text-xs text-graphite-300">{titleCase(o.status)}</td>
                   <td className="px-4 py-3 text-xs text-graphite-400">{date(o.target_completion)}</td>
                 </tr>
@@ -80,7 +90,6 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           </table>
         </div>
       </section>
-      <p className="mt-6 text-xs text-graphite-600">Design, BOM and production screens arrive in the next update.</p>
     </div>
   );
 }

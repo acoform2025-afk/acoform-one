@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/auth/permissions";
 import { titleCase } from "@/lib/format";
 import { CompanyForm } from "./company-form";
+import { EngineeringForm } from "./engineering-form";
+import { hasPermission } from "@/lib/auth/permissions";
 
 export const metadata = { title: "Settings" };
 
@@ -10,6 +12,8 @@ export default async function SettingsPage() {
   const profile = await getCurrentProfile();
   const { data: tenant } = await supabase.from("tenants").select("*").eq("id", profile!.tenant_id).single();
   const { data: isAdmin } = await supabase.rpc("is_super_admin");
+  const { data: eng } = await supabase.from("engineering_parameters").select("*").maybeSingle();
+  const canEng = await hasPermission("designs", "approve");
 
   const { data: users } = await supabase
     .from("users")
@@ -21,6 +25,10 @@ export default async function SettingsPage() {
       <h1 className="text-2xl font-semibold text-graphite-50">Settings</h1>
       <div className="mt-6">
         <CompanyForm tenant={(tenant ?? {}) as Record<string, string | null>} canEdit={isAdmin === true} />
+      </div>
+
+      <div className="mt-8">
+        <EngineeringForm p={(eng ?? {}) as Record<string, number | string | boolean | null>} canEdit={canEng} />
       </div>
 
       <section className="mt-8 overflow-hidden rounded-lg border border-graphite-800">

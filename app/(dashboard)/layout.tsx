@@ -7,7 +7,8 @@ const NAV: NavItem[] = [
   { href: "/", label: "Dashboard" },
   { href: "/leads", label: "Leads" },
   { href: "/quotations", label: "Quotations" },
-  { href: "/projects", label: "Projects" },
+  { href: "/projects", label: "Projects & designs" },
+  { href: "/production", label: "Production & QC" },
   { href: "/panel-catalog", label: "Panel catalog & rates" },
   { href: "/settings", label: "Settings" },
 ];
