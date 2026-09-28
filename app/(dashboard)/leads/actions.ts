@@ -5,25 +5,29 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+const positiveNumber = (label: string) =>
+  z.coerce.number({ invalid_type_error: `${label} must be a number` }).positive(`${label} must be more than 0`);
+const positiveWhole = (label: string) =>
+  z.coerce.number({ invalid_type_error: `${label} must be a number` }).int(`${label} must be a whole number`).positive(`${label} must be more than 0`);
+
 const createLeadSchema = z.object({
-  leadCode: z.string().min(1, "Lead code is required"),
-  customerName: z.string().min(1, "Customer name is required"),
+  projectName: z.string({ required_error: "Project name is required" }).min(1, "Project name is required"),
   companyName: z.string().optional(),
   contactPersonName: z.string().optional(),
   contactPhone: z.string().optional(),
   contactEmail: z.string().optional(),
   gstNumber: z.string().optional(),
   projectLocation: z.string().optional(),
-  estimatedAreaSqm: z.coerce.number().positive().optional(),
+  estimatedAreaSqm: positiveNumber("Estimated area").optional(),
   projectType: z.string().optional(),
-  numFloors: z.coerce.number().int().positive().optional(),
-  numRepetitiveUnits: z.coerce.number().int().positive().optional(),
+  numFloors: positiveWhole("Number of floors").optional(),
+  numRepetitiveUnits: positiveWhole("Repetitive units").optional(),
   sourceChannel: z.string().optional(),
   expectedStartDate: z.string().optional(),
   formworkType: z.string().optional(),
 });
 
-export type ActionResult = { success: boolean; error?: string };
+export type ActionResult = { success: boolean; error?: string; leadCode?: string };
 
 function emptyToUndefined(v: FormDataEntryValue | null): string | undefined {
   const s = v?.toString().trim();
@@ -38,8 +42,7 @@ export async function createLead(formData: FormData): Promise<ActionResult> {
   }
 
   const parsed = createLeadSchema.safeParse({
-    leadCode: formData.get("leadCode"),
-    customerName: formData.get("customerName"),
+    projectName: emptyToUndefined(formData.get("projectName")),
     companyName: emptyToUndefined(formData.get("companyName")),
     contactPersonName: emptyToUndefined(formData.get("contactPersonName")),
     contactPhone: emptyToUndefined(formData.get("contactPhone")),
@@ -56,20 +59,23 @@ export async function createLead(formData: FormData): Promise<ActionResult> {
   });
 
   if (!parsed.success) {
-    return { success: false, error: "Please check the form and try again." };
+    // Say exactly which field is wrong instead of a generic message
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Please check the form and try again." };
   }
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Your session has expired. Please sign in again." };
 
-  const { data: profile } = await supabase.from("users").select("tenant_id").eq("id", user!.id).single();
+  const { data: profile } = await supabase.from("users").select("tenant_id").eq("id", user.id).single();
   if (!profile) return { success: false, error: "Could not resolve your tenant." };
 
-  const { error } = await supabase.from("leads").insert({
+  // lead_code is left out on purpose: the database numbers it (ACOFORM/LEAD/<FY>/001)
+  const { data: created, error } = await supabase.from("leads").insert({
     tenant_id: profile.tenant_id,
-    lead_code: parsed.data.leadCode,
-    customer_name: parsed.data.customerName,
-    company_name: parsed.data.companyName ?? parsed.data.customerName,
+    project_name: parsed.data.projectName,
+    customer_name: parsed.data.companyName ?? parsed.data.projectName,
+    company_name: parsed.data.companyName ?? null,
     contact_person_name: parsed.data.contactPersonName ?? null,
     contact_phone: parsed.data.contactPhone ?? null,
     contact_email: parsed.data.contactEmail ?? null,
@@ -82,14 +88,14 @@ export async function createLead(formData: FormData): Promise<ActionResult> {
     source_channel: parsed.data.sourceChannel ?? null,
     expected_start_date: parsed.data.expectedStartDate ?? null,
     formwork_type: parsed.data.formworkType ?? "undecided",
-    owner_user_id: user!.id,
-  });
+    owner_user_id: user.id,
+  }).select("lead_code").single();
 
   if (error) {
-    const isDuplicate = error.message.includes("leads_tenant_id_lead_code_key");
-    return { success: false, error: isDuplicate ? "A lead with that code already exists." : "Could not create the lead. Please try again." };
+    console.error("createLead failed:", error.message);
+    return { success: false, error: `Could not create the lead: ${error.message}` };
   }
 
   revalidatePath("/leads");
-  return { success: true };
+  return { success: true, leadCode: created?.lead_code };
 }

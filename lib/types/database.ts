@@ -1021,6 +1021,7 @@ export type Database = {
           num_repetitive_units: number | null
           owner_user_id: string | null
           project_location: string | null
+          project_name: string | null
           project_type: string | null
           source_channel: string | null
           status: string
@@ -1039,12 +1040,13 @@ export type Database = {
           formwork_type?: string | null
           gst_number?: string | null
           id?: string
-          lead_code: string
+          lead_code?: string
           notes?: string | null
           num_floors?: number | null
           num_repetitive_units?: number | null
           owner_user_id?: string | null
           project_location?: string | null
+          project_name?: string | null
           project_type?: string | null
           source_channel?: string | null
           status?: string
@@ -1069,6 +1071,7 @@ export type Database = {
           num_repetitive_units?: number | null
           owner_user_id?: string | null
           project_location?: string | null
+          project_name?: string | null
           project_type?: string | null
           source_channel?: string | null
           status?: string

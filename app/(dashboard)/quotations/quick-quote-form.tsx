@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { CustomerFields } from "./customer-fields";
 import { createQuickQuote } from "./actions";
 
-type Lead = { id: string; lead_code: string; customer_name: string };
+type Lead = { id: string; lead_code: string; customer_name: string; project_name: string | null };
 type Rate = { formwork_type: string; rate_per_sqm: number };
 
 const AREA_BASIS_HINT: Record<string, string> = {
@@ -51,7 +51,7 @@ export function QuickQuoteForm({ leads, rates, nextCode }: { leads: Lead[]; rate
             <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Link to lead (optional)</label>
             <select name="leadId" className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none">
               <option value="">— None —</option>
-              {leads.map((l) => <option key={l.id} value={l.id}>{l.lead_code} — {l.customer_name}</option>)}
+              {leads.map((l) => <option key={l.id} value={l.id}>{l.lead_code} — {l.project_name ?? l.customer_name}</option>)}
             </select>
           </div>
         )}

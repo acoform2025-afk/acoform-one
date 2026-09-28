@@ -4,7 +4,7 @@ import { useState } from "react";
 import { NewQuotationForm } from "./new-quotation-form";
 import { QuickQuoteForm } from "./quick-quote-form";
 
-type Lead = { id: string; lead_code: string; customer_name: string };
+type Lead = { id: string; lead_code: string; customer_name: string; project_name: string | null };
 type Rate = { formwork_type: string; rate_per_sqm: number };
 
 export function QuotationCreationTabs({ leads, rates, nextCode }: { leads: Lead[]; rates: Rate[]; nextCode: string }) {

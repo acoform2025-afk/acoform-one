@@ -25,7 +25,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
     .order("created_at", { ascending: false });
   if (!showAll) query = query.neq("status", "superseded");
   const { data: quotations } = await query;
-  const { data: leads } = await supabase.from("leads").select("id, lead_code, customer_name").in("status", ["qualified", "contacted", "new"]).order("created_at", { ascending: false });
+  const { data: leads } = await supabase.from("leads").select("id, lead_code, customer_name, project_name").in("status", ["qualified", "contacted", "new"]).order("created_at", { ascending: false });
   const { data: quickRates } = await supabase.from("quick_quote_rates").select("formwork_type, rate_per_sqm").eq("is_active", true);
   const canCreate = await hasPermission("quotations", "create");
   const { data: nextCode } = canCreate ? await supabase.rpc("next_quotation_code") : { data: null };

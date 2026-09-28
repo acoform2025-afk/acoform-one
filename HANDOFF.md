@@ -12,6 +12,10 @@ to the live Supabase project `hxlkinnosgckehogtpgb` (do not re-apply).
 - Free services sleep after ~15 min idle. Later: Cloudflare Zero Trust + custom domain like erp.acodor.com.
 - The repo secret `HF_TOKEN` is no longer used and can be deleted.
 
+## Database changes after the rebuild
+- 00033 (28 Sep): `leads.project_name` added; lead numbers assigned automatically by trigger
+  `trg_leads_assign_code` as `ACOFORM/LEAD/<FY>/001` (FY Apr–Mar). The app no longer sends `lead_code`.
+
 ## Built so far
 Login, dashboard, settings (company, bank, engineering parameters, users), leads, quotations
 (detailed + quick, accessory/transport/design lines, revisions R1/R2, proposal PDF with real logo),

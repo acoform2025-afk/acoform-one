@@ -5,7 +5,7 @@ import { createQuotation } from "./actions";
 import { useRouter } from "next/navigation";
 import { CustomerFields } from "./customer-fields";
 
-type Lead = { id: string; lead_code: string; customer_name: string };
+type Lead = { id: string; lead_code: string; customer_name: string; project_name: string | null };
 
 export function NewQuotationForm({ leads, nextCode }: { leads: Lead[]; nextCode: string }) {
   const [isPending, startTransition] = useTransition();
@@ -41,7 +41,7 @@ export function NewQuotationForm({ leads, nextCode }: { leads: Lead[]; nextCode:
             <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Link to lead (optional)</label>
             <select name="leadId" className="rounded-md border border-graphite-700 bg-graphite-900 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none">
               <option value="">— None —</option>
-              {leads.map((l) => <option key={l.id} value={l.id}>{l.lead_code} — {l.customer_name}</option>)}
+              {leads.map((l) => <option key={l.id} value={l.id}>{l.lead_code} — {l.project_name ?? l.customer_name}</option>)}
             </select>
           </div>
         )}

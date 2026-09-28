@@ -32,6 +32,7 @@ const FORMWORK_TYPES = [
 export function NewLeadForm({ canCreate }: { canCreate: boolean }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -39,22 +40,31 @@ export function NewLeadForm({ canCreate }: { canCreate: boolean }) {
 
   async function handleSubmit(formData: FormData) {
     setError(null);
+    setSaved(null);
     startTransition(async () => {
-      const result = await createLead(formData);
-      if (!result.success) {
-        setError(result.error ?? "Something went wrong.");
-      } else {
-        formRef.current?.reset();
-        setIsOpen(false);
+      try {
+        const result = await createLead(formData);
+        if (!result.success) {
+          setError(result.error ?? "Something went wrong.");
+        } else {
+          formRef.current?.reset();
+          setIsOpen(false);
+          setSaved(result.leadCode ? `Lead ${result.leadCode} created.` : "Lead created.");
+        }
+      } catch {
+        setError("Could not reach the server. Please refresh the page and try again.");
       }
     });
   }
 
   if (!isOpen) {
     return (
+      <div className="flex items-center gap-4">
       <button onClick={() => setIsOpen(true)} className="rounded-md bg-aluminium-300 px-4 py-2 text-sm font-medium text-graphite-950 transition-opacity hover:opacity-90">
         + New lead
       </button>
+      {saved ? <p className="text-sm text-graphite-300">{saved}</p> : null}
+      </div>
     );
   }
 
@@ -67,10 +77,11 @@ export function NewLeadForm({ canCreate }: { canCreate: boolean }) {
 
       {error ? <p className="mb-4 rounded-md border border-signal-red/30 bg-signal-red/10 px-3.5 py-2.5 text-sm text-signal-red">{error}</p> : null}
 
+      <p className="mb-4 text-xs text-graphite-500">The lead number (e.g. ACOFORM/LEAD/26-27/001) is given automatically when you save.</p>
+
       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-graphite-500">Identity</p>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Lead code" name="leadCode" placeholder="LD-2026-001" />
-        <Field label="Customer / display name" name="customerName" />
+        <Field label="Project name" name="projectName" placeholder="e.g. Shivalik Heights, Tower A" />
         <Field label="Company name" name="companyName" required={false} />
         <Field label="Contact person" name="contactPersonName" required={false} />
         <Field label="Contact phone" name="contactPhone" required={false} />
