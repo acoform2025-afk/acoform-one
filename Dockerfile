@@ -1,4 +1,4 @@
-# ACOFORM ONE — Hugging Face Docker Space (port 7860)
+# ACOFORM ONE — Docker image (Render sets $PORT; defaults to 7860)
 FROM node:22-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -16,8 +16,8 @@ FROM node:22-slim
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=7860 HOSTNAME=0.0.0.0
 COPY --from=build /app /app
-# Hugging Face runs containers as uid 1000
+# run as a non-root user
 RUN chown -R 1000:1000 /app
 USER 1000
 EXPOSE 7860
-CMD ["npx", "next", "start", "-p", "7860", "-H", "0.0.0.0"]
+CMD ["sh", "-c", "exec node_modules/.bin/next start -p ${PORT:-7860} -H 0.0.0.0"]

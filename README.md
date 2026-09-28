@@ -4,18 +4,17 @@ ERP, design automation and MES for **Aco Form Work Pvt Ltd** (aluminium formwork
 
 - **App:** Next.js 15 (App Router, TypeScript, Tailwind), `@react-pdf/renderer` for quotation PDFs
 - **Database:** Supabase project `hxlkinnosgckehogtpgb` — schema, RLS and business rules live in the database (migrations applied via the Supabase MCP)
-- **Hosting:** Hugging Face Docker Spaces, deployed automatically by GitHub Actions
+- **Hosting:** Render (free web services, Docker), deployed automatically from GitHub
 
 ## How changes go live
 
 | Branch | Deploys to | Use |
 | --- | --- | --- |
-| `test` | `huggingface.co/spaces/acodorm/acoform-one-test` | check a change |
-| `main` | `huggingface.co/spaces/acodorm/acoform-one` | live app |
+| `test` | Render service `acoform-one-test` | check a change |
+| `main` | Render service `acoform-one` | live app |
 
-Every push runs a type check and production build first; a broken build never deploys.
-
-One-time setup: repository secret **`HF_TOKEN`** = a Hugging Face access token with *write* permission for the `acodorm` account.
+Every push runs a type check and production build on GitHub first; Render only deploys after it passes.
+Services are defined in `render.yaml` (Render Blueprint). Free services sleep after ~15 min idle (first load ~1 min).
 
 ## Local development (optional)
 

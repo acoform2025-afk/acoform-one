@@ -1,7 +1,6 @@
-name: Build & deploy to Hugging Face
+name: Check build
 
-# main  -> https://huggingface.co/spaces/<HF_OWNER>/acoform-one       (live)
-# test  -> https://huggingface.co/spaces/<HF_OWNER>/acoform-one-test  (preview)
+# Render deploys main (live) and test (preview) itself, but only after this check passes.
 on:
   push:
     branches: [main, test]
@@ -10,9 +9,6 @@ on:
 concurrency:
   group: deploy-${{ github.ref_name }}
   cancel-in-progress: true
-
-env:
-  HF_OWNER: acodorm
 
 jobs:
   check:
@@ -29,36 +25,3 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://hxlkinnosgckehogtpgb.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_rCYgzLXbGnHGmNqT3zxCfA_tdyQ0b_h
 
-  deploy:
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: pip install --quiet "huggingface_hub>=0.25"
-      - name: Push to Space
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          SPACE: ${{ env.HF_OWNER }}/${{ github.ref_name == 'main' && 'acoform-one' || 'acoform-one-test' }}
-          TITLE: ${{ github.ref_name == 'main' && 'ACOFORM ONE' || 'ACOFORM ONE (test)' }}
-        run: |
-          if [ -z "$HF_TOKEN" ]; then echo "::error::Add a Hugging Face write token as the HF_TOKEN repository secret"; exit 1; fi
-          python - <<'PY'
-          import os
-          from huggingface_hub import HfApi
-          space, title, sha = os.environ["SPACE"], os.environ["TITLE"], os.environ["GITHUB_SHA"][:7]
-          # The Space's README carries its Docker config; the GitHub README is not deployed.
-          with open("README.md", "w") as f:
-              f.write(f"---\ntitle: {title}\nemoji: 🏗️\ncolorFrom: yellow\ncolorTo: gray\nsdk: docker\napp_port: 7860\npinned: false\n---\n"
-                      f"Deployed automatically from GitHub ({os.environ['GITHUB_REPOSITORY']}@{sha}). Do not edit here.\n")
-          api = HfApi(token=os.environ["HF_TOKEN"])
-          api.create_repo(space, repo_type="space", space_sdk="docker", private=True, exist_ok=True)
-          api.upload_folder(
-              repo_id=space, repo_type="space", folder_path=".",
-              ignore_patterns=[".git/*", ".github/*", "node_modules/*", ".next/*", ".env*"],
-              delete_patterns=["*"],
-              commit_message=f"Deploy {sha} from GitHub",
-          )
-          print(f"Deployed to https://huggingface.co/spaces/{space}")
-          PY

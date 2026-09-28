@@ -1,0 +1,22 @@
+# Render Blueprint for ACOFORM ONE (free plan).
+# main -> acoform-one (live), test -> acoform-one-test (preview).
+# Render deploys only after the GitHub "check" workflow passes, so a broken build never goes live.
+services:
+  - type: web
+    name: acoform-one
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+  - type: web
+    name: acoform-one-test
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: test
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
