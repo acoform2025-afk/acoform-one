@@ -10,7 +10,7 @@ const positiveNumber = (label: string) =>
 const positiveWhole = (label: string) =>
   z.coerce.number({ invalid_type_error: `${label} must be a number` }).int(`${label} must be a whole number`).positive(`${label} must be more than 0`);
 
-const createLeadSchema = z.object({
+const leadSchema = z.object({
   projectName: z.string({ required_error: "Project name is required" }).min(1, "Project name is required"),
   companyName: z.string().optional(),
   contactPersonName: z.string().optional(),
@@ -25,6 +25,8 @@ const createLeadSchema = z.object({
   sourceChannel: z.string().optional(),
   expectedStartDate: z.string().optional(),
   formworkType: z.string().optional(),
+  status: z.enum(["new", "contacted", "qualified", "quoted", "won", "lost"]).optional(),
+  notes: z.string().optional(),
 });
 
 export type ActionResult = { success: boolean; error?: string; leadCode?: string };
@@ -34,14 +36,8 @@ function emptyToUndefined(v: FormDataEntryValue | null): string | undefined {
   return s ? s : undefined;
 }
 
-export async function createLead(formData: FormData): Promise<ActionResult> {
-  try {
-    await requirePermission("leads", "create");
-  } catch {
-    return { success: false, error: "You don't have permission to create leads." };
-  }
-
-  const parsed = createLeadSchema.safeParse({
+function parseLeadForm(formData: FormData) {
+  return leadSchema.safeParse({
     projectName: emptyToUndefined(formData.get("projectName")),
     companyName: emptyToUndefined(formData.get("companyName")),
     contactPersonName: emptyToUndefined(formData.get("contactPersonName")),
@@ -56,7 +52,19 @@ export async function createLead(formData: FormData): Promise<ActionResult> {
     sourceChannel: emptyToUndefined(formData.get("sourceChannel")),
     expectedStartDate: emptyToUndefined(formData.get("expectedStartDate")),
     formworkType: emptyToUndefined(formData.get("formworkType")),
+    status: emptyToUndefined(formData.get("status")),
+    notes: emptyToUndefined(formData.get("notes")),
   });
+}
+
+export async function createLead(formData: FormData): Promise<ActionResult> {
+  try {
+    await requirePermission("leads", "create");
+  } catch {
+    return { success: false, error: "You don't have permission to create leads." };
+  }
+
+  const parsed = parseLeadForm(formData);
 
   if (!parsed.success) {
     // Say exactly which field is wrong instead of a generic message
@@ -98,4 +106,51 @@ export async function createLead(formData: FormData): Promise<ActionResult> {
 
   revalidatePath("/leads");
   return { success: true, leadCode: created?.lead_code };
+}
+
+export async function updateLead(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    await requirePermission("leads", "update");
+  } catch {
+    return { success: false, error: "You don't have permission to edit leads." };
+  }
+
+  const parsed = parseLeadForm(formData);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Please check the form and try again." };
+  }
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  // lead_code and tenant are never changed here; RLS limits this to the user's own company
+  const { data: updated, error } = await supabase.from("leads").update({
+    project_name: d.projectName,
+    customer_name: d.companyName ?? d.projectName,
+    company_name: d.companyName ?? null,
+    contact_person_name: d.contactPersonName ?? null,
+    contact_phone: d.contactPhone ?? null,
+    contact_email: d.contactEmail ?? null,
+    gst_number: d.gstNumber ?? null,
+    project_location: d.projectLocation ?? null,
+    estimated_area_sqm: d.estimatedAreaSqm ?? null,
+    project_type: d.projectType ?? null,
+    num_floors: d.numFloors ?? null,
+    num_repetitive_units: d.numRepetitiveUnits ?? null,
+    source_channel: d.sourceChannel ?? null,
+    expected_start_date: d.expectedStartDate ?? null,
+    formwork_type: d.formworkType ?? "undecided",
+    ...(d.status ? { status: d.status } : {}),
+    notes: d.notes ?? null,
+  }).eq("id", id).select("lead_code").maybeSingle();
+
+  if (error) {
+    console.error("updateLead failed:", error.message);
+    return { success: false, error: `Could not save the lead: ${error.message}` };
+  }
+  if (!updated) return { success: false, error: "Lead not found, or you can't edit it." };
+
+  revalidatePath("/leads");
+  revalidatePath(`/leads/${id}`);
+  revalidatePath("/quotations");
+  return { success: true, leadCode: updated.lead_code };
 }

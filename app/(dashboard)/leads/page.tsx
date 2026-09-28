@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/auth/permissions";
+import Link from "next/link";
 import { NewLeadForm } from "./new-lead-form";
 
 export default async function LeadsPage() {
@@ -11,7 +12,7 @@ export default async function LeadsPage() {
     <div className="fade-in max-w-5xl">
       <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-graphite-50">Leads</h1>
       <p className="mt-1 text-sm text-graphite-400">
-        {canCreate ? "Create and track incoming sales leads." : "Viewing leads. Your role doesn't include lead creation."}
+        {canCreate ? "Create and track incoming sales leads. Click a lead to open or edit it." : "Viewing leads. Click a lead to open it."}
       </p>
 
       <div className="mt-6"><NewLeadForm canCreate={canCreate} /></div>
@@ -34,8 +35,12 @@ export default async function LeadsPage() {
             {leads && leads.length > 0 ? (
               leads.map((lead) => (
                 <tr key={lead.id} className="bg-graphite-950">
-                  <td className="px-4 py-3 font-mono text-xs text-aluminium-300">{lead.lead_code}</td>
-                  <td className="px-4 py-3 text-graphite-100">{lead.project_name ?? lead.customer_name}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-aluminium-300">
+                    <Link href={`/leads/${lead.id}`} className="hover:text-signal-amber hover:underline">{lead.lead_code}</Link>
+                  </td>
+                  <td className="px-4 py-3 text-graphite-100">
+                    <Link href={`/leads/${lead.id}`} className="hover:text-signal-amber hover:underline">{lead.project_name ?? lead.customer_name}</Link>
+                  </td>
                   <td className="px-4 py-3 text-graphite-300">{lead.company_name ?? "—"}</td>
                   <td className="px-4 py-3 text-xs text-graphite-400">
                     {lead.contact_person_name ?? "—"}{lead.contact_phone ? ` · ${lead.contact_phone}` : ""}
