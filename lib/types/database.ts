@@ -559,6 +559,69 @@ export type Database = {
           },
         ]
       }
+      dispatch_notes: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          dc_number: string
+          delivered_at: string | null
+          dispatch_date: string
+          driver_name: string | null
+          driver_phone: string | null
+          id: string
+          notes: string | null
+          project_id: string
+          tenant_id: string
+          transporter: string | null
+          vehicle_no: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          dc_number: string
+          delivered_at?: string | null
+          dispatch_date?: string
+          driver_name?: string | null
+          driver_phone?: string | null
+          id?: string
+          notes?: string | null
+          project_id: string
+          tenant_id: string
+          transporter?: string | null
+          vehicle_no?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          dc_number?: string
+          delivered_at?: string | null
+          dispatch_date?: string
+          driver_name?: string | null
+          driver_phone?: string | null
+          id?: string
+          notes?: string | null
+          project_id?: string
+          tenant_id?: string
+          transporter?: string | null
+          vehicle_no?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dispatch_notes_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_notes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       engineering_calculations: {
         Row: {
           calculated_at: string
@@ -707,6 +770,7 @@ export type Database = {
         Row: {
           actor_user_id: string | null
           created_at: string
+          dispatch_note_id: string | null
           event_type: string
           from_location: string | null
           id: string
@@ -720,6 +784,7 @@ export type Database = {
         Insert: {
           actor_user_id?: string | null
           created_at?: string
+          dispatch_note_id?: string | null
           event_type: string
           from_location?: string | null
           id?: string
@@ -733,6 +798,7 @@ export type Database = {
         Update: {
           actor_user_id?: string | null
           created_at?: string
+          dispatch_note_id?: string | null
           event_type?: string
           from_location?: string | null
           id?: string
@@ -749,6 +815,13 @@ export type Database = {
             columns: ["actor_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_ledger_dispatch_note_id_fkey"
+            columns: ["dispatch_note_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_notes"
             referencedColumns: ["id"]
           },
           {
@@ -2062,6 +2135,26 @@ export type Database = {
         Args: { p_quotation_id: string }
         Returns: string
       }
+      close_panel_repair: {
+        Args: { p_notes?: string; p_panel_id: string; p_scrap?: boolean }
+        Returns: undefined
+      }
+      confirm_delivery: {
+        Args: { p_dispatch_note_id: string }
+        Returns: number
+      }
+      create_dispatch: {
+        Args: {
+          p_driver_name?: string
+          p_driver_phone?: string
+          p_notes?: string
+          p_panel_ids: string[]
+          p_project_id: string
+          p_transporter?: string
+          p_vehicle_no?: string
+        }
+        Returns: string
+      }
       create_production_order: {
         Args: {
           p_bom_header_id: string
@@ -2125,6 +2218,7 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
+      next_dc_number: { Args: never; Returns: string }
       next_design_code: { Args: { p_project_id: string }; Returns: string }
       next_quotation_code: { Args: never; Returns: string }
       pass_work_order_qc: {
@@ -2176,6 +2270,10 @@ export type Database = {
       return_panel: {
         Args: { p_condition?: string; p_notes?: string; p_panel_id: string }
         Returns: undefined
+      }
+      return_panels: {
+        Args: { p_condition?: string; p_notes?: string; p_panel_ids: string[] }
+        Returns: number
       }
       run_engineering_check: { Args: { p_design_id: string }; Returns: number }
       save_design_layouts: {

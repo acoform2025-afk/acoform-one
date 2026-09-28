@@ -9,6 +9,7 @@ const NAV: NavItem[] = [
   { href: "/quotations", label: "Quotations" },
   { href: "/projects", label: "Projects & designs" },
   { href: "/production", label: "Production & QC" },
+  { href: "/inventory", label: "Inventory & dispatch" },
   { href: "/panel-catalog", label: "Panel catalog & rates" },
   { href: "/settings", label: "Settings" },
 ];
