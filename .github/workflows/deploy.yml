@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false  # Render deploys only when all checks pass; a cancelled check would block the deploy
 
 jobs:
   check:
