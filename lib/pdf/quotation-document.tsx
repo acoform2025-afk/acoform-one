@@ -20,7 +20,7 @@ const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 // Site photos + client logos come from Settings (lib/quotations/media.ts): a file path or raw image bytes
 export type PdfImage = string | { data: Buffer; format: "png" | "jpg" };
 export type PdfMedia = { photos: PdfImage[]; logos: PdfImage[] };
-export type PdfFloorPlan = { name: string; image: PdfImage | null; rows: [string, string][]; note: string };
+export type PdfFloorPlan = { name: string; image: PdfImage | null; rows: [string, string][]; note: string; items?: { code: string; label: string; calc: string; area: number }[] };
 
 const ORANGE = "#ef9d2f";
 const ORANGE_SOFT = "#fdf3e4";
@@ -424,6 +424,34 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
             ))}
           </View>
           <Text style={{ fontSize: 7.5, color: GRAY, marginTop: 4 }}>{plan.note}</Text>
+        </Page>
+      ) : null}
+      {plan && plan.items && plan.items.length > 0 ? (
+        <Page size="A4" style={s.page}>
+          {chrome}
+          <Text style={[s.h2, { marginTop: 0 }]}>FORMWORK AREA LIST (TYPICAL FLOOR)</Text>
+          <View style={[s.table, { fontSize: 8.5 }]}>
+            <View style={[s.tr, { backgroundColor: ORANGE_SOFT }]} fixed>
+              <Text style={[s.cell, { width: "10%", fontWeight: "bold" }]}>CODE</Text>
+              <Text style={[s.cell, { width: "32%", fontWeight: "bold" }]}>ELEMENT</Text>
+              <Text style={[s.cell, { width: "40%", fontWeight: "bold" }]}>CALCULATION</Text>
+              <Text style={[s.cell, { width: "18%", fontWeight: "bold", textAlign: "right" }]}>AREA (m²)</Text>
+            </View>
+            {plan.items.map((it, i) => (
+              <View key={i} style={i % 2 ? [s.tr, s.alt] : s.tr} wrap={false}>
+                <Text style={[s.cell, { width: "10%" }]}>{it.code}</Text>
+                <Text style={[s.cell, { width: "32%" }]}>{it.label}</Text>
+                <Text style={[s.cell, { width: "40%" }]}>{it.calc}</Text>
+                <Text style={[s.cell, { width: "18%", textAlign: "right" }]}>{it.area.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              </View>
+            ))}
+            {plan.rows.slice(-2).map(([k, v]) => (
+              <View key={k} style={s.tr} wrap={false}>
+                <Text style={[s.cell, { width: "82%", fontWeight: "bold" }]}>{k}</Text>
+                <Text style={[s.cell, { width: "18%", textAlign: "right", fontWeight: "bold" }]}>{v.replace(" m²", "")}</Text>
+              </View>
+            ))}
+          </View>
         </Page>
       ) : null}
 

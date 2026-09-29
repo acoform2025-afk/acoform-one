@@ -53,6 +53,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       const pr = t.params ?? {};
       plan = {
         name: fp.name, image, rows: totalsRows(t as unknown as Partial<Totals>),
+        items: Array.isArray((t as unknown as Totals).items) ? (t as unknown as Totals).items.slice(0, 400) : undefined,
         note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight ?? "-"} m, slab ${pr.slabMm ?? "-"} mm${(pr.floors ?? 1) > 1 ? `, ${pr.floors} floors` : ""}. Final quantities as per approved GFC drawings.`,
       };
     }

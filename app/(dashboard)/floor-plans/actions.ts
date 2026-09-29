@@ -101,10 +101,16 @@ const totalsSchema = z.object({
   column_sizes: z.array(z.object({ size: z.string().max(40), qty: z.number().int().min(0).max(100000) })).max(200),
   beam_area: num, vertical_area: num, contact_area: num, clear_height: num,
   extra_area: num.default(0), wall_top_area: num.default(0), extra_pct: z.number().min(0).max(100).default(0), quote_area: num.default(0),
+  wall_top_drawn: num.default(0),
+  items: z.array(z.object({
+    code: z.string().max(20), group: z.enum(["slab", "deduct", "edge", "wall", "column", "beam", "extra"]),
+    label: z.string().max(80), calc: z.string().max(120), area: z.number().finite().min(-1e7).max(1e7),
+  })).max(400).default([]),
   floors: z.number().int().min(1).max(500),
   params: z.object({
     floorHeight: z.number().min(0).max(50), slabMm: z.number().min(0).max(2000), floors: z.number().min(1).max(500),
     wallTopM2: num.optional(), includeEdges: z.boolean().optional(), extraPct: z.number().min(0).max(100).optional(),
+    beamDepthMm: num.optional(), beamWidthMm: num.optional(), wallThkMm: num.optional(),
   }),
   source: z.enum(["manual", "dxf", "mixed"]),
 });

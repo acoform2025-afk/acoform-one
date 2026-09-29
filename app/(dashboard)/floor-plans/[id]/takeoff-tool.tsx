@@ -15,7 +15,7 @@ import { saveTakeoff } from "../actions";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
 
-type Tool = "pan" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column";
+type Tool = "pan" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam";
 type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
 
 const MAX_SIDE = 2400;
@@ -24,7 +24,16 @@ const SHAPE_STYLE: Record<ShapeKind, { stroke: string; fill: string; label: stri
   opening: { stroke: "#9333ea", fill: "rgba(147,51,234,0.22)", label: "Opening / shaft" },
   wall: { stroke: "#ea580c", fill: "none", label: "Wall" },
   column: { stroke: "#dc2626", fill: "rgba(220,38,38,0.35)", label: "Column" },
+  beam: { stroke: "#db2777", fill: "none", label: "Beam" },
 };
+const PREFIX: Record<ShapeKind, string> = { slab: "S", opening: "D", wall: "W", column: "C", beam: "B" };
+const isOpen = (k: ShapeKind) => k === "wall" || k === "beam";
+/** Same numbering as the area list: own label, else S1, W1, B1 … in drawing order. */
+function shapeCodes(shapes: Shape[]): Record<string, string> {
+  const cnt: Record<string, number> = {}; const out: Record<string, string> = {};
+  for (const s of shapes) { const p = PREFIX[s.kind]; out[s.id] = s.label?.trim() ? s.label.trim().slice(0, 20) : `${p}${(cnt[p] = (cnt[p] ?? 0) + 1)}`; }
+  return out;
+}
 const TOOL_HINT: Record<Tool, string> = {
   pan: "Drag to move the plan. Scroll (or use + / −) to zoom.",
   select: "Click a drawn item to select it, then press Delete to remove it.",
@@ -35,6 +44,7 @@ const TOOL_HINT: Record<Tool, string> = {
   opening: "Click the corners of a shaft / cut-out to deduct it. Click the first point again to close.",
   wall: "Click along the wall centre line. Double-click or press Enter to finish the wall. Hold Shift for straight lines.",
   column: "Click two opposite corners of a column.",
+  beam: "Click along the beam centre line. Double-click or press Enter to finish. Set its width × depth in the list on the right (Select it).",
 };
 const uid = () => Math.random().toString(36).slice(2, 10);
 const cls = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -231,6 +241,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
   }, [isDxf, t.dxf, size]);
   const totals: Totals = useMemo(() => computeTotals(t, auto), [t, auto]);
   const mpp = t.metersPerPx;
+  const codes = useMemo(() => shapeCodes(t.shapes), [t.shapes]);
+  const selShape = selected ? t.shapes.find((x) => x.id === selected) ?? null : null;
+  const setShape = (id: string, patch: Partial<Shape>) => update((p) => ({ ...p, shapes: p.shapes.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
 
   /* ---------- pointer maths ---------- */
   const toImg = (cx: number, cy: number): Pt => {
@@ -253,8 +266,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
 
   const finishShape = useCallback((kind: ShapeKind, pts: Pt[]) => {
     const clean = pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 0.5);
-    if (kind === "wall" ? clean.length < 2 : clean.length < 3) { setDraft([]); return; }
-    if (kind !== "wall" && polyArea(clean) < 1) { setDraft([]); return; }
+    if (isOpen(kind) ? clean.length < 2 : clean.length < 3) { setDraft([]); return; }
+    if (!isOpen(kind) && polyArea(clean) < 1) { setDraft([]); return; }
     update((p) => ({ ...p, shapes: [...p.shapes, { id: uid(), kind, pts: clean }] }));
     setDraft([]);
   }, [update]);
@@ -282,11 +295,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
       if (draft.length >= 3 && Math.hypot(p[0] - draft[0][0], p[1] - draft[0][1]) < 10 / view.k) { finishShape(tool, draft); return; }
       setDraft((d) => [...d, p]); return;
     }
-    if (tool === "wall") setDraft((d) => [...d, p]);
+    if (tool === "wall" || tool === "beam") setDraft((d) => [...d, p]);
   }
 
   function finishDraft() {
-    if (tool === "slab" || tool === "opening" || tool === "wall") finishShape(tool, draft);
+    if (tool === "slab" || tool === "opening" || tool === "wall" || tool === "beam") finishShape(tool, draft);
   }
 
   /* ---------- mouse / touch ---------- */
@@ -389,6 +402,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
     { id: "opening", label: "Opening", icon: <SquareDashed className="size-4" />, show: canEdit },
     { id: "wall", label: "Wall", icon: <PenLine className="size-4" />, show: canEdit },
     { id: "column", label: "Column", icon: <Columns3 className="size-4" />, show: canEdit },
+    { id: "beam", label: "Beam", icon: <Minus className="size-4" />, show: canEdit },
     { id: "select", label: "Select", icon: <MousePointer2 className="size-4" />, show: canEdit },
   ];
   const draftPreview: Pt[] = hover && draft.length && tool !== "select" && tool !== "pan"
@@ -397,7 +411,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
   const liveLabel = (() => {
     if (!hover || !draft.length || !mpp) return null;
     if (tool === "region") return null;
-    if (tool === "wall" || tool === "calibrate" || tool === "measure") return fmtLen(shapeMeasure({ id: "", kind: "wall", pts: draftPreview }, mpp).length);
+    if (tool === "wall" || tool === "beam" || tool === "calibrate" || tool === "measure") return fmtLen(shapeMeasure({ id: "", kind: "wall", pts: draftPreview }, mpp).length);
     if (tool === "column") { const [a, , c] = draftPreview; return `${Math.round(Math.abs(c[0] - a[0]) * mpp * 1000)} × ${Math.round(Math.abs(c[1] - a[1]) * mpp * 1000)} mm`; }
     if (draftPreview.length >= 3) return fmtArea(polyArea(draftPreview) * mpp * mpp);
     return null;
@@ -441,7 +455,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           className={cls("relative h-[62vh] min-h-[380px] touch-none select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
             tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-pointer" : "cursor-crosshair")}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-          onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "slab" || tool === "opening") finishDraft(); }}
+          onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "beam" || tool === "slab" || tool === "opening") finishDraft(); }}
           onContextMenu={(e) => e.preventDefault()}
         >
           {!size && !loadErr ? <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-graphite-600"><Loader2 className="size-5 animate-spin" />Opening floor plan…</div> : null}
@@ -453,15 +467,15 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
               <svg className="pointer-events-none absolute inset-0" width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`}>
                 {t.shapes.map((s) => {
                   const st = SHAPE_STYLE[s.kind]; const sel = s.id === selected;
-                  const d = s.pts.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ") + (s.kind === "wall" ? "" : " Z");
+                  const d = s.pts.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ") + (isOpen(s.kind) ? "" : " Z");
                   const m = mpp ? shapeMeasure(s, mpp) : null;
                   const c = centroid(s.pts);
                   return (
                     <g key={s.id}>
-                      <path d={d} fill={st.fill} stroke={sel ? "#facc15" : st.stroke} strokeWidth={(s.kind === "wall" ? 3 : 2) * sw * (sel ? 1.6 : 1)} strokeLinejoin="round" strokeDasharray={s.kind === "opening" ? `${6 * sw} ${4 * sw}` : undefined} />
+                      <path d={d} fill={st.fill} stroke={sel ? "#facc15" : st.stroke} strokeWidth={(isOpen(s.kind) ? 3 : 2) * sw * (sel ? 1.6 : 1)} strokeLinejoin="round" strokeDasharray={s.kind === "opening" || s.kind === "beam" ? `${6 * sw} ${4 * sw}` : undefined} />
                       {m && s.kind !== "column" ? (
                         <text x={c[0]} y={c[1]} fontSize={12 / k} textAnchor="middle" dominantBaseline="middle" fill={st.stroke} stroke="#fff" strokeWidth={3 / k} paintOrder="stroke" fontWeight={600}>
-                          {s.kind === "wall" ? fmtLen(m.length) : `${s.kind === "opening" ? "−" : ""}${fmtArea(m.area)}`}
+                          {codes[s.id]} · {isOpen(s.kind) ? fmtLen(m.length) : `${s.kind === "opening" ? "−" : ""}${fmtArea(m.area)}`}
                         </text>
                       ) : null}
                     </g>
@@ -586,6 +600,16 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
             <Field label="Wall tops to deduct (m²)"><NumInput value={t.params.wallTopM2 ?? 0} step={0.01} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallTopM2: v } }))} /></Field>
             <Field label="Add % (extra)"><NumInput value={t.params.extraPct ?? 0} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, extraPct: Math.min(100, v) } }))} /></Field>
           </div>
+          {totals.wall_top_drawn > 0 && canEdit ? (
+            <button type="button" onClick={() => update((p) => ({ ...p, params: { ...p.params, wallTopM2: totals.wall_top_drawn } }))} className="mt-1 text-[11px] text-brand-orange hover:underline">
+              Use drawn walls&apos; tops ({fmtArea(totals.wall_top_drawn)})
+            </button>
+          ) : null}
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <Field label="Wall thk (mm)"><NumInput value={t.params.wallThkMm ?? 150} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallThkMm: v } }))} /></Field>
+            <Field label="Beam width"><NumInput value={t.params.beamWidthMm ?? 200} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamWidthMm: v } }))} /></Field>
+            <Field label="Beam depth"><NumInput value={t.params.beamDepthMm ?? 600} step={25} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamDepthMm: v } }))} /></Field>
+          </div>
           <p className="mt-1 text-[11px] text-graphite-500">
             Wall tops ≈ wall length × thickness — at 150 mm that is {fmtArea(totals.wall_length * 0.15)}; at 125 mm {fmtArea(totals.wall_length * 0.125)}.
           </p>
@@ -633,13 +657,13 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
         <Panel title={`Drawn on the plan (${t.shapes.length})`}>
           {t.shapes.length === 0 ? <p className="text-xs text-graphite-500">Nothing drawn yet. Use Slab area, Opening, Wall or Column above the plan.</p> : (
             <ul className="max-h-48 space-y-1 overflow-y-auto pr-1 text-xs">
-              {t.shapes.map((s, i) => {
+              {t.shapes.map((s) => {
                 const m = mpp ? shapeMeasure(s, mpp) : null;
                 return (
                   <li key={s.id} className={cls("flex items-center gap-2 rounded px-1.5 py-1", s.id === selected && "bg-graphite-800")}>
                     <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: SHAPE_STYLE[s.kind].stroke }} />
-                    <button type="button" className="flex-1 text-left text-graphite-200" onClick={() => { setSelected(s.id); setTool("select"); }}>{SHAPE_STYLE[s.kind].label} {i + 1}</button>
-                    <span className="font-mono text-graphite-400">{m ? (s.kind === "wall" ? fmtLen(m.length) : s.kind === "column" ? colSize(s.pts, mpp!) : fmtArea(m.area)) : "—"}</span>
+                    <button type="button" className="flex-1 text-left text-graphite-200" onClick={() => { setSelected(s.id); setTool("select"); }}><span className="font-mono text-graphite-400">{codes[s.id]}</span> {SHAPE_STYLE[s.kind].label}{s.kind === "wall" && s.t ? ` ${s.t}` : s.kind === "beam" ? ` ${s.b ?? t.params.beamWidthMm ?? 200}×${s.d ?? t.params.beamDepthMm ?? 600}` : ""}</button>
+                    <span className="font-mono text-graphite-400">{m ? (isOpen(s.kind) ? fmtLen(m.length) : s.kind === "column" ? colSize(s.pts, mpp!) : fmtArea(m.area)) : "—"}</span>
                     {canEdit ? <button type="button" aria-label="Delete" onClick={() => update((p) => ({ ...p, shapes: p.shapes.filter((x) => x.id !== s.id) }))} className="text-graphite-500 hover:text-signal-red"><Trash2 className="size-3.5" /></button> : null}
                   </li>
                 );
@@ -647,6 +671,23 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
             </ul>
           )}
         </Panel>
+
+        {selShape && canEdit ? (
+          <Panel title={`Element ${codes[selShape.id]} · ${SHAPE_STYLE[selShape.kind].label}`} hint="Leave a size blank to use the plan default.">
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Code / name"><input maxLength={20} value={selShape.label ?? ""} placeholder={codes[selShape.id]} className={numIn} onChange={(e) => setShape(selShape.id, { label: e.target.value || undefined })} /></Field>
+              {selShape.kind === "wall" ? <>
+                <Field label="Thickness mm"><OptNum value={selShape.t} placeholder={String(t.params.wallThkMm ?? 150)} onChange={(v) => setShape(selShape.id, { t: v })} /></Field>
+                <Field label="Height mm"><OptNum value={selShape.h} placeholder={String(Math.round(totals.clear_height * 1000))} onChange={(v) => setShape(selShape.id, { h: v })} /></Field>
+              </> : null}
+              {selShape.kind === "beam" ? <>
+                <Field label="Width mm"><OptNum value={selShape.b} placeholder={String(t.params.beamWidthMm ?? 200)} onChange={(v) => setShape(selShape.id, { b: v })} /></Field>
+                <Field label="Depth mm"><OptNum value={selShape.d} placeholder={String(t.params.beamDepthMm ?? 600)} onChange={(v) => setShape(selShape.id, { d: v })} /></Field>
+              </> : null}
+              {selShape.kind === "column" ? <Field label="Height mm"><OptNum value={selShape.h} placeholder={String(Math.round(totals.clear_height * 1000))} onChange={(v) => setShape(selShape.id, { h: v })} /></Field> : null}
+            </div>
+          </Panel>
+        ) : null}
 
         <Panel title="Columns by size" hint="Add columns you didn't draw (typed from the column schedule).">
           <RowsEditor
@@ -697,6 +738,25 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           {needScale && t.shapes.length ? <p className="mt-2 text-xs text-signal-amber">Set the scale to see areas of drawn items.</p> : null}
         </Panel>
 
+        <Panel title={`Formwork area list (${totals.items.length})`} hint="Every element with its working — printed on the quotation.">
+          {totals.items.length === 0 ? <p className="text-xs text-graphite-500">Nothing measured yet.</p> : (
+            <div className="max-h-80 overflow-y-auto">
+              <table className="w-full text-[11px]">
+                <tbody className="divide-y divide-graphite-800">
+                  {totals.items.map((it, i) => (
+                    <tr key={i}>
+                      <td className="py-1 pr-1.5 align-top font-mono text-graphite-400">{it.code}</td>
+                      <td className="py-1 pr-1.5 align-top"><div className="text-graphite-200">{it.label}</div><div className="font-mono text-graphite-500">{it.calc}</div></td>
+                      <td className={cls("py-1 text-right align-top font-mono", it.area < 0 ? "text-signal-red" : "text-graphite-200")}>{it.area.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  ))}
+                  <tr><td /><td className="py-1.5 font-medium text-graphite-100">Total for typical floor</td><td className="py-1.5 text-right font-mono font-semibold text-graphite-50">{totals.contact_area.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+
         <UseInQuotation planId={plan.id} lead={plan.lead} quotes={quotes} totals={totals} dirty={dirty} canEdit={canEdit} />
         {designs ? <SendToDesign planId={plan.id} designs={designs} dirty={dirty} wallSegments={t.shapes.filter((s) => s.kind === "wall").reduce((n, s) => n + Math.max(0, s.pts.length - 1), 0)} /> : null}
       </aside>
@@ -720,7 +780,7 @@ function distSeg(p: Pt, a: Pt, b: Pt) {
   return Math.hypot(p[0] - (a[0] + tt * dx), p[1] - (a[1] + tt * dy));
 }
 function hitTest(s: Shape, p: Pt, tol: number) {
-  if (s.kind === "wall") return s.pts.some((q, i) => i > 0 && distSeg(p, s.pts[i - 1], q) < tol);
+  if (isOpen(s.kind)) return s.pts.some((q, i) => i > 0 && distSeg(p, s.pts[i - 1], q) < tol);
   let c = false;
   for (let i = 0, j = s.pts.length - 1; i < s.pts.length; j = i++) {
     const [xi, yi] = s.pts[i], [xj, yj] = s.pts[j];
@@ -731,6 +791,7 @@ function hitTest(s: Shape, p: Pt, tol: number) {
 
 /** Plan picture with the measurements drawn on it — saved as preview.jpg and printed on the quotation. */
 async function renderPreview(src: HTMLCanvasElement, t: Takeoff, size: { w: number; h: number }, isDxf: boolean): Promise<Blob> {
+  const codes = shapeCodes(t.shapes);
   const f = Math.min(1, 1800 / Math.max(size.w, size.h));
   const c = document.createElement("canvas"); c.width = Math.round(size.w * f); c.height = Math.round(size.h * f);
   const ctx = c.getContext("2d")!;
@@ -740,12 +801,12 @@ async function renderPreview(src: HTMLCanvasElement, t: Takeoff, size: { w: numb
   for (const s of t.shapes) {
     const st = SHAPE_STYLE[s.kind];
     ctx.beginPath(); s.pts.forEach((p, i) => (i ? ctx.lineTo(p[0] * f, p[1] * f) : ctx.moveTo(p[0] * f, p[1] * f)));
-    if (s.kind !== "wall") { ctx.closePath(); ctx.fillStyle = st.fill; ctx.fill(); }
-    ctx.setLineDash(s.kind === "opening" ? [lw * 3, lw * 2] : []);
-    ctx.strokeStyle = st.stroke; ctx.lineWidth = s.kind === "wall" ? lw * 1.6 : lw; ctx.lineJoin = "round"; ctx.stroke();
+    if (!isOpen(s.kind)) { ctx.closePath(); ctx.fillStyle = st.fill; ctx.fill(); }
+    ctx.setLineDash(s.kind === "opening" || s.kind === "beam" ? [lw * 3, lw * 2] : []);
+    ctx.strokeStyle = st.stroke; ctx.lineWidth = isOpen(s.kind) ? lw * 1.6 : lw; ctx.lineJoin = "round"; ctx.stroke();
     if (t.metersPerPx && s.kind !== "column") {
       const m = shapeMeasure(s, t.metersPerPx); const cc = centroid(s.pts);
-      const label = s.kind === "wall" ? fmtLen(m.length) : `${s.kind === "opening" ? "−" : ""}${fmtArea(m.area)}`;
+      const label = `${codes[s.id]} ${isOpen(s.kind) ? fmtLen(m.length) : `${s.kind === "opening" ? "−" : ""}${fmtArea(m.area)}`}`;
       ctx.setLineDash([]); ctx.font = `bold ${lw * 7}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.lineWidth = lw * 2; ctx.strokeStyle = "#fff"; ctx.strokeText(label, cc[0] * f, cc[1] * f);
       ctx.fillStyle = st.stroke; ctx.fillText(label, cc[0] * f, cc[1] * f);
@@ -766,6 +827,12 @@ function Panel({ title, hint, children }: { title: string; hint?: string; childr
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="flex flex-col gap-1"><span className="text-[11px] font-medium uppercase tracking-wide text-graphite-500">{label}</span>{children}</label>;
+}
+function OptNum({ value, placeholder, onChange }: { value: number | undefined; placeholder: string; onChange: (v: number | undefined) => void }) {
+  const [s, setS] = useState(value != null ? String(value) : "");
+  useEffect(() => { setS(value != null ? String(value) : ""); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <input type="number" min={0} step="any" value={s} placeholder={placeholder} className={numIn}
+    onChange={(e) => { setS(e.target.value); const n = Number(e.target.value); onChange(e.target.value === "" || !(n > 0) ? undefined : n); }} />;
 }
 function NumInput({ value, onChange, step, disabled }: { value: number; onChange: (v: number) => void; step?: number; disabled?: boolean }) {
   const [s, setS] = useState(String(value));
