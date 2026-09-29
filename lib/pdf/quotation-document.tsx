@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Document, Font, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import {
-  ADVANTAGES, ACCESSORIES, CLOSING, DEFAULT_PAYMENT_TERMS, DELIVERY_SCHEDULE, SCHEDULE_NOTE, SET_LABEL, TECH_SPECS, TERMS,
+  ADVANTAGES, accessoriesFor, CLOSING, DEFAULT_PAYMENT_TERMS, DELIVERY_SCHEDULE, SCHEDULE_NOTE, SET_LABEL, TECH_SPECS, TERMS,
   formworkKind,
 } from "@/lib/quotations/document-content";
 import { EXTRA_LINE_TYPES, LINE_TYPE_LABELS, formatQty, summariseLines } from "@/lib/quotations/line-types";
@@ -89,6 +89,7 @@ export type PdfQuotation = {
   quotation_date: string; validity_days: number; payment_terms: string[] | null;
   total_area_sqm: number | null; total_amount: number | null; total_with_gst: number | null; gst_percentage: number;
   quick_rate_per_sqm: number | null; nalco_rate_per_kg: number | null; nalco_rate_date: string | null;
+  accessories?: unknown; // edited accessories list (null = standard list)
 };
 
 export type PdfLine = {
@@ -408,7 +409,7 @@ export function QuotationDocument({ q, lines, company }: { q: PdfQuotation; line
             <Text style={[s.cell, { width: "9%" }, s.center]}>Unit</Text>
             <Text style={[s.cell, { width: "15%" }]}>Remarks</Text>
           </View>
-          {ACCESSORIES[kind].map(([item, desc, unit, rem], i) => (
+          {accessoriesFor(kind, q.accessories).map(([item, desc, unit, rem], i) => (
             <View key={i} style={i % 2 ? [s.tr, s.alt] : s.tr} wrap={false}>
               <Text style={[s.cell, { width: "7%" }, s.center]}>{i + 1}</Text>
               <Text style={[s.cell, { width: "30%" }]}>{item}</Text>

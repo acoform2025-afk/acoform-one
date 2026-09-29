@@ -8,6 +8,8 @@ import { ExtraLinesSection } from "./extra-lines-section";
 import { RevisionPanel } from "./revision-panel";
 import { DocumentDetails } from "./document-details";
 import { EditableNumberCell } from "./editable-number-cell";
+import { AccessoriesEditor } from "./accessories-editor";
+import { formworkKind, standardAccessories, type AccessoryRow } from "@/lib/quotations/document-content";
 import Link from "next/link";
 import { Lock, Pencil } from "lucide-react";
 
@@ -103,6 +105,14 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
       ) : null}
 
       <DocumentDetails key={edit ?? "view"} q={quotation} editable={canEdit} defaultOpen={edit === "1" && canEdit} />
+
+      <AccessoriesEditor
+        quotationId={id}
+        rows={Array.isArray(quotation.accessories) ? (quotation.accessories as unknown as AccessoryRow[]) : standardAccessories(formworkKind(quotation.formwork_type))}
+        isCustom={Array.isArray(quotation.accessories)}
+        standard={standardAccessories(formworkKind(quotation.formwork_type))}
+        editable={canEdit}
+      />
 
       {isQuick && (
         <div className="mt-6 rounded-lg border border-graphite-800 bg-graphite-900 p-5">

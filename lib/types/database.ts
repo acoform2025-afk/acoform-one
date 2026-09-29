@@ -1664,6 +1664,7 @@ export type Database = {
       }
       quotations: {
         Row: {
+          accessories: Json | null
           approved_at: string | null
           approved_by: string | null
           area_basis: string | null
@@ -1701,6 +1702,7 @@ export type Database = {
           validity_days: number
         }
         Insert: {
+          accessories?: Json | null
           approved_at?: string | null
           approved_by?: string | null
           area_basis?: string | null
@@ -1738,6 +1740,7 @@ export type Database = {
           validity_days?: number
         }
         Update: {
+          accessories?: Json | null
           approved_at?: string | null
           approved_by?: string | null
           area_basis?: string | null
@@ -2289,6 +2292,10 @@ export type Database = {
       }
       update_quick_quote_area: {
         Args: { p_area_sqm: number; p_quotation_id: string }
+        Returns: undefined
+      }
+      set_quotation_accessories: {
+        Args: { p_items: Json | null; p_quotation_id: string }
         Returns: undefined
       }
       update_quick_quote_rate: {

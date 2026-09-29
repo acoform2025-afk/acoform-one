@@ -82,7 +82,9 @@ export const TECH_SPECS: Record<FormworkKind, Spec[]> = {
 };
 
 // [item, description, unit, remarks]
-type Acc = [string, string, string, string];
+export type Acc = [string, string, string, string];
+/** One row of a quotation's own (edited) accessories list, as stored in quotations.accessories */
+export type AccessoryRow = { item: string; description: string; unit: string; remarks: string };
 const WALL_TIES = "330 MM (150 MM wall), 380 MM (200), 430 MM (250), 480 MM (300), 530 MM (350), 630 MM (450)";
 const BY_WALL = "For 150 / 200 / 250 / 300 / 350 / 450 MM wall thickness";
 const WALERS = "2650, 2050, 3500, 2400, 3000, 2500, 3200, 2900, 1600, 1580, 2000 MM";
@@ -184,4 +186,17 @@ export function pdfFileName(code: string, revisionNo: number | null | undefined,
   const { seq, rev } = parseCode(code, revisionNo);
   const [y, m, d] = isoDate.slice(0, 10).split("-");
   return `R${rev}_${seq} Quote - Acoform ${SET_LABEL[kind]} (${d}-${m}-${y.slice(2)}).pdf`;
+}
+
+/** Standard accessories list for a formwork type, as editable rows. */
+export function standardAccessories(kind: FormworkKind): AccessoryRow[] {
+  return ACCESSORIES[kind].map(([item, description, unit, remarks]) => ({ item, description, unit, remarks }));
+}
+
+/** The accessories list to print: the quotation's edited list, or the standard one when it was never edited. */
+export function accessoriesFor(kind: FormworkKind, custom: unknown): Acc[] {
+  if (Array.isArray(custom)) {
+    return (custom as Partial<AccessoryRow>[]).map((r) => [r.item ?? "", r.description ?? "", r.unit ?? "", r.remarks ?? ""]);
+  }
+  return ACCESSORIES[kind];
 }
