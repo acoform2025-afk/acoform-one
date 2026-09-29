@@ -28,7 +28,7 @@ export default async function DispatchesPage() {
                   <td className="px-4 py-3 text-graphite-200">{p?.project_code} <span className="text-graphite-500">{p?.customer_name}</span></td>
                   <td className="px-4 py-3">{date(n.dispatch_date)}</td>
                   <td className="px-4 py-3">{n.vehicle_no ?? "—"}</td>
-                  <td className="px-4 py-3">{n.delivered_at ? <span className="text-signal-green">Delivered</span> : <span className="text-blue-300">In transit</span>}</td>
+                  <td className="px-4 py-3">{n.delivered_at ? <span className="text-signal-green">Delivered</span> : <span className="text-blue-700 dark:text-blue-300">In transit</span>}</td>
                   <td className="px-4 py-3 text-right"><a href={`/dispatches/${n.id}/pdf`} target="_blank" rel="noopener" className="text-aluminium-300 hover:underline">PDF</a></td>
                 </tr>
               );

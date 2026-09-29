@@ -9,7 +9,7 @@ import { FailQcForm } from "./fail-qc-form";
 
 const NEXT_LABEL: Record<string, string> = { pending: "Start cutting", cutting: "Move to assembly", assembly: "Send to QC", on_hold: "Rework → assembly" };
 const WO_STYLE: Record<string, string> = {
-  pending: "text-graphite-400", cutting: "text-blue-300", assembly: "text-blue-300", qc: "text-signal-amber", completed: "text-signal-green", on_hold: "text-signal-red",
+  pending: "text-graphite-400", cutting: "text-blue-700 dark:text-blue-300", assembly: "text-blue-700 dark:text-blue-300", qc: "text-signal-amber", completed: "text-signal-green", on_hold: "text-signal-red",
 };
 
 export default async function ProductionOrderPage({ params }: { params: Promise<{ id: string }> }) {

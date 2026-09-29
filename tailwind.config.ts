@@ -1,21 +1,25 @@
 import type { Config } from "tailwindcss";
 
 // ACOFORM ONE palette. Brand: orange #f09800, gray #6b6d68.
+// "graphite" and "aluminium" come from CSS variables (app/globals.css) so the whole app can switch
+// between the light theme (default) and dark theme without touching each screen.
+const v = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
+const scale = (prefix: string, steps: number[]) =>
+  Object.fromEntries(steps.map((s) => [s, v(`${prefix}-${s}`)]));
+
 const config: Config = {
+  darkMode: "class",
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        graphite: {
-          50: "#f6f6f5", 100: "#e8e8e6", 200: "#d1d1ce", 300: "#b0b1ad", 400: "#8d8e8a",
-          500: "#6b6d68", 600: "#555752", 700: "#3f413d", 800: "#2a2c29", 900: "#1c1d1b", 950: "#121311",
-        },
-        aluminium: { 100: "#f2f3f4", 200: "#e3e5e8", 300: "#cfd3d8", 400: "#aeb4bb" },
-        signal: { amber: "#f09800", red: "#ef4444", green: "#22c55e" },
-        brand: { orange: "#f09800", gray: "#6b6d68" },
+        graphite: scale("graphite", [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]),
+        aluminium: scale("aluminium", [100, 200, 300, 400]),
+        signal: { amber: "#f09800", red: "#dc2626", green: "#16a34a" },
+        brand: { orange: "#f09800", "orange-dark": "#c77a00", gray: "#6b6d68" },
       },
       fontFamily: {
-        sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
+        sans: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
     },

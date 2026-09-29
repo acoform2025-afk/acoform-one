@@ -2,8 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color-scheme: dark; }
-html, body { background: #121311; color: #e8e8e6; }
+/*
+  Theme tokens (space-separated RGB so Tailwind opacity like bg-graphite-900/40 keeps working).
+  Light theme is the default. "graphite" runs from strongest text (50) to page background (950),
+  so every screen written against it flips cleanly between light and dark.
+*/
+:root {
+  --font-display: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+  --graphite-50: 17 18 16;     /* headings */
+  --graphite-100: 31 32 30;    /* body text */
+  --graphite-200: 46 48 44;
+  --graphite-300: 70 72 67;
+  --graphite-400: 92 94 89;    /* secondary text */
+  --graphite-500: 107 109 104; /* brand gray, muted text */
+  --graphite-600: 150 152 147;
+  --graphite-700: 210 211 207; /* input borders */
+  --graphite-800: 229 230 226; /* dividers, chips */
+  --graphite-900: 246 246 244; /* panels, table headers */
+  --graphite-950: 255 255 255; /* page, rows */
+  --aluminium-100: 120 72 0;
+  --aluminium-200: 150 90 0;
+  --aluminium-300: 184 110 0;  /* primary action / codes: dark brand orange, readable on white */
+  --aluminium-400: 240 152 0;  /* brand orange */
+  --app-bg: 255 255 255;
+}
+
+.dark {
+  color-scheme: dark;
+  --graphite-50: 246 246 245;
+  --graphite-100: 232 232 230;
+  --graphite-200: 209 209 206;
+  --graphite-300: 176 177 173;
+  --graphite-400: 141 142 138;
+  --graphite-500: 107 109 104;
+  --graphite-600: 85 87 82;
+  --graphite-700: 63 65 61;
+  --graphite-800: 42 44 41;
+  --graphite-900: 28 29 27;
+  --graphite-950: 18 19 17;
+  --aluminium-100: 242 243 244;
+  --aluminium-200: 227 229 232;
+  --aluminium-300: 207 211 216;
+  --aluminium-400: 174 180 187;
+  --app-bg: 18 19 17;
+}
+
+html, body { background: rgb(var(--app-bg)); color: rgb(var(--graphite-100)); }
+body { -webkit-font-smoothing: antialiased; }
+
+/* Primary buttons written as "bg-aluminium-300 text-graphite-950" get white text in light mode */
+.bg-aluminium-300.text-graphite-950 { color: #fff; }
+.dark .bg-aluminium-300.text-graphite-950 { color: rgb(var(--graphite-950)); }
+
 .fade-in { animation: fadeIn 0.2s ease-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 input[type="number"]::-webkit-inner-spin-button { opacity: 0.4; }

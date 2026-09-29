@@ -12,7 +12,7 @@ const STATUS_STYLES: Record<string, string> = {
   draft: "bg-graphite-800 text-graphite-300",
   pending_approval: "bg-signal-amber/15 text-signal-amber",
   approved: "bg-signal-green/15 text-signal-green",
-  sent: "bg-blue-900/30 text-blue-300",
+  sent: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
   accepted: "bg-signal-green/25 text-signal-green",
   rejected: "bg-signal-red/15 text-signal-red",
   expired: "bg-graphite-800 text-graphite-500",

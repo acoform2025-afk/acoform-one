@@ -32,7 +32,7 @@ export default async function DispatchPage({ params }: { params: Promise<{ id: s
       <p className="mt-2 text-sm text-graphite-400">
         <Link href={`/projects/${p?.id}`} className="hover:text-signal-amber">{p?.project_code}</Link> · {p?.customer_name} · {date(n.dispatch_date)}
         {n.vehicle_no ? ` · ${n.vehicle_no}` : ""}{n.driver_name ? ` · ${n.driver_name}` : ""}
-        {n.delivered_at ? <span className="text-signal-green"> · delivered {date(n.delivered_at)}</span> : <span className="text-blue-300"> · in transit</span>}
+        {n.delivered_at ? <span className="text-signal-green"> · delivered {date(n.delivered_at)}</span> : <span className="text-blue-700 dark:text-blue-300"> · in transit</span>}
       </p>
       <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         {Object.entries(byCode).sort().map(([code, q]) => (

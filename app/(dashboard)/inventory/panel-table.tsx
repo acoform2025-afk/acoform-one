@@ -9,7 +9,7 @@ type Project = { id: string; project_code: string; customer_name: string };
 
 const input = "rounded-md border border-graphite-700 bg-graphite-800 px-2.5 py-1.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none";
 const STATUS_STYLE: Record<string, string> = {
-  in_stock: "text-signal-green", dispatched: "text-blue-300", on_site: "text-signal-amber", returned: "text-graphite-300",
+  in_stock: "text-signal-green", dispatched: "text-blue-700 dark:text-blue-300", on_site: "text-signal-amber", returned: "text-graphite-300",
   under_repair: "text-signal-red", scrapped: "text-graphite-500 line-through",
 };
 

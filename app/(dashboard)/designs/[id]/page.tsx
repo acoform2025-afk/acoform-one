@@ -10,7 +10,7 @@ import {
 } from "../actions";
 
 const STATUS: Record<string, string> = {
-  draft: "bg-graphite-800 text-graphite-300", calculated: "bg-blue-900/30 text-blue-300",
+  draft: "bg-graphite-800 text-graphite-300", calculated: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
   pending_approval: "bg-signal-amber/15 text-signal-amber", approved: "bg-signal-green/15 text-signal-green", rejected: "bg-signal-red/15 text-signal-red",
 };
 
