@@ -55,3 +55,9 @@ returns and repairs.
 - Tables/cols (migrations 00038–00039): `floor_plans` (takeoff, totals, preview_path, drawing_type, original_path), `quotations.floor_plan_id`, RPC `set_quotation_floor_plan`, copied on revisions.
 - Quotation: "Use in quotation" on the plan (quick quotes: floor plate → Full set, walls+columns → Vertical set) and "Quick quote from plan" (`/quotations?lead=..&mode=quick&plan=..`). Attached plan prints as page "PROJECT FLOOR PLAN & FORMWORK AREA" (preview.jpg + area table).
 - Panel design hand-off: "Send walls to panel design" turns each drawn wall segment into `design_walls` (height must be 2400–3000 mm); then run the layout engine / BOM in the design.
+
+## Shell plan (Sep 2026) — on the floor plan screen, panel "Shell plan"
+- Elements: walls (thk/height), doors & windows (2 clicks on the wall; height, sill), beams (b×D), columns, slabs (thk, level − sunk), ducts, lofts (thk, level). Codes S/W/DR/WN/B/C/L/D, own names allowed.
+- Area list rules added: door/window faces deducted from walls (2 × w × h), concrete reveals added ((2h + w [+w for windows]) × wall thk); lofts = soffit + edge.
+- `/floor-plans/[id]/shell-plan` → A3 PDF (lib/pdf/shell-plan-document.tsx: plan drawing via react-pdf Svg, door/window/beam/slab/wall schedules, area summary, legend, notes, title block with client approval box); `?format=dxf` → R12 DXF (layers SHELL-*) in the client's own drawing coordinates so it overlays their plan (lib/floor-plans/shell.ts).
+- Title block fields stored in `takeoff.shell` (drawingNo, rev, drawnBy, checkedBy, notes).

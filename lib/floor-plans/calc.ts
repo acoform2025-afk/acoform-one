@@ -7,12 +7,19 @@
  */
 
 export type Pt = [number, number];
-export type ShapeKind = "slab" | "opening" | "wall" | "column" | "beam";
+export type ShapeKind = "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft";
 /**
  * A drawn element. Optional sizes (mm) override the plan defaults:
  * wall: t = thickness, h = height · beam: b = width, d = depth · column: h = height · slab/opening: t = thickness.
  */
-export type Shape = { id: string; kind: ShapeKind; pts: Pt[]; label?: string; t?: number; h?: number; b?: number; d?: number };
+export type Shape = {
+  id: string; kind: ShapeKind; pts: Pt[]; label?: string;
+  t?: number; h?: number; b?: number; d?: number;
+  sill?: number;   // window sill height above floor (mm)
+  lvl?: number;    // slab level offset (mm, e.g. −50 sunken) · loft bottom level above floor (mm)
+};
+/** Door / window / loft defaults (mm). */
+export const OPENING_DEFAULTS = { doorH: 2100, windowH: 1200, windowSill: 900, loftT: 75, loftLvl: 2100 };
 export type ColumnRow = { w_mm: number; d_mm: number; qty: number };
 /** Beam sides to shutter: side length (both sides) × (depth − slab). The beam bottom is already in the slab area. */
 export type BeamRow = { label?: string; width_mm?: number; depth_mm: number; length_m: number; qty: number };
@@ -29,7 +36,9 @@ export type Params = {
 };
 
 /** One line of the formwork area list (like an "estimate FM area list"). */
-export type AreaItem = { code: string; group: "slab" | "deduct" | "edge" | "wall" | "column" | "beam" | "extra"; label: string; calc: string; area: number };
+export type AreaItem = { code: string; group: "slab" | "deduct" | "edge" | "wall" | "opening" | "column" | "beam" | "loft" | "extra"; label: string; calc: string; area: number };
+/** Shell-plan title block and notes (stored with the take-off). */
+export type ShellMeta = { drawingNo?: string; rev?: string; drawnBy?: string; checkedBy?: string; notes?: string; scaleNote?: string };
 export type LayerRole = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams";
 
 export type Takeoff = {
@@ -42,6 +51,7 @@ export type Takeoff = {
   columns: ColumnRow[];                // columns typed in by size
   beams: BeamRow[];
   extras?: ExtraRow[];
+  shell?: ShellMeta;
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null };
 };
 
@@ -102,7 +112,7 @@ function bboxSize(pts: Pt[]): [number, number] {
 
 /** Value of one drawn shape in metres (area m² for areas, length m for walls). */
 export function shapeMeasure(s: Shape, mpp: number): { area: number; length: number; perimeter: number } {
-  const open = s.kind === "wall" || s.kind === "beam";
+  const open = s.kind === "wall" || s.kind === "beam" || s.kind === "door" || s.kind === "window";
   const length = polyLength(s.pts, !open) * mpp;
   const area = !open && s.pts.length >= 3 ? polyArea(s.pts) * mpp * mpp : 0;
   return { area, length: open ? length : 0, perimeter: open ? 0 : length };
@@ -124,7 +134,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
   const hOf = (s: Shape) => (s.h && s.h > 0 ? s.h / 1000 : H);
 
   let slabArea = 0, slabPer = 0, openArea = 0, openPer = 0, wallCentre = 0, wallFaces = 0, wallArea = 0, wallTopDrawn = 0;
-  let colCount = 0, colPerimeter = 0, colFoot = 0, colArea = 0, beamArea = 0;
+  let colCount = 0, colPerimeter = 0, colFoot = 0, colArea = 0, beamArea = 0, loftArea = 0;
   const sizes = new Map<string, number>();
   const addSize = (wm: number, dm: number, q: number) => {
     const a = Math.round(Math.min(wm, dm) * 1000 / 5) * 5, b = Math.round(Math.max(wm, dm) * 1000 / 5) * 5;
@@ -137,7 +147,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
       const m = shapeMeasure(s, mpp);
       if (s.kind === "slab") {
         slabArea += m.area; slabPer += m.perimeter;
-        items.push({ code: code("S", s.label), group: "slab", label: "Slab", calc: `outline ${n2(m.area)} m²`, area: m.area });
+        items.push({ code: code("S", s.label), group: "slab", label: `Slab${s.t ? ` ${s.t} thk` : ""}${s.lvl ? ` (${s.lvl > 0 ? "+" : ""}${s.lvl})` : ""}`, calc: `outline ${n2(m.area)} m²`, area: m.area });
       } else if (s.kind === "opening") {
         openArea += m.area; openPer += m.perimeter;
         items.push({ code: code("D", s.label), group: "deduct", label: "Duct / opening", calc: `− ${n2(m.area)} m²`, area: -m.area });
@@ -157,6 +167,21 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
         const a = beamSides(m.length, dMm);
         beamArea += a;
         items.push({ code: code("B", s.label), group: "beam", label: `Beam ${bMm}×${dMm}`, calc: `2 × ${n2(m.length)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
+      } else if (s.kind === "door" || s.kind === "window") {
+        // opening in a drawn wall: both faces come off the wall; the concrete reveals (sides, top, sill) are added
+        const isDoor = s.kind === "door";
+        const w = m.length, h = (s.h && s.h > 0 ? s.h : isDoor ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH) / 1000;
+        const thk = (s.t && s.t > 0 ? s.t : Number(t.params.wallThkMm) || 150) / 1000;
+        const faces = 2 * w * h, reveal = (2 * h + w * (isDoor ? 1 : 2)) * thk;
+        const c = code(isDoor ? "DR" : "WN", s.label);
+        wallArea -= faces; wallArea += reveal;
+        items.push({ code: c, group: "opening", label: `${isDoor ? "Door" : "Window"} ${Math.round(w * 1000)}×${Math.round(h * 1000)} − faces`, calc: `− 2 × ${n2(w)} m × ${n3(h)} m`, area: -faces });
+        items.push({ code: c, group: "opening", label: `${isDoor ? "Door" : "Window"} reveals`, calc: `(2 × ${n3(h)} + ${isDoor ? "" : "2 × "}${n2(w)}) m × ${n3(thk)} m`, area: reveal });
+      } else if (s.kind === "loft") {
+        const lt = (s.t && s.t > 0 ? s.t : OPENING_DEFAULTS.loftT) / 1000;
+        const a = m.area + m.perimeter * lt;
+        loftArea += a;
+        items.push({ code: code("L", s.label), group: "loft", label: `Loft ${Math.round(lt * 1000)} thk`, calc: `${n2(m.area)} m² + ${n2(m.perimeter)} m × ${n3(lt)} m`, area: a });
       }
     }
   }
@@ -208,16 +233,16 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
   const soffit = Math.max(0, plan - wallTop - colFoot);
   const edge = t.params.includeEdges ? (slabPer + openPer) * slab : 0;
   if (edge) items.push({ code: "E", group: "edge", label: "Slab & opening edges", calc: `${n2(slabPer + openPer)} m × ${n3(slab)} m`, area: edge });
-  const contact = soffit + edge + wallArea + colArea + beamArea + extraArea;
+  const contact = soffit + edge + wallArea + colArea + beamArea + extraArea + loftArea;
   const hasManual = t.shapes.length > 0 || t.columns.length > 0 || t.beams.length > 0 || extraArea > 0;
-  const order = { slab: 0, deduct: 1, edge: 2, wall: 3, column: 4, beam: 5, extra: 6 } as const;
+  const order = { slab: 0, deduct: 1, edge: 2, wall: 3, opening: 4, column: 5, beam: 6, loft: 7, extra: 8 } as const;
   items.sort((x, y) => order[x.group] - order[y.group]);
   return {
     plan_area: r2(plan), slab_soffit: r2(soffit), slab_edge: r2(edge),
     wall_length: r2(wallCentre), wall_area: r2(wallArea),
     column_count: colCount, column_area: r2(colArea),
     column_sizes: [...sizes.entries()].map(([size, qty]) => ({ size, qty })).sort((a, b) => b.qty - a.qty),
-    beam_area: r2(beamArea), extra_area: r2(extraArea), wall_top_area: r2(wallTop),
+    beam_area: r2(beamArea), extra_area: r2(extraArea + loftArea), wall_top_area: r2(wallTop),
     vertical_area: r2(wallArea + colArea),
     contact_area: r2(contact), extra_pct: extraPct, quote_area: r2(contact * (1 + extraPct / 100)),
     clear_height: r2(H), floors: Math.max(1, Math.round(floors || 1)), params: t.params,

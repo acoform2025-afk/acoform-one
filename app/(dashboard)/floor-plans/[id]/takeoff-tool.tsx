@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Check, Crop, Hand, Loader2, MoveVertical, Maximize, Minus, MousePointer2, PenLine, Plus, Ruler, Save, Square, SquareDashed, Trash2, Undo2, X, Columns3,
+  AppWindow, Check, Crop, DoorOpen, FileDown, Hand, Layers, Loader2, MoveVertical, Maximize, Minus, MousePointer2, PenLine, Plus, Ruler, Save, Square, SquareDashed, Trash2, Undo2, X, Columns3,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -15,7 +15,7 @@ import { saveTakeoff } from "../actions";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
 
-type Tool = "pan" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam";
+type Tool = "pan" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft";
 type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
 
 const MAX_SIDE = 2400;
@@ -25,9 +25,13 @@ const SHAPE_STYLE: Record<ShapeKind, { stroke: string; fill: string; label: stri
   wall: { stroke: "#ea580c", fill: "none", label: "Wall" },
   column: { stroke: "#dc2626", fill: "rgba(220,38,38,0.35)", label: "Column" },
   beam: { stroke: "#db2777", fill: "none", label: "Beam" },
+  door: { stroke: "#0d9488", fill: "none", label: "Door" },
+  window: { stroke: "#0284c7", fill: "none", label: "Window" },
+  loft: { stroke: "#65a30d", fill: "rgba(101,163,13,0.18)", label: "Loft / ledge" },
 };
-const PREFIX: Record<ShapeKind, string> = { slab: "S", opening: "D", wall: "W", column: "C", beam: "B" };
-const isOpen = (k: ShapeKind) => k === "wall" || k === "beam";
+const PREFIX: Record<ShapeKind, string> = { slab: "S", opening: "D", wall: "W", column: "C", beam: "B", door: "DR", window: "WN", loft: "L" };
+const isOpen = (k: ShapeKind) => k === "wall" || k === "beam" || k === "door" || k === "window";
+const isTwoPoint = (k: string) => k === "door" || k === "window";
 /** Same numbering as the area list: own label, else S1, W1, B1 … in drawing order. */
 function shapeCodes(shapes: Shape[]): Record<string, string> {
   const cnt: Record<string, number> = {}; const out: Record<string, string> = {};
@@ -44,6 +48,9 @@ const TOOL_HINT: Record<Tool, string> = {
   opening: "Click the corners of a shaft / cut-out to deduct it. Click the first point again to close.",
   wall: "Click along the wall centre line. Double-click or press Enter to finish the wall. Hold Shift for straight lines.",
   column: "Click two opposite corners of a column.",
+  door: "Click the two sides of the door opening along the wall. Set its height in the element box (default 2100).",
+  window: "Click the two sides of the window along the wall. Set height and sill in the element box (default 1200, sill 900).",
+  loft: "Click the corners of the loft / ledge slab. Click the first point again to close.",
   beam: "Click along the beam centre line. Double-click or press Enter to finish. Set its width × depth in the list on the right (Select it).",
 };
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -257,7 +264,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
     const tol = 10 / view.k;
     let best: Pt | null = null, bd = tol;
     const consider = (c: Pt) => { const d = Math.hypot(c[0] - q[0], c[1] - q[1]); if (d < bd) { bd = d; best = c; } };
-    if (draft.length >= 3 && (tool === "slab" || tool === "opening")) consider(draft[0]);
+    if (draft.length >= 3 && (tool === "slab" || tool === "opening" || tool === "loft")) consider(draft[0]);
     for (const s of t.shapes) for (const c of s.pts) consider(c);
     for (const c of snapRef.current) consider(c);
     if (best && !(shift && last)) return { pt: best, snapped: true };
@@ -291,7 +298,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
       const a = draft[0];
       finishShape("column", [a, [p[0], a[1]], p, [a[0], p[1]]]); return;
     }
-    if (tool === "slab" || tool === "opening") {
+    if (tool === "door" || tool === "window") {
+      if (draft.length === 0) { setDraft([p]); return; }
+      finishShape(tool, [draft[0], p]); return;
+    }
+    if (tool === "slab" || tool === "opening" || tool === "loft") {
       if (draft.length >= 3 && Math.hypot(p[0] - draft[0][0], p[1] - draft[0][1]) < 10 / view.k) { finishShape(tool, draft); return; }
       setDraft((d) => [...d, p]); return;
     }
@@ -299,7 +310,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
   }
 
   function finishDraft() {
-    if (tool === "slab" || tool === "opening" || tool === "wall" || tool === "beam") finishShape(tool, draft);
+    if (tool === "slab" || tool === "opening" || tool === "loft" || tool === "wall" || tool === "beam") finishShape(tool, draft);
   }
 
   /* ---------- mouse / touch ---------- */
@@ -403,6 +414,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
     { id: "wall", label: "Wall", icon: <PenLine className="size-4" />, show: canEdit },
     { id: "column", label: "Column", icon: <Columns3 className="size-4" />, show: canEdit },
     { id: "beam", label: "Beam", icon: <Minus className="size-4" />, show: canEdit },
+    { id: "door", label: "Door", icon: <DoorOpen className="size-4" />, show: canEdit },
+    { id: "window", label: "Window", icon: <AppWindow className="size-4" />, show: canEdit },
+    { id: "loft", label: "Loft", icon: <Layers className="size-4" />, show: canEdit },
     { id: "select", label: "Select", icon: <MousePointer2 className="size-4" />, show: canEdit },
   ];
   const draftPreview: Pt[] = hover && draft.length && tool !== "select" && tool !== "pan"
@@ -411,7 +425,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
   const liveLabel = (() => {
     if (!hover || !draft.length || !mpp) return null;
     if (tool === "region") return null;
-    if (tool === "wall" || tool === "beam" || tool === "calibrate" || tool === "measure") return fmtLen(shapeMeasure({ id: "", kind: "wall", pts: draftPreview }, mpp).length);
+    if (tool === "wall" || tool === "beam" || tool === "door" || tool === "window" || tool === "calibrate" || tool === "measure") return fmtLen(shapeMeasure({ id: "", kind: "wall", pts: draftPreview }, mpp).length);
     if (tool === "column") { const [a, , c] = draftPreview; return `${Math.round(Math.abs(c[0] - a[0]) * mpp * 1000)} × ${Math.round(Math.abs(c[1] - a[1]) * mpp * 1000)} mm`; }
     if (draftPreview.length >= 3) return fmtArea(polyArea(draftPreview) * mpp * mpp);
     return null;
@@ -432,7 +446,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           <IconBtn label="Zoom out" onClick={() => zoomAt(1 / 1.3)}><Minus className="size-4" /></IconBtn>
           <IconBtn label="Zoom in" onClick={() => zoomAt(1.3)}><Plus className="size-4" /></IconBtn>
           <IconBtn label="Fit to screen" onClick={() => size && fit(size.w, size.h)}><Maximize className="size-4" /></IconBtn>
-          {draft.length > 0 && tool !== "calibrate" && tool !== "measure" && tool !== "region" ? (
+          {draft.length > 0 && tool !== "calibrate" && tool !== "measure" && tool !== "region" && !isTwoPoint(tool) ? (
             <>
               <span className="mx-1 h-5 w-px bg-graphite-700" />
               {tool !== "column" ? <button type="button" onClick={finishDraft} className="inline-flex items-center gap-1 rounded-md bg-signal-green/15 px-2.5 py-1.5 text-xs font-medium text-signal-green"><Check className="size-4" />Finish</button> : null}
@@ -455,7 +469,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           className={cls("relative h-[62vh] min-h-[380px] touch-none select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
             tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-pointer" : "cursor-crosshair")}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-          onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "beam" || tool === "slab" || tool === "opening") finishDraft(); }}
+          onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "beam" || tool === "slab" || tool === "opening" || tool === "loft") finishDraft(); }}
           onContextMenu={(e) => e.preventDefault()}
         >
           {!size && !loadErr ? <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-graphite-600"><Loader2 className="size-5 animate-spin" />Opening floor plan…</div> : null}
@@ -662,7 +676,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
                 return (
                   <li key={s.id} className={cls("flex items-center gap-2 rounded px-1.5 py-1", s.id === selected && "bg-graphite-800")}>
                     <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: SHAPE_STYLE[s.kind].stroke }} />
-                    <button type="button" className="flex-1 text-left text-graphite-200" onClick={() => { setSelected(s.id); setTool("select"); }}><span className="font-mono text-graphite-400">{codes[s.id]}</span> {SHAPE_STYLE[s.kind].label}{s.kind === "wall" && s.t ? ` ${s.t}` : s.kind === "beam" ? ` ${s.b ?? t.params.beamWidthMm ?? 200}×${s.d ?? t.params.beamDepthMm ?? 600}` : ""}</button>
+                    <button type="button" className="flex-1 text-left text-graphite-200" onClick={() => { setSelected(s.id); setTool("select"); }}><span className="font-mono text-graphite-400">{codes[s.id]}</span> {SHAPE_STYLE[s.kind].label}{s.kind === "wall" && s.t ? ` ${s.t}` : s.kind === "beam" ? ` ${s.b ?? t.params.beamWidthMm ?? 200}×${s.d ?? t.params.beamDepthMm ?? 600}` : s.kind === "door" || s.kind === "window" ? ` ×${s.h ?? (s.kind === "door" ? 2100 : 1200)}${s.kind === "window" ? ` sill ${s.sill ?? 900}` : ""}` : ""}</button>
                     <span className="font-mono text-graphite-400">{m ? (isOpen(s.kind) ? fmtLen(m.length) : s.kind === "column" ? colSize(s.pts, mpp!) : fmtArea(m.area)) : "—"}</span>
                     {canEdit ? <button type="button" aria-label="Delete" onClick={() => update((p) => ({ ...p, shapes: p.shapes.filter((x) => x.id !== s.id) }))} className="text-graphite-500 hover:text-signal-red"><Trash2 className="size-3.5" /></button> : null}
                   </li>
@@ -683,6 +697,19 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
               {selShape.kind === "beam" ? <>
                 <Field label="Width mm"><OptNum value={selShape.b} placeholder={String(t.params.beamWidthMm ?? 200)} onChange={(v) => setShape(selShape.id, { b: v })} /></Field>
                 <Field label="Depth mm"><OptNum value={selShape.d} placeholder={String(t.params.beamDepthMm ?? 600)} onChange={(v) => setShape(selShape.id, { d: v })} /></Field>
+              </> : null}
+              {selShape.kind === "door" || selShape.kind === "window" ? <>
+                <Field label="Height mm"><OptNum value={selShape.h} placeholder={String(selShape.kind === "door" ? 2100 : 1200)} onChange={(v) => setShape(selShape.id, { h: v })} /></Field>
+                {selShape.kind === "window" ? <Field label="Sill mm"><OptNum value={selShape.sill} placeholder="900" onChange={(v) => setShape(selShape.id, { sill: v })} /></Field> : null}
+                <Field label="Wall thk mm"><OptNum value={selShape.t} placeholder={String(t.params.wallThkMm ?? 150)} onChange={(v) => setShape(selShape.id, { t: v })} /></Field>
+              </> : null}
+              {selShape.kind === "slab" ? <>
+                <Field label="Thickness mm"><OptNum value={selShape.t} placeholder={String(t.params.slabMm)} onChange={(v) => setShape(selShape.id, { t: v })} /></Field>
+                <Field label="Level mm (− sunk)"><LevelInput value={selShape.lvl} onChange={(v) => setShape(selShape.id, { lvl: v })} /></Field>
+              </> : null}
+              {selShape.kind === "loft" ? <>
+                <Field label="Thickness mm"><OptNum value={selShape.t} placeholder="75" onChange={(v) => setShape(selShape.id, { t: v })} /></Field>
+                <Field label="Bottom level mm"><OptNum value={selShape.lvl} placeholder="2100" onChange={(v) => setShape(selShape.id, { lvl: v })} /></Field>
               </> : null}
               {selShape.kind === "column" ? <Field label="Height mm"><OptNum value={selShape.h} placeholder={String(Math.round(totals.clear_height * 1000))} onChange={(v) => setShape(selShape.id, { h: v })} /></Field> : null}
             </div>
@@ -757,6 +784,30 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           )}
         </Panel>
 
+        <Panel title="Shell plan" hint="Concrete-only drawing for client approval: codes, sizes, schedules and title block.">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Drawing no."><MetaInput value={t.shell?.drawingNo} placeholder="SP-01" disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, shell: { ...p.shell, drawingNo: v } }))} /></Field>
+            <Field label="Revision"><MetaInput value={t.shell?.rev} placeholder="R0" disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, shell: { ...p.shell, rev: v } }))} /></Field>
+            <Field label="Drawn by"><MetaInput value={t.shell?.drawnBy} placeholder="" disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, shell: { ...p.shell, drawnBy: v } }))} /></Field>
+            <Field label="Checked by"><MetaInput value={t.shell?.checkedBy} placeholder="" disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, shell: { ...p.shell, checkedBy: v } }))} /></Field>
+          </div>
+          <Field label="Notes (one per line)">
+            <textarea rows={3} disabled={!canEdit} defaultValue={t.shell?.notes ?? ""} maxLength={1500} placeholder="All dimensions are in mm unless noted." className={numIn}
+              onChange={(e) => update((p) => ({ ...p, shell: { ...p.shell, notes: e.target.value } }))} />
+          </Field>
+          <div className="mt-2 flex gap-2">
+            <a href={dirty ? undefined : `/floor-plans/${plan.id}/shell-plan`} target="_blank" rel="noreferrer" aria-disabled={dirty}
+              className={cls("inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white", dirty && "pointer-events-none opacity-40")}>
+              <FileDown className="size-3.5" />Shell plan PDF
+            </a>
+            <a href={dirty ? undefined : `/floor-plans/${plan.id}/shell-plan?format=dxf`} aria-disabled={dirty}
+              className={cls("inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200", dirty && "pointer-events-none opacity-40")}>
+              <FileDown className="size-3.5" />DXF for AutoCAD
+            </a>
+          </div>
+          {dirty ? <p className="mt-1 text-[11px] text-signal-amber">Save the measurements first.</p> : null}
+        </Panel>
+
         <UseInQuotation planId={plan.id} lead={plan.lead} quotes={quotes} totals={totals} dirty={dirty} canEdit={canEdit} />
         {designs ? <SendToDesign planId={plan.id} designs={designs} dirty={dirty} wallSegments={t.shapes.filter((s) => s.kind === "wall").reduce((n, s) => n + Math.max(0, s.pts.length - 1), 0)} /> : null}
       </aside>
@@ -827,6 +878,14 @@ function Panel({ title, hint, children }: { title: string; hint?: string; childr
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="flex flex-col gap-1"><span className="text-[11px] font-medium uppercase tracking-wide text-graphite-500">{label}</span>{children}</label>;
+}
+function MetaInput({ value, placeholder, disabled, onChange }: { value: string | undefined; placeholder: string; disabled?: boolean; onChange: (v: string) => void }) {
+  return <input maxLength={40} defaultValue={value ?? ""} placeholder={placeholder} disabled={disabled} className={numIn} onChange={(e) => onChange(e.target.value)} />;
+}
+function LevelInput({ value, onChange }: { value: number | undefined; onChange: (v: number | undefined) => void }) {
+  const [s, setS] = useState(value != null ? String(value) : "");
+  return <input type="number" step="any" value={s} placeholder="0" className={numIn}
+    onChange={(e) => { setS(e.target.value); const n = Number(e.target.value); onChange(e.target.value === "" || !Number.isFinite(n) || n === 0 ? undefined : Math.max(-2000, Math.min(5000, n))); }} />;
 }
 function OptNum({ value, placeholder, onChange }: { value: number | undefined; placeholder: string; onChange: (v: number | undefined) => void }) {
   const [s, setS] = useState(value != null ? String(value) : "");

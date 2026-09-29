@@ -103,7 +103,7 @@ const totalsSchema = z.object({
   extra_area: num.default(0), wall_top_area: num.default(0), extra_pct: z.number().min(0).max(100).default(0), quote_area: num.default(0),
   wall_top_drawn: num.default(0),
   items: z.array(z.object({
-    code: z.string().max(20), group: z.enum(["slab", "deduct", "edge", "wall", "column", "beam", "extra"]),
+    code: z.string().max(20), group: z.enum(["slab", "deduct", "edge", "wall", "opening", "column", "beam", "loft", "extra"]),
     label: z.string().max(80), calc: z.string().max(120), area: z.number().finite().min(-1e7).max(1e7),
   })).max(400).default([]),
   floors: z.number().int().min(1).max(500),
