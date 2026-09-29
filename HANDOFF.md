@@ -36,3 +36,8 @@ returns and repairs.
 - Company legal name / GSTIN / bank details in Settings.
 - Minimum custom-filler width and how to top walls above 2400 mm (layout rules).
 - 4–6 site photos, optional signature/stamp PNG for PDFs.
+
+## Quotation PDF — site photos & client logos (Sep 2026)
+- New page after the Technical Specification: "OUR WORK AT SITE" (3 photos) + "OUR ESTEEMED CLIENTS" (logo grid).
+- Files: `public/brand/site/site-1..3.jpg`, `public/brand/clients/*.png`; lists live in `SITE_PHOTOS` / `CLIENT_LOGOS` in `lib/quotations/document-content.ts`.
+- To swap a photo/logo: replace the file with the same name (or edit the list). Page hides itself if no files are listed.

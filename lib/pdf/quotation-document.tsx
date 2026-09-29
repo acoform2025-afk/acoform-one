@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Document, Font, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import {
-  ADVANTAGES, accessoriesFor, CLOSING, DEFAULT_PAYMENT_TERMS, DELIVERY_SCHEDULE, SCHEDULE_NOTE, SET_LABEL, TECH_SPECS, TERMS,
+  ADVANTAGES, accessoriesFor, CLIENT_LOGOS, SITE_PHOTOS, CLOSING, DEFAULT_PAYMENT_TERMS, DELIVERY_SCHEDULE, SCHEDULE_NOTE, SET_LABEL, TECH_SPECS, TERMS,
   formworkKind,
 } from "@/lib/quotations/document-content";
 import { EXTRA_LINE_TYPES, LINE_TYPE_LABELS, formatQty, summariseLines } from "@/lib/quotations/line-types";
@@ -17,6 +17,8 @@ Font.register({
 });
 Font.registerHyphenationCallback((word) => [word]);
 const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
+const sitePhoto = (f: string) => path.join(PUBLIC, "brand", "site", f);
+const clientLogo = (f: string) => path.join(PUBLIC, "brand", "clients", f);
 
 const ORANGE = "#ef9d2f";
 const ORANGE_SOFT = "#fdf3e4";
@@ -90,6 +92,7 @@ export type PdfQuotation = {
   total_area_sqm: number | null; total_amount: number | null; total_with_gst: number | null; gst_percentage: number;
   quick_rate_per_sqm: number | null; nalco_rate_per_kg: number | null; nalco_rate_date: string | null;
   accessories?: unknown; // edited accessories list (null = standard list)
+  show_references?: boolean | null; // print the "Our work at site & esteemed clients" page
 };
 
 export type PdfLine = {
@@ -283,6 +286,7 @@ export function QuotationDocument({ q, lines, company }: { q: PdfQuotation; line
   const validUntil = addDays(q.quotation_date, q.validity_days);
   const companyName = titleCase(company.company_name ?? "Aco Form Work Pvt Ltd");
   const chrome = <Chrome c={company} code={q.quotation_code} draft={draft} />;
+  const showReferences = q.show_references !== false && (SITE_PHOTOS.length > 0 || CLIENT_LOGOS.length > 0);
   const qtyLabel = q.quotation_type === "quick" ? "QUANTITY" : "FORMWORK AREA";
 
   return (
@@ -396,6 +400,38 @@ export function QuotationDocument({ q, lines, company }: { q: PdfQuotation; line
           ))}
         </View>
       </Page>
+
+      {/* 3b. Our work at site + esteemed clients */}
+      {showReferences ? (
+        <Page size="A4" style={s.page}>
+          {chrome}
+          <Text style={[s.h2, { marginTop: 0 }]}>OUR WORK AT SITE</Text>
+          {SITE_PHOTOS[0] ? (
+            <View wrap={false}>
+              <Image src={sitePhoto(SITE_PHOTOS[0].file)} style={{ width: "100%", height: 215, objectFit: "cover", borderRadius: 3 }} />
+            </View>
+          ) : null}
+          {SITE_PHOTOS.length > 1 ? (
+            <View style={{ flexDirection: "row", marginTop: 8, gap: 8 }} wrap={false}>
+              {SITE_PHOTOS.slice(1, 3).map((p, i) => (
+                <Image key={p.file} src={sitePhoto(p.file)} style={{ width: i === 0 ? "60%" : "38.4%", height: 190, objectFit: "cover", borderRadius: 3 }} />
+              ))}
+            </View>
+          ) : null}
+          <Text style={{ fontSize: 8, color: GRAY, marginTop: 4, textAlign: "center" }}>
+            Actual site photographs of ACOFORM powder-coated aluminium formwork in use.
+          </Text>
+
+          <Text style={[s.h2, { marginTop: 16 }]}>OUR ESTEEMED CLIENTS</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 4 }} wrap={false}>
+            {CLIENT_LOGOS.map((c) => (
+              <View key={c.file} style={{ width: "23.5%", height: 62, borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 4, padding: 6, alignItems: "center", justifyContent: "center" }}>
+                <Image src={clientLogo(c.file)} style={{ maxWidth: "100%", maxHeight: 48, objectFit: "contain" }} />
+              </View>
+            ))}
+          </View>
+        </Page>
+      ) : null}
 
       {/* 4. Accessories */}
       <Page size="A4" style={s.page}>
