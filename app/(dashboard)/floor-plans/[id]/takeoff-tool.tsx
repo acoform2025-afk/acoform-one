@@ -805,6 +805,10 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
               <FileDown className="size-3.5" />DXF for AutoCAD
             </a>
           </div>
+          <a href={dirty ? undefined : `/floor-plans/${plan.id}/panels`} aria-disabled={dirty}
+            className={cls("mt-2 flex items-center justify-center gap-1.5 rounded-md border border-brand-orange/60 px-3 py-2 text-xs font-medium text-graphite-100 hover:bg-graphite-800", dirty && "pointer-events-none opacity-40")}>
+            Panel layout &amp; BOM →
+          </a>
           {dirty ? <p className="mt-1 text-[11px] text-signal-amber">Save the measurements first.</p> : null}
         </Panel>
 

@@ -61,3 +61,9 @@ returns and repairs.
 - Area list rules added: door/window faces deducted from walls (2 × w × h), concrete reveals added ((2h + w [+w for windows]) × wall thk); lofts = soffit + edge.
 - `/floor-plans/[id]/shell-plan` → A3 PDF (lib/pdf/shell-plan-document.tsx: plan drawing via react-pdf Svg, door/window/beam/slab/wall schedules, area summary, legend, notes, title block with client approval box); `?format=dxf` → R12 DXF (layers SHELL-*) in the client's own drawing coordinates so it overlays their plan (lib/floor-plans/shell.ts).
 - Title block fields stored in `takeoff.shell` (drawingNo, rev, drawnBy, checkedBy, notes).
+
+## Panel layout & BOM (Sep 2026) — "Panel layout & BOM →" on the floor plan screen
+- Engine: `lib/design-engine/floor-panels.ts` (pure). Inputs from `lib/floor-plans/panel-input.ts` (drawn walls → 2 faces per segment; DXF wall lines in the plan region → 1 face per straight run; slabs with ducts as holes; beams from Beam tool / Beams table / DXF beam layer).
+- Rules v1 (standard Mivan, to tune with ACOFORM drawings): fewest catalogue wall panels per face (50 mm DP), gaps < 25 mm taken in joints, faces ≤ 250 mm = stop-ends, walls taller than the standard panel get WT top strips, 65 mm corner per ~90° joint (IC/EC to confirm), deck strips of 1200 filled with 600/450/300 and scaled to net soffit, props @ spacing, soffit corner along top of faces, beam sides (D − slab) and bottoms (b) in 1200 lengths. Custom items weighed at kg/m² (default 20).
+- Page `/floor-plans/[id]/panels` (options h, kg, prop in the query string) + `/panels/export?format=csv|pdf` (lib/pdf/panel-bom-document.tsx).
+- Gorwa check: ≈ 3,018 m² of panels, 56.7 t, 18.8 kg/m² (quote says 19–21 kg/m²).
