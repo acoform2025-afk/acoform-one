@@ -1,6 +1,6 @@
 name: Check build
 
-# Render deploys main (live) and test (preview) itself, but only after this check passes.
+# Render deploys main (live) and test (preview) itself, but only after these checks pass.
 on:
   push:
     branches: [main, test]
@@ -25,3 +25,11 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://hxlkinnosgckehogtpgb.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_rCYgzLXbGnHGmNqT3zxCfA_tdyQ0b_h
 
+
+  # Builds the same Docker image Render builds (incl. the LibreDWG DWG reader), so a broken image never deploys.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t acoform-one-ci .
+      - run: docker run --rm --entrypoint /opt/libredwg/bin/dwg2dxf acoform-one-ci --version

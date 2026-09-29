@@ -151,6 +151,10 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
   const extra = contactColumns(contact.data);
   if (Object.keys(extra).length > 0) await supabase.from("quotations").update(extra).eq("id", data as string);
 
+  // made from a measured floor plan → print that plan on the quotation
+  const planId = String(formData.get("floorPlanId") ?? "");
+  if (/^[0-9a-f-]{36}$/i.test(planId)) await supabase.rpc("set_quotation_floor_plan", { p_quotation_id: data as string, p_floor_plan_id: planId });
+
   revalidatePath("/quotations");
   return { success: true, data: { id: data as string } };
 }

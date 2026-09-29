@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { EditLeadForm } from "./edit-lead-form";
+import { fmtArea } from "@/lib/floor-plans/calc";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -14,6 +15,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { data: quotes } = await supabase.from("quotations")
     .select("id, quotation_code, quotation_type, status, total_with_gst, created_at")
     .eq("lead_id", id).neq("status", "superseded").order("created_at", { ascending: false });
+  const { data: plans } = await supabase.from("floor_plans")
+    .select("id, name, drawing_type, source_kind, original_path, totals, updated_at").eq("lead_id", id).order("created_at", { ascending: false });
 
   return (
     <div className="fade-in max-w-5xl">
@@ -50,6 +53,32 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </table>
         </div>
       ) : null}
+
+      <div className="mt-6 overflow-hidden rounded-lg border border-graphite-800">
+        <div className="flex items-center justify-between bg-graphite-900 px-4 py-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-graphite-500">Drawings &amp; area take-off</p>
+          {canQuote ? <Link href={`/floor-plans/new?lead=${lead.id}`} className="rounded-md bg-brand-orange px-3 py-1 text-xs font-medium text-white hover:opacity-90">+ Upload AutoCAD / PDF drawing</Link> : null}
+        </div>
+        {plans && plans.length > 0 ? (
+          <table className="w-full text-left text-sm">
+            <tbody className="divide-y divide-graphite-800">
+              {plans.map((p) => {
+                const t = (p.totals ?? {}) as Record<string, number>;
+                return (
+                  <tr key={p.id} className="bg-graphite-950">
+                    <td className="px-4 py-2.5"><Link href={`/floor-plans/${p.id}`} className="font-medium text-graphite-100 hover:text-brand-orange hover:underline">{p.name}</Link></td>
+                    <td className="px-4 py-2.5 text-xs capitalize text-graphite-400">{p.drawing_type} · {p.original_path ? "DWG" : p.source_kind.toUpperCase()}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs text-graphite-300">{t.contact_area ? `${fmtArea(t.contact_area)} contact` : "not measured"}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      {canQuote && t.plan_area ? <Link href={`/quotations?lead=${lead.id}&mode=quick&plan=${p.id}`} className="text-xs text-brand-orange hover:underline">⚡ Quick quote from plan</Link> : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : <p className="bg-graphite-950 px-4 py-4 text-sm text-graphite-500">No drawings yet. Upload the AutoCAD floor plan (DWG/DXF) or a PDF to measure the formwork area.</p>}
+      </div>
 
       {!canEdit ? <p className="mt-3 text-sm text-graphite-500">Your role can view this lead but not edit it.</p> : null}
       <div className="mt-6"><EditLeadForm lead={lead} canEdit={canEdit} /></div>

@@ -20,6 +20,7 @@ const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 // Site photos + client logos come from Settings (lib/quotations/media.ts): a file path or raw image bytes
 export type PdfImage = string | { data: Buffer; format: "png" | "jpg" };
 export type PdfMedia = { photos: PdfImage[]; logos: PdfImage[] };
+export type PdfFloorPlan = { name: string; image: PdfImage | null; rows: [string, string][]; note: string };
 
 const ORANGE = "#ef9d2f";
 const ORANGE_SOFT = "#fdf3e4";
@@ -278,7 +279,7 @@ function DetailedSchedule({ q, lines }: { q: PdfQuotation; lines: PdfLine[] }) {
   );
 }
 
-export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] } }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia }) {
+export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] }, plan = null }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia; plan?: PdfFloorPlan | null }) {
   const kind = formworkKind(q.formwork_type);
   const setLabel = SET_LABEL[kind];
   const payment = q.payment_terms && q.payment_terms.length > 0 ? q.payment_terms : DEFAULT_PAYMENT_TERMS[kind];
@@ -402,6 +403,29 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
           ))}
         </View>
       </Page>
+
+      {/* 3a. Project floor plan + area take-off */}
+      {plan ? (
+        <Page size="A4" style={s.page}>
+          {chrome}
+          <Text style={[s.h2, { marginTop: 0 }]}>PROJECT FLOOR PLAN &amp; FORMWORK AREA</Text>
+          <Text style={{ fontSize: 9, color: GRAY, marginBottom: 6 }}>{plan.name}</Text>
+          {plan.image ? (
+            <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, alignItems: "center" }} wrap={false}>
+              <Image src={plan.image} style={{ maxWidth: "100%", maxHeight: 430, objectFit: "contain" }} />
+            </View>
+          ) : null}
+          <View style={[s.table, { marginTop: 10, fontSize: 9 }]} wrap={false}>
+            {plan.rows.map(([k, v], i) => (
+              <View key={k} style={i % 2 ? [s.tr, s.alt] : s.tr}>
+                <Text style={[s.cell, { width: "65%" }, i === plan.rows.length - 1 ? { fontWeight: "bold" } : {}]}>{k}</Text>
+                <Text style={[s.cell, { width: "35%", textAlign: "right" }, i === plan.rows.length - 1 ? { fontWeight: "bold" } : {}]}>{v}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={{ fontSize: 7.5, color: GRAY, marginTop: 4 }}>{plan.note}</Text>
+        </Page>
+      ) : null}
 
       {/* 3b. Our work at site + esteemed clients */}
       {showReferences ? (

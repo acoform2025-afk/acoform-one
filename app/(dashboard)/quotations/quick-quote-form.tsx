@@ -13,11 +13,17 @@ const AREA_BASIS_HINT: Record<string, string> = {
   vertical: "Vertical formwork face area (walls/columns only, slab separate)",
 };
 
-export function QuickQuoteForm({ leads, rates, nextCode, leadId, prefill, areaDefault }: { leads: Lead[]; rates: Rate[]; nextCode: string; leadId?: string; prefill?: CustomerDefaults; areaDefault?: string }) {
+export function QuickQuoteForm({ leads, rates, nextCode, leadId, prefill, areaDefault, plan }: { leads: Lead[]; rates: Rate[]; nextCode: string; leadId?: string; prefill?: CustomerDefaults; areaDefault?: string; plan?: { id: string; name: string; monolithic: number; vertical: number } }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [formworkType, setFormworkType] = useState<"monolithic" | "vertical">("monolithic");
   const [areaSqm, setAreaSqm] = useState(areaDefault ?? "");
+  const [areaTouched, setAreaTouched] = useState(false);
+  // area measured on a floor plan follows the formwork type (floor plate vs walls + columns) until typed over
+  function changeType(v: "monolithic" | "vertical") {
+    setFormworkType(v);
+    if (plan && !areaTouched) setAreaSqm(String(v === "vertical" ? plan.vertical : plan.monolithic));
+  }
   const router = useRouter();
 
   const activeRate = rates.find((r) => r.formwork_type === formworkType);
@@ -57,14 +63,20 @@ export function QuickQuoteForm({ leads, rates, nextCode, leadId, prefill, areaDe
         )}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Formwork type</label>
-          <select name="formworkType" value={formworkType} onChange={(e) => setFormworkType(e.target.value as "monolithic" | "vertical")} className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none">
+          <select name="formworkType" value={formworkType} onChange={(e) => changeType(e.target.value as "monolithic" | "vertical")} className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none">
             <option value="monolithic">Full Set (Monolithic)</option>
             <option value="vertical">Vertical Set</option>
           </select>
         </div>
         <div className="col-span-2 flex flex-col gap-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Area (sqm) — {AREA_BASIS_HINT[formworkType]}</label>
-          <input name="areaSqm" type="number" step="0.01" required value={areaSqm} onChange={(e) => setAreaSqm(e.target.value)} placeholder="5000" className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none" />
+          {plan ? (
+            <p className="text-xs text-signal-green">
+              From floor plan “{plan.name}”: floor plate {plan.monolithic.toLocaleString("en-IN")} m² · walls + columns {plan.vertical.toLocaleString("en-IN")} m². The plan is printed on the quotation.
+              <input type="hidden" name="floorPlanId" value={plan.id} />
+            </p>
+          ) : null}
+          <input name="areaSqm" type="number" step="0.01" required value={areaSqm} onChange={(e) => { setAreaSqm(e.target.value); setAreaTouched(true); }} placeholder="5000" className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none" />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Nalco rate ref. (₹/kg, optional)</label>

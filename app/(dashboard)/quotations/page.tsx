@@ -8,8 +8,8 @@ import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Quotations" };
 
-export default async function QuotationsPage({ searchParams }: { searchParams: Promise<{ all?: string; lead?: string; mode?: string }> }) {
-  const { all, lead: leadParam, mode } = await searchParams;
+export default async function QuotationsPage({ searchParams }: { searchParams: Promise<{ all?: string; lead?: string; mode?: string; plan?: string }> }) {
+  const { all, lead: leadParam, mode, plan: planParam } = await searchParams;
   const showAll = all === "1";
   const supabase = await createClient();
   let query = supabase.from("quotations")
@@ -35,6 +35,15 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
         },
         areaSqm: l.estimated_area_sqm != null ? String(l.estimated_area_sqm) : undefined,
       };
+    }
+  }
+  // Opened from a measured floor plan ("Quick quote from this plan"): area comes from the take-off
+  if (fromLead && planParam && /^[0-9a-f-]{36}$/i.test(planParam)) {
+    const { data: fp } = await supabase.from("floor_plans").select("id, name, totals").eq("id", planParam).maybeSingle();
+    const tt = (fp?.totals ?? {}) as Record<string, number>;
+    if (fp && (tt.plan_area > 0 || tt.vertical_area > 0)) {
+      fromLead.plan = { id: fp.id, name: fp.name, monolithic: Number(tt.plan_area ?? 0), vertical: Number(tt.vertical_area ?? 0) };
+      fromLead.areaSqm = String(tt.plan_area ?? "");
     }
   }
   const initialMode = mode === "quick" ? "quick" : fromLead ? "detailed" : undefined;

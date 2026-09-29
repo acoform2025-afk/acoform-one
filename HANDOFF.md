@@ -43,3 +43,14 @@ returns and repairs.
 - Migration 00037: table `quotation_media` (storage_path = `builtin:site/x.jpg` for files shipped in /public/brand, or `<tenant_id>/<file>` in the private storage bucket `quotation-media`, 5 MB, jpg/png), limit trigger, storage RLS by tenant folder.
 - Browser resizes before upload (photos 1600px JPEG, logos 600px PNG) and uploads straight to Storage; server action `addMedia` records the row. PDF route loads them via `lib/quotations/media.ts` (`mediaForPdf`).
 - Per-quotation switch: `quotations.show_references` (default true) via RPC `set_quotation_show_references` (draft/pending only); copied on revisions. UI: `references-toggle.tsx` on the quotation page.
+
+## Floor plans & area take-off (Sep 2026) — sidebar "Floor plans & area"
+- Upload: `/floor-plans/new` (from a lead or quotation). Files: DWG, DXF, PDF, JPG, PNG → private bucket `floor-plans` (`<tenant>/<plan id>/source.*`, 50 MB).
+- DWG: read on the server by GNU **LibreDWG** `dwg2dxf` (open source, GPL-3, built in the Dockerfile's `libredwg` stage, run as a separate program via `lib/floor-plans/dwg.ts`). Original kept as `original.dwg`, converted `source.dxf` used by the viewer. Keep the drawing's own DXF version (forcing `--as r2000` drops entities from 2007+ files). CI job `docker` builds the image so a broken LibreDWG build never deploys.
+- DXF read in the browser with `dxf-parser` (MIT): `lib/floor-plans/dxf.ts` (blocks/INSERTs expanded, arcs/bulges tessellated, units from $INSUNITS). Layers get roles (walls / columns / slab outline / openings / ignore, suggested from layer names) → automatic quantities. "Plan region" box excludes sections/elevations drawn in the same file.
+- PDF rendered with `pdfjs-dist` legacy build (worker via `new URL(...)`); pictures drawn to canvas. Scale set by clicking a known dimension.
+- Tools: Set scale, Measure (use as floor height / slab thickness — for section drawings), Slab area, Opening, Wall (centre line), Column, Select; columns & beams by size tables.
+- Formulas (`lib/floor-plans/calc.ts`, per floor): clear height = floor height − slab; walls = both faces × clear height; columns = perimeter × clear height; slab soffit = plate − column footprints; edges = (slab + opening perimeters) × slab; beams = L × (b + 2 × (D − slab)).
+- Tables/cols (migrations 00038–00039): `floor_plans` (takeoff, totals, preview_path, drawing_type, original_path), `quotations.floor_plan_id`, RPC `set_quotation_floor_plan`, copied on revisions.
+- Quotation: "Use in quotation" on the plan (quick quotes: floor plate → Full set, walls+columns → Vertical set) and "Quick quote from plan" (`/quotations?lead=..&mode=quick&plan=..`). Attached plan prints as page "PROJECT FLOOR PLAN & FORMWORK AREA" (preview.jpg + area table).
+- Panel design hand-off: "Send walls to panel design" turns each drawn wall segment into `design_walls` (height must be 2400–3000 mm); then run the layout engine / BOM in the design.

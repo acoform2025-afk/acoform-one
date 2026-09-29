@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { QuotationDocument, type PdfLine, type PdfQuotation, type PdfCompany } from "@/lib/pdf/quotation-document";
 import { formworkKind, pdfFileName } from "@/lib/quotations/document-content";
 import { mediaForPdf } from "@/lib/quotations/media";
+import { totalsRows, type Totals } from "@/lib/floor-plans/calc";
+import type { PdfFloorPlan } from "@/lib/pdf/quotation-document";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,8 +40,26 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const media = q.show_references === false ? { photos: [], logos: [] } : await mediaForPdf(supabase);
 
+  let plan: PdfFloorPlan | null = null;
+  if (q.floor_plan_id) {
+    const { data: fp } = await supabase.from("floor_plans").select("name, totals, preview_path").eq("id", q.floor_plan_id).maybeSingle();
+    if (fp) {
+      let image: PdfFloorPlan["image"] = null;
+      if (fp.preview_path) {
+        const { data: img } = await supabase.storage.from("floor-plans").download(fp.preview_path);
+        if (img) image = { data: Buffer.from(await img.arrayBuffer()), format: "jpg" };
+      }
+      const t = (fp.totals ?? {}) as Record<string, number> & { params?: { floorHeight?: number; slabMm?: number; floors?: number } };
+      const pr = t.params ?? {};
+      plan = {
+        name: fp.name, image, rows: totalsRows(t as unknown as Partial<Totals>),
+        note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight ?? "-"} m, slab ${pr.slabMm ?? "-"} mm${(pr.floors ?? 1) > 1 ? `, ${pr.floors} floors` : ""}. Final quantities as per approved GFC drawings.`,
+      };
+    }
+  }
+
   const buffer = await renderToBuffer(
-    <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} />,
+    <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} plan={plan} />,
   );
 
   const name = pdfFileName(q.quotation_code, q.revision_no, formworkKind(q.formwork_type), q.quotation_date);

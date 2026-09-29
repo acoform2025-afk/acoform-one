@@ -4,8 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Boxes, Factory, FileText, FolderKanban, LayoutDashboard, LogOut, Menu, Ruler, Settings, Users, X,
-} from "lucide-react";
+  Boxes, Factory, FileText, FolderKanban, LayoutDashboard, LogOut, Menu, Ruler, Settings, Users, X, DraftingCompass } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Item = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
@@ -17,6 +16,7 @@ const NAV: Group[] = [
   { label: "Sales", items: [
     { href: "/leads", label: "Leads", icon: Users },
     { href: "/quotations", label: "Quotations", icon: FileText },
+    { href: "/floor-plans", label: "Floor plans & area", icon: DraftingCompass },
   ] },
   { label: "Engineering", items: [
     { href: "/projects", label: "Projects & designs", icon: FolderKanban },

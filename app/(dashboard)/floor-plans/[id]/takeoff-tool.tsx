@@ -1,0 +1,735 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Check, Crop, Hand, Loader2, MoveVertical, Maximize, Minus, MousePointer2, PenLine, Plus, Ruler, Save, Square, SquareDashed, Trash2, Undo2, X, Columns3,
+} from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import {
+  computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, UNIT_TO_M,
+  type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
+} from "@/lib/floor-plans/calc";
+import { dxfAuto, dxfFrame, drawDxf, readDxf, ROLE_COLOR, snapPoints, type DxfModel } from "@/lib/floor-plans/dxf";
+import { saveTakeoff } from "../actions";
+import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
+import { SendToDesign, type DesignOption } from "./send-to-design";
+
+type Tool = "pan" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column";
+type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
+
+const MAX_SIDE = 2400;
+const SHAPE_STYLE: Record<ShapeKind, { stroke: string; fill: string; label: string }> = {
+  slab: { stroke: "#2563eb", fill: "rgba(37,99,235,0.14)", label: "Slab area" },
+  opening: { stroke: "#9333ea", fill: "rgba(147,51,234,0.22)", label: "Opening / shaft" },
+  wall: { stroke: "#ea580c", fill: "none", label: "Wall" },
+  column: { stroke: "#dc2626", fill: "rgba(220,38,38,0.35)", label: "Column" },
+};
+const TOOL_HINT: Record<Tool, string> = {
+  pan: "Drag to move the plan. Scroll (or use + / −) to zoom.",
+  select: "Click a drawn item to select it, then press Delete to remove it.",
+  calibrate: "Click the two ends of a dimension you know (e.g. a 6000 mm grid line), then type its length.",
+  measure: "Click two points to measure a distance — e.g. floor-to-floor height or slab thickness on a section drawing.",
+  region: "Click two opposite corners around the floor plan. Only drawing inside this box is counted (sections / elevations outside are ignored).",
+  slab: "Click each corner of the slab outline. Click the first point again (or press Enter) to close.",
+  opening: "Click the corners of a shaft / cut-out to deduct it. Click the first point again to close.",
+  wall: "Click along the wall centre line. Double-click or press Enter to finish the wall. Hold Shift for straight lines.",
+  column: "Click two opposite corners of a column.",
+};
+const uid = () => Math.random().toString(36).slice(2, 10);
+const cls = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
+const numIn = "w-full rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-sm text-graphite-100 focus:border-brand-orange focus:outline-none";
+
+function normalise(t: Partial<Takeoff> | null): Takeoff {
+  const e = emptyTakeoff();
+  return {
+    ...e, ...(t ?? {}), v: 1,
+    params: { ...e.params, ...(t?.params ?? {}) },
+    shapes: Array.isArray(t?.shapes) ? t!.shapes : [], columns: Array.isArray(t?.columns) ? t!.columns : [], beams: Array.isArray(t?.beams) ? t!.beams : [],
+  };
+}
+
+export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null }) {
+  const router = useRouter();
+  const stageRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const modelRef = useRef<DxfModel | null>(null);
+  const frameRef = useRef<ReturnType<typeof dxfFrame> | null>(null);
+  const snapRef = useRef<Pt[]>([]);
+
+  const [t, setT] = useState<Takeoff>(() => normalise(plan.takeoff));
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [pdfPages, setPdfPages] = useState(1);
+  const [layers, setLayers] = useState<DxfModel["layers"]>([]);
+  const [unitsGuessed, setUnitsGuessed] = useState(false);
+  const [tool, setTool] = useState<Tool>(canEdit ? "slab" : "pan");
+  const [draft, setDraft] = useState<Pt[]>([]);
+  const [hover, setHover] = useState<{ pt: Pt; snapped: boolean } | null>(null);
+  const [view, setView] = useState({ k: 1, x: 0, y: 0 });
+  const [selected, setSelected] = useState<string | null>(null);
+  const [calibMm, setCalibMm] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok?: string; error?: string } | null>(null);
+  const [layerVersion, setLayerVersion] = useState(0);
+
+  const isDxf = plan.source_kind === "dxf";
+  const update = useCallback((fn: (p: Takeoff) => Takeoff) => { setT((p) => fn(p)); setDirty(true); setMsg(null); }, []);
+
+  /* ---------- load the plan picture ---------- */
+  const fit = useCallback((w: number, h: number) => {
+    const st = stageRef.current; if (!st) return;
+    const r = st.getBoundingClientRect();
+    const k = Math.min(r.width / w, r.height / h) * 0.95;
+    setView({ k, x: (r.width - w * k) / 2, y: (r.height - h * k) / 2 });
+  }, []);
+
+  const rescaleTo = useCallback((w: number, h: number) => {
+    setT((p) => {
+      const old = p.image; if (!old || (old.w === w && old.h === h) || isDxf) return { ...p, image: { ...(p.image ?? {}), w, h } };
+      const f = w / old.w; // same page rendered at a different size → keep drawings in place
+      const sc = (q: Pt): Pt => [q[0] * f, q[1] * f];
+      return {
+        ...p, image: { ...old, w, h },
+        shapes: p.shapes.map((s) => ({ ...s, pts: s.pts.map(sc) })),
+        metersPerPx: p.metersPerPx ? p.metersPerPx / f : p.metersPerPx,
+        calib: p.calib ? { ...p.calib, p1: sc(p.calib.p1), p2: sc(p.calib.p2) } : p.calib,
+      };
+    });
+  }, [isDxf]);
+
+  const drawDxfNow = useCallback((roles: Record<string, LayerRole>) => {
+    const m = modelRef.current, f = frameRef.current, c = canvasRef.current; if (!m || !f || !c) return;
+    const ctx = c.getContext("2d"); if (!ctx) return;
+    drawDxf(ctx, m, roles, f);
+    snapRef.current = snapPoints(m, f, roles);
+  }, []);
+
+  const loadPdfPage = useCallback(async (buf: ArrayBuffer, pageNo: number) => {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(buf.slice(0)), isEvalSupported: false }).promise;
+    setPdfPages(doc.numPages);
+    const page = await doc.getPage(Math.min(Math.max(1, pageNo), doc.numPages));
+    const v1 = page.getViewport({ scale: 1 });
+    const scale = MAX_SIDE / Math.max(v1.width, v1.height);
+    const vp = page.getViewport({ scale });
+    const c = canvasRef.current!; c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const ctx = c.getContext("2d")!; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    return { w: c.width, h: c.height };
+  }, []);
+
+  const pdfBuf = useRef<ArrayBuffer | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(plan.file_url);
+        if (!res.ok) throw new Error("Could not download the plan file.");
+        let dims: { w: number; h: number };
+        if (plan.source_kind === "dxf") {
+          const model = readDxf(await res.text());
+          if (cancelled) return;
+          modelRef.current = model;
+          const saved = normalise(plan.takeoff);
+          const roles: Record<string, LayerRole> = {};
+          for (const l of model.layers) roles[l.name] = saved.dxf?.layerRoles?.[l.name] ?? l.suggested;
+          const units = (saved.dxf?.units ?? model.units) as DxfUnits;
+          const frame = dxfFrame(model, MAX_SIDE); frameRef.current = frame;
+          const c = canvasRef.current!; c.width = frame.width; c.height = frame.height;
+          drawDxfNow(roles);
+          setLayers(model.layers); setUnitsGuessed(model.unitsGuessed && !saved.dxf?.units);
+          setT((p) => ({ ...p, dxf: { units, layerRoles: roles, wallsDrawn: p.dxf?.wallsDrawn ?? "faces" }, metersPerPx: frame.unitsPerPx * UNIT_TO_M[units] }));
+          dims = { w: frame.width, h: frame.height };
+        } else if (plan.source_kind === "pdf") {
+          pdfBuf.current = await res.arrayBuffer();
+          dims = await loadPdfPage(pdfBuf.current, normalise(plan.takeoff).image?.page ?? 1);
+        } else {
+          const blob = await res.blob();
+          const bmp = await createImageBitmap(blob);
+          const s = Math.min(1, 3000 / Math.max(bmp.width, bmp.height));
+          const c = canvasRef.current!; c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+          c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
+          dims = { w: c.width, h: c.height };
+        }
+        if (cancelled) return;
+        rescaleTo(dims.w, dims.h);
+        setSize(dims);
+        requestAnimationFrame(() => fit(dims.w, dims.h));
+      } catch (e) {
+        if (!cancelled) setLoadErr(e instanceof Error ? e.message : "Could not open this floor plan.");
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan.file_url]);
+
+  // re-draw DXF when layer roles change
+  useEffect(() => { if (isDxf && t.dxf) drawDxfNow(t.dxf.layerRoles); }, [isDxf, layerVersion, drawDxfNow]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function changePdfPage(n: number) {
+    if (!pdfBuf.current) return;
+    if (t.shapes.length && !window.confirm("Changing the page clears the scale and all measurements on this plan. Continue?")) return;
+    const dims = await loadPdfPage(pdfBuf.current, n);
+    update((p) => ({ ...p, image: { ...dims, page: n }, shapes: [], metersPerPx: null, calib: undefined }));
+    setSize(dims); fit(dims.w, dims.h);
+  }
+
+  /* ---------- quantities ---------- */
+  const auto: DxfAuto | null = useMemo(() => {
+    if (!isDxf || !modelRef.current || !t.dxf) return null;
+    const reg = t.dxf.region, f = frameRef.current;
+    const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDxf, t.dxf, size]);
+  const totals: Totals = useMemo(() => computeTotals(t, auto), [t, auto]);
+  const mpp = t.metersPerPx;
+
+  /* ---------- pointer maths ---------- */
+  const toImg = (cx: number, cy: number): Pt => {
+    const r = stageRef.current!.getBoundingClientRect();
+    return [(cx - r.left - view.x) / view.k, (cy - r.top - view.y) / view.k];
+  };
+  const snap = (p: Pt, shift: boolean): { pt: Pt; snapped: boolean } => {
+    let q: Pt = p;
+    const last = draft[draft.length - 1];
+    if (shift && last) q = Math.abs(p[0] - last[0]) > Math.abs(p[1] - last[1]) ? [p[0], last[1]] : [last[0], p[1]];
+    const tol = 10 / view.k;
+    let best: Pt | null = null, bd = tol;
+    const consider = (c: Pt) => { const d = Math.hypot(c[0] - q[0], c[1] - q[1]); if (d < bd) { bd = d; best = c; } };
+    if (draft.length >= 3 && (tool === "slab" || tool === "opening")) consider(draft[0]);
+    for (const s of t.shapes) for (const c of s.pts) consider(c);
+    for (const c of snapRef.current) consider(c);
+    if (best && !(shift && last)) return { pt: best, snapped: true };
+    return { pt: q, snapped: false };
+  };
+
+  const finishShape = useCallback((kind: ShapeKind, pts: Pt[]) => {
+    const clean = pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 0.5);
+    if (kind === "wall" ? clean.length < 2 : clean.length < 3) { setDraft([]); return; }
+    if (kind !== "wall" && polyArea(clean) < 1) { setDraft([]); return; }
+    update((p) => ({ ...p, shapes: [...p.shapes, { id: uid(), kind, pts: clean }] }));
+    setDraft([]);
+  }, [update]);
+
+  function click(p: Pt) {
+    if (!canEdit) return;
+    if (tool === "select") {
+      const hit = [...t.shapes].reverse().find((s) => hitTest(s, p, 8 / view.k));
+      setSelected(hit?.id ?? null); return;
+    }
+    if (tool === "calibrate" || tool === "measure") { setDraft((d) => (d.length >= 2 ? [p] : [...d, p])); return; }
+    if (tool === "region") {
+      if (draft.length === 0) { setDraft([p]); return; }
+      const a = draft[0];
+      const r: [number, number, number, number] = [Math.min(a[0], p[0]), Math.min(a[1], p[1]), Math.max(a[0], p[0]), Math.max(a[1], p[1])];
+      if (r[2] - r[0] > 5 && r[3] - r[1] > 5) update((pp) => ({ ...pp, dxf: pp.dxf ? { ...pp.dxf, region: r } : pp.dxf }));
+      setDraft([]); return;
+    }
+    if (tool === "column") {
+      if (draft.length === 0) { setDraft([p]); return; }
+      const a = draft[0];
+      finishShape("column", [a, [p[0], a[1]], p, [a[0], p[1]]]); return;
+    }
+    if (tool === "slab" || tool === "opening") {
+      if (draft.length >= 3 && Math.hypot(p[0] - draft[0][0], p[1] - draft[0][1]) < 10 / view.k) { finishShape(tool, draft); return; }
+      setDraft((d) => [...d, p]); return;
+    }
+    if (tool === "wall") setDraft((d) => [...d, p]);
+  }
+
+  function finishDraft() {
+    if (tool === "slab" || tool === "opening" || tool === "wall") finishShape(tool, draft);
+  }
+
+  /* ---------- mouse / touch ---------- */
+  const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean; pan: boolean } | null>(null);
+  const spaceDown = useRef(false);
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (!size) return;
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    const pan = tool === "pan" || e.button === 1 || e.button === 2 || spaceDown.current;
+    drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false, pan };
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (!size) return;
+    const d = drag.current;
+    if (d) {
+      const dx = e.clientX - d.x, dy = e.clientY - d.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
+      if (d.moved && (d.pan || e.pointerType === "touch")) { d.pan = true; setView((v) => ({ ...v, x: d.vx + dx, y: d.vy + dy })); return; }
+    }
+    if (tool !== "pan") setHover(snap(toImg(e.clientX, e.clientY), e.shiftKey));
+  }
+  function onPointerUp(e: React.PointerEvent) {
+    const d = drag.current; drag.current = null;
+    if (!d || d.pan || d.moved || e.button !== 0) return;
+    click(snap(toImg(e.clientX, e.clientY), e.shiftKey).pt);
+  }
+  function zoomAt(factor: number, cx?: number, cy?: number) {
+    const r = stageRef.current!.getBoundingClientRect();
+    const px = cx ?? r.left + r.width / 2, py = cy ?? r.top + r.height / 2;
+    setView((v) => {
+      const k = Math.min(40, Math.max(0.02, v.k * factor));
+      const ix = (px - r.left - v.x) / v.k, iy = (py - r.top - v.y) / v.k;
+      return { k, x: px - r.left - ix * k, y: py - r.top - iy * k };
+    });
+  }
+  useEffect(() => {
+    const st = stageRef.current; if (!st) return;
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); };
+    st.addEventListener("wheel", onWheel, { passive: false });
+    return () => st.removeEventListener("wheel", onWheel);
+  });
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest("input,textarea,select")) return;
+      if (e.code === "Space") { spaceDown.current = true; e.preventDefault(); }
+      if (e.key === "Escape") { setDraft([]); setSelected(null); }
+      if (e.key === "Enter") finishDraft();
+      if (e.key === "Backspace" && draft.length) { e.preventDefault(); setDraft((d) => d.slice(0, -1)); }
+      if ((e.key === "Delete" || e.key === "Backspace") && selected && !draft.length) { update((p) => ({ ...p, shapes: p.shapes.filter((s) => s.id !== selected) })); setSelected(null); }
+    };
+    const up = (e: KeyboardEvent) => { if (e.code === "Space") spaceDown.current = false; };
+    window.addEventListener("keydown", down); window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  });
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  /* ---------- calibration ---------- */
+  const measureM = tool === "measure" && draft.length === 2 && mpp ? Math.hypot(draft[1][0] - draft[0][0], draft[1][1] - draft[0][1]) * mpp : 0;
+  const calibPx = tool === "calibrate" && draft.length === 2 ? Math.hypot(draft[1][0] - draft[0][0], draft[1][1] - draft[0][1]) : 0;
+  function applyCalib() {
+    const mm = Number(calibMm);
+    if (!(mm > 0) || !(calibPx > 0)) return;
+    const [p1, p2] = draft;
+    update((p) => ({ ...p, metersPerPx: mm / 1000 / calibPx, calib: { p1, p2, mm } }));
+    setDraft([]); setCalibMm(""); setTool("slab");
+  }
+
+  /* ---------- save ---------- */
+  async function save() {
+    if (!size || !canvasRef.current) return;
+    setSaving(true); setMsg(null);
+    try {
+      const blob = await renderPreview(canvasRef.current, t, size, isDxf);
+      const path = `${tenantId}/${plan.id}/preview.jpg`;
+      const up = await createClient().storage.from("floor-plans").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+      if (up.error) throw new Error("Could not save the plan picture: " + up.error.message);
+      const res = await saveTakeoff(plan.id, { ...t, image: { ...(t.image ?? {}), w: size.w, h: size.h } }, totals, path);
+      if (res.error) throw new Error(res.error);
+      setDirty(false); setMsg({ ok: "Saved." });
+      router.refresh();
+    } catch (e) {
+      setMsg({ error: e instanceof Error ? e.message : "Could not save." });
+    } finally { setSaving(false); }
+  }
+
+  /* ---------- render ---------- */
+  const k = view.k;
+  const sw = 2 / k;
+  const needScale = !isDxf && !mpp;
+  const tools: { id: Tool; label: string; icon: React.ReactNode; show: boolean }[] = [
+    { id: "pan", label: "Move", icon: <Hand className="size-4" />, show: true },
+    { id: "calibrate", label: "Set scale", icon: <Ruler className="size-4" />, show: canEdit && !isDxf },
+    { id: "measure", label: "Measure", icon: <MoveVertical className="size-4" />, show: true },
+    { id: "region", label: "Plan region", icon: <Crop className="size-4" />, show: canEdit && isDxf },
+    { id: "slab", label: "Slab area", icon: <Square className="size-4" />, show: canEdit },
+    { id: "opening", label: "Opening", icon: <SquareDashed className="size-4" />, show: canEdit },
+    { id: "wall", label: "Wall", icon: <PenLine className="size-4" />, show: canEdit },
+    { id: "column", label: "Column", icon: <Columns3 className="size-4" />, show: canEdit },
+    { id: "select", label: "Select", icon: <MousePointer2 className="size-4" />, show: canEdit },
+  ];
+  const draftPreview: Pt[] = hover && draft.length && tool !== "select" && tool !== "pan"
+    ? tool === "column" || tool === "region" ? [draft[0], [hover.pt[0], draft[0][1]], hover.pt, [draft[0][0], hover.pt[1]]] : (tool === "measure" || tool === "calibrate") && draft.length >= 2 ? draft : [...draft, hover.pt]
+    : draft;
+  const liveLabel = (() => {
+    if (!hover || !draft.length || !mpp) return null;
+    if (tool === "region") return null;
+    if (tool === "wall" || tool === "calibrate" || tool === "measure") return fmtLen(shapeMeasure({ id: "", kind: "wall", pts: draftPreview }, mpp).length);
+    if (tool === "column") { const [a, , c] = draftPreview; return `${Math.round(Math.abs(c[0] - a[0]) * mpp * 1000)} × ${Math.round(Math.abs(c[1] - a[1]) * mpp * 1000)} mm`; }
+    if (draftPreview.length >= 3) return fmtArea(polyArea(draftPreview) * mpp * mpp);
+    return null;
+  })();
+
+  return (
+    <div className="flex flex-col gap-4 xl:flex-row">
+      {/* drawing area */}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1 rounded-t-lg border border-b-0 border-graphite-800 bg-graphite-900 p-1.5">
+          {tools.filter((x) => x.show).map((x) => (
+            <button key={x.id} type="button" onClick={() => { setTool(x.id); setDraft([]); setSelected(null); }}
+              className={cls("inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium", tool === x.id ? "bg-brand-orange text-white" : "text-graphite-300 hover:bg-graphite-800")}>
+              {x.icon}{x.label}
+            </button>
+          ))}
+          <span className="mx-1 h-5 w-px bg-graphite-700" />
+          <IconBtn label="Zoom out" onClick={() => zoomAt(1 / 1.3)}><Minus className="size-4" /></IconBtn>
+          <IconBtn label="Zoom in" onClick={() => zoomAt(1.3)}><Plus className="size-4" /></IconBtn>
+          <IconBtn label="Fit to screen" onClick={() => size && fit(size.w, size.h)}><Maximize className="size-4" /></IconBtn>
+          {draft.length > 0 && tool !== "calibrate" && tool !== "measure" && tool !== "region" ? (
+            <>
+              <span className="mx-1 h-5 w-px bg-graphite-700" />
+              {tool !== "column" ? <button type="button" onClick={finishDraft} className="inline-flex items-center gap-1 rounded-md bg-signal-green/15 px-2.5 py-1.5 text-xs font-medium text-signal-green"><Check className="size-4" />Finish</button> : null}
+              <IconBtn label="Undo last point" onClick={() => setDraft((d) => d.slice(0, -1))}><Undo2 className="size-4" /></IconBtn>
+              <IconBtn label="Cancel" onClick={() => setDraft([])}><X className="size-4" /></IconBtn>
+            </>
+          ) : null}
+          {selected ? (
+            <button type="button" onClick={() => { update((p) => ({ ...p, shapes: p.shapes.filter((s) => s.id !== selected) })); setSelected(null); }}
+              className="ml-1 inline-flex items-center gap-1 rounded-md bg-signal-red/15 px-2.5 py-1.5 text-xs font-medium text-signal-red"><Trash2 className="size-4" />Delete selected</button>
+          ) : null}
+        </div>
+        <p className="border-x border-graphite-800 bg-graphite-900 px-3 pb-2 text-xs text-graphite-400">
+          {needScale && canEdit && tool !== "calibrate" ? <span className="font-medium text-signal-amber">First set the scale: choose “Set scale” and click a dimension you know. </span> : null}
+          {TOOL_HINT[tool]}
+        </p>
+
+        <div
+          ref={stageRef}
+          className={cls("relative h-[62vh] min-h-[380px] touch-none select-none overflow-hidden rounded-b-lg border border-graphite-800 bg-[#e9eaec]",
+            tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-pointer" : "cursor-crosshair")}
+          onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+          onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "slab" || tool === "opening") finishDraft(); }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {!size && !loadErr ? <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-graphite-600"><Loader2 className="size-5 animate-spin" />Opening floor plan…</div> : null}
+          {loadErr ? <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-signal-red">{loadErr}</div> : null}
+          <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${k})`, width: size?.w, height: size?.h }}>
+            <canvas ref={canvasRef} className="block shadow-md" style={{ width: size?.w, height: size?.h, background: "#fff" }} />
+            {size ? (
+              <svg className="pointer-events-none absolute inset-0" width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`}>
+                {t.shapes.map((s) => {
+                  const st = SHAPE_STYLE[s.kind]; const sel = s.id === selected;
+                  const d = s.pts.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ") + (s.kind === "wall" ? "" : " Z");
+                  const m = mpp ? shapeMeasure(s, mpp) : null;
+                  const c = centroid(s.pts);
+                  return (
+                    <g key={s.id}>
+                      <path d={d} fill={st.fill} stroke={sel ? "#facc15" : st.stroke} strokeWidth={(s.kind === "wall" ? 3 : 2) * sw * (sel ? 1.6 : 1)} strokeLinejoin="round" strokeDasharray={s.kind === "opening" ? `${6 * sw} ${4 * sw}` : undefined} />
+                      {m && s.kind !== "column" ? (
+                        <text x={c[0]} y={c[1]} fontSize={12 / k} textAnchor="middle" dominantBaseline="middle" fill={st.stroke} stroke="#fff" strokeWidth={3 / k} paintOrder="stroke" fontWeight={600}>
+                          {s.kind === "wall" ? fmtLen(m.length) : `${s.kind === "opening" ? "−" : ""}${fmtArea(m.area)}`}
+                        </text>
+                      ) : null}
+                    </g>
+                  );
+                })}
+                {isDxf && t.dxf?.region ? (
+                  <g>
+                    <rect x={t.dxf.region[0]} y={t.dxf.region[1]} width={t.dxf.region[2] - t.dxf.region[0]} height={t.dxf.region[3] - t.dxf.region[1]} fill="none" stroke="#059669" strokeWidth={2 * sw} strokeDasharray={`${8 * sw} ${5 * sw}`} />
+                    <text x={t.dxf.region[0] + 6 / k} y={t.dxf.region[1] - 6 / k} fontSize={12 / k} fill="#059669" stroke="#fff" strokeWidth={3 / k} paintOrder="stroke" fontWeight={600}>Plan region (counted)</text>
+                  </g>
+                ) : null}
+                {t.calib && !isDxf ? (
+                  <g opacity={0.8}>
+                    <line x1={t.calib.p1[0]} y1={t.calib.p1[1]} x2={t.calib.p2[0]} y2={t.calib.p2[1]} stroke="#059669" strokeWidth={2 * sw} strokeDasharray={`${4 * sw} ${3 * sw}`} />
+                    <text x={(t.calib.p1[0] + t.calib.p2[0]) / 2} y={(t.calib.p1[1] + t.calib.p2[1]) / 2 - 8 / k} fontSize={11 / k} textAnchor="middle" fill="#059669" stroke="#fff" strokeWidth={3 / k} paintOrder="stroke">scale {t.calib.mm} mm</text>
+                  </g>
+                ) : null}
+                {draftPreview.length ? (
+                  <g>
+                    <path d={draftPreview.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ") + (tool === "column" || tool === "region" ? " Z" : "")}
+                      fill={tool === "slab" || tool === "opening" || tool === "column" ? SHAPE_STYLE[tool as ShapeKind].fill : "none"}
+                      stroke={tool === "calibrate" || tool === "measure" || tool === "region" ? "#059669" : SHAPE_STYLE[(tool === "select" || tool === "pan" ? "slab" : tool) as ShapeKind]?.stroke ?? "#059669"}
+                      strokeWidth={2 * sw} strokeDasharray={`${5 * sw} ${3 * sw}`} />
+                    {draft.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={4 / k} fill="#fff" stroke="#111" strokeWidth={1.5 / k} />)}
+                  </g>
+                ) : null}
+                {hover && tool !== "pan" && tool !== "select" ? (
+                  <g>
+                    <circle cx={hover.pt[0]} cy={hover.pt[1]} r={(hover.snapped ? 6 : 3) / k} fill={hover.snapped ? "rgba(16,185,129,0.25)" : "#111"} stroke={hover.snapped ? "#059669" : "none"} strokeWidth={1.5 / k} />
+                    {liveLabel ? <text x={hover.pt[0] + 12 / k} y={hover.pt[1] - 12 / k} fontSize={13 / k} fill="#111" stroke="#fff" strokeWidth={3 / k} paintOrder="stroke" fontWeight={700}>{liveLabel}</text> : null}
+                  </g>
+                ) : null}
+              </svg>
+            ) : null}
+          </div>
+
+          {tool === "calibrate" && draft.length === 2 ? (
+            <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-graphite-700 bg-graphite-950 p-2 shadow-lg" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+              <span className="text-xs text-graphite-300">Real length of this line</span>
+              <input autoFocus type="number" min={1} value={calibMm} onChange={(e) => setCalibMm(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyCalib(); }} placeholder="e.g. 6000" className="w-28 rounded border border-graphite-700 bg-graphite-900 px-2 py-1 text-sm text-graphite-100" />
+              <span className="text-xs text-graphite-400">mm</span>
+              <button type="button" onClick={applyCalib} disabled={!(Number(calibMm) > 0)} className="rounded bg-brand-orange px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50">Set scale</button>
+              <button type="button" onClick={() => setDraft([])} className="text-xs text-graphite-400 hover:text-graphite-200">Cancel</button>
+            </div>
+          ) : null}
+          {tool === "measure" && draft.length === 2 ? (
+            <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-lg border border-graphite-700 bg-graphite-950 p-2 shadow-lg" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+              {mpp ? (
+                <>
+                  <span className="font-mono text-sm font-semibold text-graphite-50">{Math.round(measureM * 1000).toLocaleString("en-IN")} mm</span>
+                  {canEdit ? (
+                    <>
+                      <button type="button" onClick={() => { update((p) => ({ ...p, params: { ...p.params, floorHeight: Math.round(measureM * 1000) / 1000 } })); setDraft([]); }} className="rounded bg-brand-orange px-2.5 py-1 text-xs font-medium text-white">Use as floor height</button>
+                      <button type="button" onClick={() => { update((p) => ({ ...p, params: { ...p.params, slabMm: Math.round(measureM * 1000) } })); setDraft([]); }} className="rounded border border-graphite-700 px-2.5 py-1 text-xs text-graphite-200">Use as slab thickness</button>
+                    </>
+                  ) : null}
+                </>
+              ) : <span className="text-xs text-signal-amber">Set the scale first.</span>}
+              <button type="button" onClick={() => setDraft([])} className="text-xs text-graphite-400 hover:text-graphite-200">Close</button>
+            </div>
+          ) : null}
+        </div>
+
+        {/* legend */}
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-graphite-500">
+          {(Object.keys(SHAPE_STYLE) as ShapeKind[]).map((kk) => (
+            <span key={kk} className="inline-flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-sm" style={{ background: SHAPE_STYLE[kk].stroke }} />{SHAPE_STYLE[kk].label}</span>
+          ))}
+          {isDxf ? <span>· DXF layers are coloured by the role you choose on the right.</span> : null}
+        </div>
+      </div>
+
+      {/* side panel */}
+      <aside className="w-full shrink-0 space-y-4 xl:w-[360px]">
+        {canEdit ? (
+          <div className="flex items-center gap-2 rounded-lg border border-graphite-800 bg-graphite-900 p-3">
+            <button type="button" onClick={save} disabled={saving || !size} className="inline-flex items-center gap-2 rounded-md bg-brand-orange px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}{saving ? "Saving…" : "Save measurements"}
+            </button>
+            <span className={cls("text-xs", msg?.error ? "text-signal-red" : dirty ? "text-signal-amber" : "text-signal-green")}>
+              {msg?.error ?? (dirty ? "Unsaved changes" : msg?.ok ?? "All saved")}
+            </span>
+          </div>
+        ) : null}
+
+        <Panel title="Scale & heights">
+          {isDxf && t.dxf ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Drawing units">
+                <select value={t.dxf.units} disabled={!canEdit} className={numIn}
+                  onChange={(e) => { const u = e.target.value as DxfUnits; update((p) => ({ ...p, dxf: { ...p.dxf!, units: u }, metersPerPx: (frameRef.current?.unitsPerPx ?? 0) * UNIT_TO_M[u] })); setUnitsGuessed(false); }}>
+                  <option value="mm">millimetres</option><option value="cm">centimetres</option><option value="m">metres</option><option value="in">inches</option><option value="ft">feet</option>
+                </select>
+              </Field>
+              <Field label="Walls drawn as">
+                <select value={t.dxf.wallsDrawn} disabled={!canEdit} className={numIn} onChange={(e) => update((p) => ({ ...p, dxf: { ...p.dxf!, wallsDrawn: e.target.value as "faces" | "centre" } }))}>
+                  <option value="faces">both faces (2 lines)</option><option value="centre">single centre line</option>
+                </select>
+              </Field>
+              {unitsGuessed ? <p className="col-span-2 text-xs text-signal-amber">The file doesn&apos;t say its units — we guessed {t.dxf.units}. Check one known dimension.</p> : null}
+            </div>
+          ) : (
+            <p className="text-xs text-graphite-400">
+              {mpp ? <>Scale set{t.calib ? ` from a ${t.calib.mm} mm line` : ""}: 1 px = {(mpp * 1000).toFixed(1)} mm. </> : <span className="text-signal-amber">Scale not set yet. </span>}
+              {canEdit ? <button type="button" onClick={() => { setTool("calibrate"); setDraft([]); }} className="text-brand-orange hover:underline">{mpp ? "Re-set scale" : "Set scale"}</button> : null}
+            </p>
+          )}
+          {plan.source_kind === "pdf" && pdfPages > 1 ? (
+            <Field label={`PDF page (of ${pdfPages})`}>
+              <select value={t.image?.page ?? 1} disabled={!canEdit} className={numIn} onChange={(e) => changePdfPage(Number(e.target.value))}>
+                {Array.from({ length: pdfPages }, (_, i) => <option key={i} value={i + 1}>Page {i + 1}</option>)}
+              </select>
+            </Field>
+          ) : null}
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <Field label="Floor height (m)"><NumInput value={t.params.floorHeight} step={0.05} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floorHeight: v } }))} /></Field>
+            <Field label="Slab (mm)"><NumInput value={t.params.slabMm} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, slabMm: v } }))} /></Field>
+            <Field label="No. of floors"><NumInput value={t.params.floors} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floors: Math.max(1, Math.round(v)) } }))} /></Field>
+          </div>
+          <p className="mt-1.5 text-[11px] text-graphite-500">Walls and columns are shuttered to the slab bottom: clear height {totals.clear_height} m.</p>
+        </Panel>
+
+        {isDxf && t.dxf && layers.length ? (
+          <Panel title={`DXF layers (${layers.length})`} hint="Tell the app what each layer is. Areas and lengths are then read automatically.">
+            <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
+              {layers.map((l) => {
+                const role = t.dxf!.layerRoles[l.name] ?? "ignore";
+                return (
+                  <div key={l.name} className="flex items-center gap-2">
+                    <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: ROLE_COLOR[role] }} />
+                    <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({l.count})</span></span>
+                    <select value={role} disabled={!canEdit} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-0.5 text-xs text-graphite-100"
+                      onChange={(e) => { const r = e.target.value as LayerRole; update((p) => ({ ...p, dxf: { ...p.dxf!, layerRoles: { ...p.dxf!.layerRoles, [l.name]: r } } })); setLayerVersion((v) => v + 1); }}>
+                      <option value="ignore">Ignore</option><option value="slab">Slab outline</option><option value="opening">Openings</option><option value="walls">Walls</option><option value="columns">Columns</option>
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[11px] text-graphite-500">
+              {t.dxf.region ? <>Counting only inside the green plan region. {canEdit ? <button type="button" className="text-brand-orange hover:underline" onClick={() => update((p) => ({ ...p, dxf: p.dxf ? { ...p.dxf, region: null } : p.dxf }))}>Clear region</button> : null}</>
+                : <>Whole drawing is counted. If the file also has sections or elevations, use <b>Plan region</b> to box the floor plan.</>}
+            </p>
+            {auto ? (
+              <p className="mt-2 text-[11px] text-graphite-500">
+                Read from layers: slab {fmtArea(auto.slabArea)}, openings {fmtArea(auto.openingArea)}, wall lines {fmtLen(auto.wallLineLength)}, {auto.columns.length} columns.
+              </p>
+            ) : null}
+          </Panel>
+        ) : null}
+
+        <Panel title={`Drawn on the plan (${t.shapes.length})`}>
+          {t.shapes.length === 0 ? <p className="text-xs text-graphite-500">Nothing drawn yet. Use Slab area, Opening, Wall or Column above the plan.</p> : (
+            <ul className="max-h-48 space-y-1 overflow-y-auto pr-1 text-xs">
+              {t.shapes.map((s, i) => {
+                const m = mpp ? shapeMeasure(s, mpp) : null;
+                return (
+                  <li key={s.id} className={cls("flex items-center gap-2 rounded px-1.5 py-1", s.id === selected && "bg-graphite-800")}>
+                    <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: SHAPE_STYLE[s.kind].stroke }} />
+                    <button type="button" className="flex-1 text-left text-graphite-200" onClick={() => { setSelected(s.id); setTool("select"); }}>{SHAPE_STYLE[s.kind].label} {i + 1}</button>
+                    <span className="font-mono text-graphite-400">{m ? (s.kind === "wall" ? fmtLen(m.length) : s.kind === "column" ? colSize(s.pts, mpp!) : fmtArea(m.area)) : "—"}</span>
+                    {canEdit ? <button type="button" aria-label="Delete" onClick={() => update((p) => ({ ...p, shapes: p.shapes.filter((x) => x.id !== s.id) }))} className="text-graphite-500 hover:text-signal-red"><Trash2 className="size-3.5" /></button> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel title="Columns by size" hint="Add columns you didn't draw (typed from the column schedule).">
+          <RowsEditor
+            rows={t.columns} disabled={!canEdit}
+            cols={[{ k: "w_mm", label: "Width mm" }, { k: "d_mm", label: "Depth mm" }, { k: "qty", label: "Nos." }]}
+            blank={{ w_mm: 230, d_mm: 600, qty: 1 }}
+            onChange={(rows) => update((p) => ({ ...p, columns: rows }))}
+          />
+        </Panel>
+
+        <Panel title="Beams" hint="Area = length × (width + 2 × depth below slab).">
+          <RowsEditor
+            rows={t.beams} disabled={!canEdit}
+            cols={[{ k: "width_mm", label: "Width mm" }, { k: "depth_mm", label: "Depth mm" }, { k: "length_m", label: "Length m" }, { k: "qty", label: "Nos." }]}
+            blank={{ width_mm: 230, depth_mm: 450, length_m: 5, qty: 1 }}
+            onChange={(rows) => update((p) => ({ ...p, beams: rows }))}
+          />
+        </Panel>
+
+        <Panel title="Formwork area (per floor)">
+          <table className="w-full text-xs">
+            <tbody className="divide-y divide-graphite-800">
+              <TRow k="Floor plate area" v={fmtArea(totals.plan_area)} strong />
+              <TRow k="Slab soffit" v={fmtArea(totals.slab_soffit)} />
+              <TRow k="Slab & opening edges" v={fmtArea(totals.slab_edge)} />
+              <TRow k={`Walls · ${fmtLen(totals.wall_length)}`} v={fmtArea(totals.wall_area)} />
+              <TRow k={`Columns · ${totals.column_count} nos.`} v={fmtArea(totals.column_area)} />
+              <TRow k="Beams" v={fmtArea(totals.beam_area)} />
+              <TRow k="Vertical (walls + columns)" v={fmtArea(totals.vertical_area)} />
+              <TRow k="Total contact area" v={fmtArea(totals.contact_area)} strong />
+              {totals.floors > 1 ? <TRow k={`All ${totals.floors} floors`} v={fmtArea(totals.contact_area * totals.floors)} /> : null}
+            </tbody>
+          </table>
+          {totals.column_sizes.length ? (
+            <p className="mt-2 text-[11px] text-graphite-500">Column sizes: {totals.column_sizes.map((c) => `${c.qty} × ${c.size}`).join(", ")}</p>
+          ) : null}
+          {needScale && t.shapes.length ? <p className="mt-2 text-xs text-signal-amber">Set the scale to see areas of drawn items.</p> : null}
+        </Panel>
+
+        <UseInQuotation planId={plan.id} lead={plan.lead} quotes={quotes} totals={totals} dirty={dirty} canEdit={canEdit} />
+        {designs ? <SendToDesign planId={plan.id} designs={designs} dirty={dirty} wallSegments={t.shapes.filter((s) => s.kind === "wall").reduce((n, s) => n + Math.max(0, s.pts.length - 1), 0)} /> : null}
+      </aside>
+    </div>
+  );
+}
+
+/* ---------- helpers ---------- */
+function colSize(pts: Pt[], mpp: number) {
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  return `${Math.round((Math.max(...xs) - Math.min(...xs)) * mpp * 1000)} × ${Math.round((Math.max(...ys) - Math.min(...ys)) * mpp * 1000)} mm`;
+}
+function centroid(pts: Pt[]): Pt {
+  if (pts.length === 2) return [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2];
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+}
+function distSeg(p: Pt, a: Pt, b: Pt) {
+  const dx = b[0] - a[0], dy = b[1] - a[1]; const l2 = dx * dx + dy * dy;
+  const tt = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(p[0] - (a[0] + tt * dx), p[1] - (a[1] + tt * dy));
+}
+function hitTest(s: Shape, p: Pt, tol: number) {
+  if (s.kind === "wall") return s.pts.some((q, i) => i > 0 && distSeg(p, s.pts[i - 1], q) < tol);
+  let c = false;
+  for (let i = 0, j = s.pts.length - 1; i < s.pts.length; j = i++) {
+    const [xi, yi] = s.pts[i], [xj, yj] = s.pts[j];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c || s.pts.some((q, i) => distSeg(p, s.pts[(i + s.pts.length - 1) % s.pts.length], q) < tol);
+}
+
+/** Plan picture with the measurements drawn on it — saved as preview.jpg and printed on the quotation. */
+async function renderPreview(src: HTMLCanvasElement, t: Takeoff, size: { w: number; h: number }, isDxf: boolean): Promise<Blob> {
+  const f = Math.min(1, 1800 / Math.max(size.w, size.h));
+  const c = document.createElement("canvas"); c.width = Math.round(size.w * f); c.height = Math.round(size.h * f);
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  const lw = Math.max(2, Math.round(Math.max(c.width, c.height) / 500));
+  for (const s of t.shapes) {
+    const st = SHAPE_STYLE[s.kind];
+    ctx.beginPath(); s.pts.forEach((p, i) => (i ? ctx.lineTo(p[0] * f, p[1] * f) : ctx.moveTo(p[0] * f, p[1] * f)));
+    if (s.kind !== "wall") { ctx.closePath(); ctx.fillStyle = st.fill; ctx.fill(); }
+    ctx.setLineDash(s.kind === "opening" ? [lw * 3, lw * 2] : []);
+    ctx.strokeStyle = st.stroke; ctx.lineWidth = s.kind === "wall" ? lw * 1.6 : lw; ctx.lineJoin = "round"; ctx.stroke();
+    if (t.metersPerPx && s.kind !== "column") {
+      const m = shapeMeasure(s, t.metersPerPx); const cc = centroid(s.pts);
+      const label = s.kind === "wall" ? fmtLen(m.length) : `${s.kind === "opening" ? "−" : ""}${fmtArea(m.area)}`;
+      ctx.setLineDash([]); ctx.font = `bold ${lw * 7}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = lw * 2; ctx.strokeStyle = "#fff"; ctx.strokeText(label, cc[0] * f, cc[1] * f);
+      ctx.fillStyle = st.stroke; ctx.fillText(label, cc[0] * f, cc[1] * f);
+    }
+  }
+  void isDxf;
+  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("Could not create the plan picture."))), "image/jpeg", 0.85));
+}
+
+function Panel({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border border-graphite-800 bg-graphite-900 p-3">
+      <h3 className="text-sm font-medium text-graphite-100">{title}</h3>
+      {hint ? <p className="mb-2 mt-0.5 text-[11px] text-graphite-500">{hint}</p> : <div className="mb-2" />}
+      {children}
+    </section>
+  );
+}
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="flex flex-col gap-1"><span className="text-[11px] font-medium uppercase tracking-wide text-graphite-500">{label}</span>{children}</label>;
+}
+function NumInput({ value, onChange, step, disabled }: { value: number; onChange: (v: number) => void; step?: number; disabled?: boolean }) {
+  const [s, setS] = useState(String(value));
+  useEffect(() => { if (Number(s) !== value) setS(String(value)); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <input type="number" min={0} step={step} value={s} disabled={disabled} className={numIn} onChange={(e) => { setS(e.target.value); const n = Number(e.target.value); if (Number.isFinite(n) && n >= 0) onChange(n); }} />;
+}
+function TRow({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
+  return <tr><td className={cls("py-1.5 pr-2", strong ? "font-medium text-graphite-100" : "text-graphite-400")}>{k}</td><td className={cls("py-1.5 text-right font-mono", strong ? "font-semibold text-graphite-50" : "text-graphite-300")}>{v}</td></tr>;
+}
+function IconBtn({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return <button type="button" aria-label={label} title={label} onClick={onClick} className="rounded-md p-1.5 text-graphite-300 hover:bg-graphite-800">{children}</button>;
+}
+function RowsEditor<R extends Record<string, number | string | undefined>>({ rows, cols, blank, onChange, disabled }: {
+  rows: R[]; cols: { k: keyof R & string; label: string }[]; blank: R; onChange: (r: R[]) => void; disabled?: boolean;
+}) {
+  return (
+    <div>
+      {rows.length ? (
+        <table className="w-full text-xs">
+          <thead><tr>{cols.map((c) => <th key={c.k} className="pb-1 text-left font-medium text-graphite-500">{c.label}</th>)}<th /></tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                {cols.map((c) => (
+                  <td key={c.k} className="pb-1 pr-1">
+                    <input type="number" min={0} step="any" disabled={disabled} value={String(r[c.k] ?? "")} className={numIn}
+                      onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, [c.k]: Math.max(0, Number(e.target.value) || 0) } : x)))} />
+                  </td>
+                ))}
+                <td className="pb-1">{!disabled ? <button type="button" aria-label="Remove row" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="p-1 text-graphite-500 hover:text-signal-red"><Trash2 className="size-3.5" /></button> : null}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : <p className="text-xs text-graphite-500">None.</p>}
+      {!disabled ? <button type="button" onClick={() => onChange([...rows, { ...blank }])} className="mt-1 inline-flex items-center gap-1 text-xs text-brand-orange hover:underline"><Plus className="size-3.5" />Add row</button> : null}
+    </div>
+  );
+}

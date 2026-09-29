@@ -8,7 +8,7 @@ import type { CustomerDefaults } from "./customer-fields";
 type Lead = { id: string; lead_code: string; customer_name: string; project_name: string | null };
 type Rate = { formwork_type: string; rate_per_sqm: number };
 
-export type LeadPrefill = { leadId: string; label: string; customer: CustomerDefaults; areaSqm?: string };
+export type LeadPrefill = { leadId: string; label: string; customer: CustomerDefaults; areaSqm?: string; plan?: { id: string; name: string; monolithic: number; vertical: number } };
 
 export function QuotationCreationTabs({ leads, rates, nextCode, initialMode, fromLead }: {
   leads: Lead[]; rates: Rate[]; nextCode: string; initialMode?: "detailed" | "quick"; fromLead?: LeadPrefill;
@@ -35,7 +35,7 @@ export function QuotationCreationTabs({ leads, rates, nextCode, initialMode, fro
       </div>
       {mode === "detailed"
         ? <NewQuotationForm key="d" leads={leads} nextCode={nextCode} leadId={fromLead?.leadId} prefill={fromLead?.customer} />
-        : <QuickQuoteForm key="q" leads={leads} rates={rates} nextCode={nextCode} leadId={fromLead?.leadId} prefill={fromLead?.customer} areaDefault={fromLead?.areaSqm} />}
+        : <QuickQuoteForm key="q" leads={leads} rates={rates} nextCode={nextCode} leadId={fromLead?.leadId} prefill={fromLead?.customer} areaDefault={fromLead?.areaSqm} plan={fromLead?.plan} />}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { DocumentDetails } from "./document-details";
 import { EditableNumberCell } from "./editable-number-cell";
 import { AccessoriesEditor } from "./accessories-editor";
 import { ReferencesToggle } from "./references-toggle";
+import { FloorPlanCard } from "./floor-plan-card";
 import { formworkKind, standardAccessories, type AccessoryRow } from "@/lib/quotations/document-content";
 import Link from "next/link";
 import { Lock, Pencil } from "lucide-react";
@@ -63,6 +64,11 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
   const canEdit = isEditable && canCreate;
   const { data: mediaRows } = await supabase.from("quotation_media").select("kind");
   const mediaCounts = { site_photo: 0, client_logo: 0 };
+  const { data: planRows } = await supabase.from("floor_plans").select("id, name, drawing_type, totals, preview_path, lead_id")
+    .or([quotation.lead_id ? `lead_id.eq.${quotation.lead_id}` : null, quotation.floor_plan_id ? `id.eq.${quotation.floor_plan_id}` : null].filter(Boolean).join(",") || "id.is.null")
+    .order("created_at", { ascending: false });
+  const attachedPlan = planRows?.find((p) => p.id === quotation.floor_plan_id) ?? null;
+  const planPreview = attachedPlan?.preview_path ? (await supabase.storage.from("floor-plans").createSignedUrl(attachedPlan.preview_path, 3600)).data?.signedUrl ?? null : null;
   for (const m of mediaRows ?? []) if (m.kind === "site_photo" || m.kind === "client_logo") mediaCounts[m.kind]++;
   const canRevise = canCreate && ["approved", "sent", "rejected", "expired"].includes(quotation.status);
   const totalPanels = lines?.reduce((s, l) => s + l.quantity, 0) ?? 0;
@@ -116,6 +122,12 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
         isCustom={Array.isArray(quotation.accessories)}
         standard={standardAccessories(formworkKind(quotation.formwork_type))}
         editable={canEdit}
+      />
+
+      <FloorPlanCard
+        quotationId={id} leadId={quotation.lead_id} editable={canEdit} isQuick={quotation.quotation_type === "quick"}
+        attached={attachedPlan ? { id: attachedPlan.id, name: attachedPlan.name, previewUrl: planPreview, totals: (attachedPlan.totals ?? {}) as Record<string, number> } : null}
+        options={(planRows ?? []).map((p) => ({ id: p.id, name: p.name, drawing_type: p.drawing_type, contact: Number((p.totals as Record<string, number> | null)?.contact_area ?? 0) || null }))}
       />
 
       <ReferencesToggle

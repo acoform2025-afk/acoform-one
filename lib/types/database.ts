@@ -766,6 +766,68 @@ export type Database = {
           },
         ]
       }
+      floor_plans: {
+        Row: {
+          created_at: string
+          drawing_type: string
+          created_by: string | null
+          file_name: string | null
+          file_path: string
+          id: string
+          lead_id: string | null
+          name: string
+          original_path: string | null
+          preview_path: string | null
+          source_kind: string
+          takeoff: Json
+          tenant_id: string
+          totals: Json
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          drawing_type?: string
+          created_by?: string | null
+          file_name?: string | null
+          file_path: string
+          id?: string
+          lead_id?: string | null
+          name: string
+          original_path?: string | null
+          preview_path?: string | null
+          source_kind: string
+          takeoff?: Json
+          tenant_id?: string
+          totals?: Json
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          drawing_type?: string
+          created_by?: string | null
+          file_name?: string | null
+          file_path?: string
+          id?: string
+          lead_id?: string | null
+          name?: string
+          original_path?: string | null
+          preview_path?: string | null
+          source_kind?: string
+          takeoff?: Json
+          tenant_id?: string
+          totals?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "floor_plans_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_ledger: {
         Row: {
           actor_user_id: string | null
@@ -1699,6 +1761,7 @@ export type Database = {
         Row: {
           accessories: Json | null
           show_references: boolean
+          floor_plan_id: string | null
           approved_at: string | null
           approved_by: string | null
           area_basis: string | null
@@ -1738,6 +1801,7 @@ export type Database = {
         Insert: {
           accessories?: Json | null
           show_references?: boolean
+          floor_plan_id?: string | null
           approved_at?: string | null
           approved_by?: string | null
           area_basis?: string | null
@@ -1777,6 +1841,7 @@ export type Database = {
         Update: {
           accessories?: Json | null
           show_references?: boolean
+          floor_plan_id?: string | null
           approved_at?: string | null
           approved_by?: string | null
           area_basis?: string | null
@@ -2328,6 +2393,10 @@ export type Database = {
       }
       update_quick_quote_area: {
         Args: { p_area_sqm: number; p_quotation_id: string }
+        Returns: undefined
+      }
+      set_quotation_floor_plan: {
+        Args: { p_quotation_id: string; p_floor_plan_id: string | null }
         Returns: undefined
       }
       set_quotation_show_references: {
