@@ -9,6 +9,7 @@ import { RevisionPanel } from "./revision-panel";
 import { DocumentDetails } from "./document-details";
 import { EditableNumberCell } from "./editable-number-cell";
 import { AccessoriesEditor } from "./accessories-editor";
+import { ReferencesToggle } from "./references-toggle";
 import { formworkKind, standardAccessories, type AccessoryRow } from "@/lib/quotations/document-content";
 import Link from "next/link";
 import { Lock, Pencil } from "lucide-react";
@@ -60,6 +61,9 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
 
   const isEditable = ["draft", "pending_approval"].includes(quotation.status);
   const canEdit = isEditable && canCreate;
+  const { data: mediaRows } = await supabase.from("quotation_media").select("kind");
+  const mediaCounts = { site_photo: 0, client_logo: 0 };
+  for (const m of mediaRows ?? []) if (m.kind === "site_photo" || m.kind === "client_logo") mediaCounts[m.kind]++;
   const canRevise = canCreate && ["approved", "sent", "rejected", "expired"].includes(quotation.status);
   const totalPanels = lines?.reduce((s, l) => s + l.quantity, 0) ?? 0;
   const gstAmount = (quotation.total_with_gst ?? 0) - (quotation.total_amount ?? 0);
@@ -112,6 +116,14 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
         isCustom={Array.isArray(quotation.accessories)}
         standard={standardAccessories(formworkKind(quotation.formwork_type))}
         editable={canEdit}
+      />
+
+      <ReferencesToggle
+        quotationId={id}
+        value={quotation.show_references !== false}
+        editable={canEdit}
+        photos={mediaCounts.site_photo}
+        logos={mediaCounts.client_logo}
       />
 
       {isQuick && (

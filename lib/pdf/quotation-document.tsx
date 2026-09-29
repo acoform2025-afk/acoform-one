@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Document, Font, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import {
-  ADVANTAGES, accessoriesFor, CLIENT_LOGOS, SITE_PHOTOS, CLOSING, DEFAULT_PAYMENT_TERMS, DELIVERY_SCHEDULE, SCHEDULE_NOTE, SET_LABEL, TECH_SPECS, TERMS,
+  ADVANTAGES, accessoriesFor, CLOSING, DEFAULT_PAYMENT_TERMS, DELIVERY_SCHEDULE, SCHEDULE_NOTE, SET_LABEL, TECH_SPECS, TERMS,
   formworkKind,
 } from "@/lib/quotations/document-content";
 import { EXTRA_LINE_TYPES, LINE_TYPE_LABELS, formatQty, summariseLines } from "@/lib/quotations/line-types";
@@ -17,8 +17,9 @@ Font.register({
 });
 Font.registerHyphenationCallback((word) => [word]);
 const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
-const sitePhoto = (f: string) => path.join(PUBLIC, "brand", "site", f);
-const clientLogo = (f: string) => path.join(PUBLIC, "brand", "clients", f);
+// Site photos + client logos come from Settings (lib/quotations/media.ts): a file path or raw image bytes
+export type PdfImage = string | { data: Buffer; format: "png" | "jpg" };
+export type PdfMedia = { photos: PdfImage[]; logos: PdfImage[] };
 
 const ORANGE = "#ef9d2f";
 const ORANGE_SOFT = "#fdf3e4";
@@ -277,7 +278,7 @@ function DetailedSchedule({ q, lines }: { q: PdfQuotation; lines: PdfLine[] }) {
   );
 }
 
-export function QuotationDocument({ q, lines, company }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany }) {
+export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] } }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia }) {
   const kind = formworkKind(q.formwork_type);
   const setLabel = SET_LABEL[kind];
   const payment = q.payment_terms && q.payment_terms.length > 0 ? q.payment_terms : DEFAULT_PAYMENT_TERMS[kind];
@@ -286,7 +287,8 @@ export function QuotationDocument({ q, lines, company }: { q: PdfQuotation; line
   const validUntil = addDays(q.quotation_date, q.validity_days);
   const companyName = titleCase(company.company_name ?? "Aco Form Work Pvt Ltd");
   const chrome = <Chrome c={company} code={q.quotation_code} draft={draft} />;
-  const showReferences = q.show_references !== false && (SITE_PHOTOS.length > 0 || CLIENT_LOGOS.length > 0);
+  const { photos, logos } = media;
+  const showReferences = q.show_references !== false && (photos.length > 0 || logos.length > 0);
   const qtyLabel = q.quotation_type === "quick" ? "QUANTITY" : "FORMWORK AREA";
 
   return (
@@ -405,31 +407,37 @@ export function QuotationDocument({ q, lines, company }: { q: PdfQuotation; line
       {showReferences ? (
         <Page size="A4" style={s.page}>
           {chrome}
-          <Text style={[s.h2, { marginTop: 0 }]}>OUR WORK AT SITE</Text>
-          {SITE_PHOTOS[0] ? (
-            <View wrap={false}>
-              <Image src={sitePhoto(SITE_PHOTOS[0].file)} style={{ width: "100%", height: 215, objectFit: "cover", borderRadius: 3 }} />
-            </View>
-          ) : null}
-          {SITE_PHOTOS.length > 1 ? (
-            <View style={{ flexDirection: "row", marginTop: 8, gap: 8 }} wrap={false}>
-              {SITE_PHOTOS.slice(1, 3).map((p, i) => (
-                <Image key={p.file} src={sitePhoto(p.file)} style={{ width: i === 0 ? "60%" : "38.4%", height: 190, objectFit: "cover", borderRadius: 3 }} />
-              ))}
-            </View>
-          ) : null}
-          <Text style={{ fontSize: 8, color: GRAY, marginTop: 4, textAlign: "center" }}>
-            Actual site photographs of ACOFORM powder-coated aluminium formwork in use.
-          </Text>
-
-          <Text style={[s.h2, { marginTop: 16 }]}>OUR ESTEEMED CLIENTS</Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 4 }} wrap={false}>
-            {CLIENT_LOGOS.map((c) => (
-              <View key={c.file} style={{ width: "23.5%", height: 62, borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 4, padding: 6, alignItems: "center", justifyContent: "center" }}>
-                <Image src={clientLogo(c.file)} style={{ maxWidth: "100%", maxHeight: 48, objectFit: "contain" }} />
+          {photos.length > 0 ? (
+            <>
+              <Text style={[s.h2, { marginTop: 0 }]}>OUR WORK AT SITE</Text>
+              <View wrap={false}>
+                <Image src={photos[0]} style={{ width: "100%", height: photos.length > 1 ? 215 : 300, objectFit: "cover", borderRadius: 3 }} />
               </View>
-            ))}
-          </View>
+              {photos.length > 1 ? (
+                <View style={{ flexDirection: "row", marginTop: 8, gap: 8 }} wrap={false}>
+                  {photos.slice(1, 3).map((p, i) => (
+                    <Image key={i} src={p} style={{ width: photos.length === 2 ? "100%" : i === 0 ? "60%" : "38.4%", height: 190, objectFit: "cover", borderRadius: 3 }} />
+                  ))}
+                </View>
+              ) : null}
+              <Text style={{ fontSize: 8, color: GRAY, marginTop: 4, textAlign: "center" }}>
+                Actual site photographs of ACOFORM powder-coated aluminium formwork in use.
+              </Text>
+            </>
+          ) : null}
+
+          {logos.length > 0 ? (
+            <>
+              <Text style={[s.h2, { marginTop: photos.length > 0 ? 16 : 0 }]}>OUR ESTEEMED CLIENTS</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 4 }} wrap={false}>
+                {logos.map((src, i) => (
+                  <View key={i} style={{ width: "23.5%", height: 62, borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 4, padding: 6, alignItems: "center", justifyContent: "center" }}>
+                    <Image src={src} style={{ maxWidth: "100%", maxHeight: 48, objectFit: "contain" }} />
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
         </Page>
       ) : null}
 

@@ -1662,9 +1662,43 @@ export type Database = {
           },
         ]
       }
+      quotation_media: {
+        Row: {
+          caption: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          sort_order: number
+          storage_path: string
+          tenant_id: string
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          sort_order?: number
+          storage_path: string
+          tenant_id?: string
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          sort_order?: number
+          storage_path?: string
+          tenant_id?: string
+        }
+        Relationships: []
+      }
       quotations: {
         Row: {
           accessories: Json | null
+          show_references: boolean
           approved_at: string | null
           approved_by: string | null
           area_basis: string | null
@@ -1703,6 +1737,7 @@ export type Database = {
         }
         Insert: {
           accessories?: Json | null
+          show_references?: boolean
           approved_at?: string | null
           approved_by?: string | null
           area_basis?: string | null
@@ -1741,6 +1776,7 @@ export type Database = {
         }
         Update: {
           accessories?: Json | null
+          show_references?: boolean
           approved_at?: string | null
           approved_by?: string | null
           area_basis?: string | null
@@ -2292,6 +2328,10 @@ export type Database = {
       }
       update_quick_quote_area: {
         Args: { p_area_sqm: number; p_quotation_id: string }
+        Returns: undefined
+      }
+      set_quotation_show_references: {
+        Args: { p_quotation_id: string; p_show: boolean }
         Returns: undefined
       }
       set_quotation_accessories: {

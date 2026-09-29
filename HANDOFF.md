@@ -39,5 +39,7 @@ returns and repairs.
 
 ## Quotation PDF — site photos & client logos (Sep 2026)
 - New page after the Technical Specification: "OUR WORK AT SITE" (3 photos) + "OUR ESTEEMED CLIENTS" (logo grid).
-- Files: `public/brand/site/site-1..3.jpg`, `public/brand/clients/*.png`; lists live in `SITE_PHOTOS` / `CLIENT_LOGOS` in `lib/quotations/document-content.ts`.
-- To swap a photo/logo: replace the file with the same name (or edit the list). Page hides itself if no files are listed.
+- Managed in **Settings → Quotation pictures** (upload / rename / reorder / delete; max 3 photos, 12 logos). Needs quotations.approve.
+- Migration 00037: table `quotation_media` (storage_path = `builtin:site/x.jpg` for files shipped in /public/brand, or `<tenant_id>/<file>` in the private storage bucket `quotation-media`, 5 MB, jpg/png), limit trigger, storage RLS by tenant folder.
+- Browser resizes before upload (photos 1600px JPEG, logos 600px PNG) and uploads straight to Storage; server action `addMedia` records the row. PDF route loads them via `lib/quotations/media.ts` (`mediaForPdf`).
+- Per-quotation switch: `quotations.show_references` (default true) via RPC `set_quotation_show_references` (draft/pending only); copied on revisions. UI: `references-toggle.tsx` on the quotation page.

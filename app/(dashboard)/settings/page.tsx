@@ -4,6 +4,8 @@ import { titleCase } from "@/lib/format";
 import { CompanyForm } from "./company-form";
 import { EngineeringForm } from "./engineering-form";
 import { hasPermission } from "@/lib/auth/permissions";
+import { listMedia, mediaViewUrls } from "@/lib/quotations/media";
+import { MediaManager, type MediaTile } from "./media-manager";
 
 export const metadata = { title: "Settings" };
 
@@ -14,6 +16,10 @@ export default async function SettingsPage() {
   const { data: isAdmin } = await supabase.rpc("is_super_admin");
   const { data: eng } = await supabase.from("engineering_parameters").select("*").maybeSingle();
   const canEng = await hasPermission("designs", "approve");
+  const canMedia = await hasPermission("quotations", "approve");
+  const media = await listMedia(supabase);
+  const mediaUrls = await mediaViewUrls(supabase, media);
+  const tiles: MediaTile[] = media.filter((m) => mediaUrls[m.id]).map((m) => ({ id: m.id, kind: m.kind, url: mediaUrls[m.id], caption: m.caption }));
 
   const { data: users } = await supabase
     .from("users")
@@ -25,6 +31,10 @@ export default async function SettingsPage() {
       <h1 className="text-2xl font-semibold text-graphite-50">Settings</h1>
       <div className="mt-6">
         <CompanyForm tenant={(tenant ?? {}) as Record<string, string | null>} canEdit={isAdmin === true} />
+      </div>
+
+      <div className="mt-8">
+        <MediaManager items={tiles} tenantId={profile!.tenant_id} canEdit={canMedia} />
       </div>
 
       <div className="mt-8">

@@ -2,6 +2,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { createClient } from "@/lib/supabase/server";
 import { QuotationDocument, type PdfLine, type PdfQuotation, type PdfCompany } from "@/lib/pdf/quotation-document";
 import { formworkKind, pdfFileName } from "@/lib/quotations/document-content";
+import { mediaForPdf } from "@/lib/quotations/media";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,8 +36,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     };
   });
 
+  const media = q.show_references === false ? { photos: [], logos: [] } : await mediaForPdf(supabase);
+
   const buffer = await renderToBuffer(
-    <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} />,
+    <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} />,
   );
 
   const name = pdfFileName(q.quotation_code, q.revision_no, formworkKind(q.formwork_type), q.quotation_date);

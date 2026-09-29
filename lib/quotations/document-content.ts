@@ -201,20 +201,3 @@ export function accessoriesFor(kind: FormworkKind, custom: unknown): Acc[] {
   return ACCESSORIES[kind];
 }
 
-// "Our work at site" photos and "Our esteemed clients" logos printed in the proposal PDF.
-// Files live in public/brand/site and public/brand/clients; add or replace files and list them here.
-export const SITE_PHOTOS: { file: string; caption: string }[] = [
-  { file: "site-1.jpg", caption: "ACOFORM aluminium column formwork in use on site" },
-  { file: "site-2.jpg", caption: "Column shuttering with ACOFORM panels" },
-  { file: "site-3.jpg", caption: "ACOFORM column formwork assembly" },
-];
-
-export const CLIENT_LOGOS: { file: string; name: string }[] = [
-  { file: "trine.png", name: "Trine Projects" },
-  { file: "ramesth.png", name: "Ramesth Construction" },
-  { file: "psp.png", name: "PSP" },
-  { file: "epsilon.png", name: "Epsilon Group" },
-  { file: "a-shridhar.png", name: "A. Shridhar" },
-  { file: "shivay.png", name: "Shivay Construction" },
-  { file: "jay-urban.png", name: "Jay Urban" },
-];
