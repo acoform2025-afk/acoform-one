@@ -124,3 +124,36 @@ export async function updateExtraLineRate(lineId: string, quotationId: string, u
   revalidatePath(`/quotations/${parsed.data.quotationId}`);
   return { success: true };
 }
+
+const numSchema = z.object({
+  id: z.string().uuid(),
+  quotationId: z.string().uuid(),
+  value: z.coerce.number({ invalid_type_error: "Enter a number" }).positive("Must be more than 0"),
+});
+
+/** Negotiated rate (₹/kg) on a panel line of a draft quotation. */
+export async function updatePanelLineRate(lineId: string, quotationId: string, ratePerKg: string): Promise<LineActionResult> {
+  try { await requirePermission("quotations", "create"); } catch { return { success: false, error: "Permission denied." }; }
+  const parsed = numSchema.safeParse({ id: lineId, quotationId, value: ratePerKg });
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid rate." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("update_quotation_line", { p_line_id: parsed.data.id, p_rate_per_kg: parsed.data.value });
+  if (error) return { success: false, error: cleanDbError(error.message) };
+  revalidatePath(`/quotations/${parsed.data.quotationId}`);
+  return { success: true };
+}
+
+/** Quick quote: change the area (sqm) or the rate (₹/sqm). */
+export async function updateQuickQuoteField(quotationId: string, field: "area" | "rate", value: string): Promise<LineActionResult> {
+  try { await requirePermission("quotations", "create"); } catch { return { success: false, error: "Permission denied." }; }
+  const parsed = numSchema.safeParse({ id: quotationId, quotationId, value });
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid value." };
+  const supabase = await createClient();
+  const { error } = field === "area"
+    ? await supabase.rpc("update_quick_quote_area", { p_quotation_id: quotationId, p_area_sqm: parsed.data.value })
+    : await supabase.rpc("update_quick_quote_rate", { p_quotation_id: quotationId, p_rate_per_sqm: parsed.data.value });
+  if (error) return { success: false, error: cleanDbError(error.message) };
+  revalidatePath(`/quotations/${quotationId}`);
+  revalidatePath("/quotations");
+  return { success: true };
+}

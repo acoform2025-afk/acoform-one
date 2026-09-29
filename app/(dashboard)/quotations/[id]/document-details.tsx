@@ -24,18 +24,18 @@ function L({ label, children, wide }: { label: string; children: React.ReactNode
   );
 }
 
-export function DocumentDetails({ q, editable }: { q: Q; editable: boolean }) {
+export function DocumentDetails({ q, editable, defaultOpen = false }: { q: Q; editable: boolean; defaultOpen?: boolean }) {
   const [state, action, pending] = useActionState(saveQuotationDetails, undefined);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const kind = formworkKind(q.formwork_type);
   const terms = (q.payment_terms ?? DEFAULT_PAYMENT_TERMS[kind]).join("\n");
   const d = !editable;
 
   return (
-    <div className="mt-6 rounded-lg border border-graphite-800 bg-graphite-900">
+    <div id="details" className="mt-6 scroll-mt-6 rounded-lg border border-graphite-800 bg-graphite-900">
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between px-4 py-3 text-left">
         <span className="text-sm font-medium text-graphite-200">Customer & proposal details (printed on the PDF)</span>
-        <span className="text-xs text-graphite-500">{open ? "Hide" : editable ? "Edit" : "View"}</span>
+        <span className={editable && !open ? "rounded-md bg-brand-orange px-3 py-1 text-xs font-medium text-white" : "text-xs text-graphite-500"}>{open ? "Hide" : editable ? "Edit" : "View"}</span>
       </button>
       {open && (
         <form action={action} className="border-t border-graphite-800 p-4">

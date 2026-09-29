@@ -37,7 +37,7 @@ export async function RevisionPanel({ quotationId, revisionOf, status, isQuick, 
   if (!showHistory && !canRevise) return null;
 
   return (
-    <div className="mt-6 flex flex-col gap-4">
+    <div id="revise" className="mt-6 flex scroll-mt-6 flex-col gap-4">
       {status === "superseded" && latest && latest.id !== quotationId && (
         <p className="rounded-md border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">
           This version has been superseded. Latest:{" "}

@@ -2291,12 +2291,17 @@ export type Database = {
         Args: { p_area_sqm: number; p_quotation_id: string }
         Returns: undefined
       }
+      update_quick_quote_rate: {
+        Args: { p_quotation_id: string; p_rate_per_sqm: number }
+        Returns: undefined
+      }
       update_quotation_line: {
         Args: {
           p_description?: string
           p_line_id: string
           p_notes?: string
           p_quantity?: number
+          p_rate_per_kg?: number
           p_unit?: string
           p_unit_rate?: number
         }

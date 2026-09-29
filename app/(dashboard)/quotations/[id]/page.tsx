@@ -7,6 +7,9 @@ import { RemoveLineButton } from "./remove-line-button";
 import { ExtraLinesSection } from "./extra-lines-section";
 import { RevisionPanel } from "./revision-panel";
 import { DocumentDetails } from "./document-details";
+import { EditableNumberCell } from "./editable-number-cell";
+import Link from "next/link";
+import { Lock, Pencil } from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   draft: "bg-graphite-800 text-graphite-300",
@@ -29,8 +32,9 @@ function inr(n: number | null): string {
   return `₹ ${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 }
 
-export default async function QuotationDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function QuotationDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
   const { id } = await params;
+  const { edit } = await searchParams;
   const supabase = await createClient();
 
   const { data: quotation } = await supabase.from("quotations").select("*").eq("id", id).single();
@@ -53,6 +57,8 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
   const canConvert = await hasPermission("projects", "create");
 
   const isEditable = ["draft", "pending_approval"].includes(quotation.status);
+  const canEdit = isEditable && canCreate;
+  const canRevise = canCreate && ["approved", "sent", "rejected", "expired"].includes(quotation.status);
   const totalPanels = lines?.reduce((s, l) => s + l.quantity, 0) ?? 0;
   const gstAmount = (quotation.total_with_gst ?? 0) - (quotation.total_amount ?? 0);
 
@@ -63,7 +69,7 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
           <div className="flex items-center gap-3">
             <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-graphite-50">{quotation.quotation_code}</h1>
             <span className={`rounded-full px-2.5 py-1 text-xs capitalize ${STATUS_STYLES[quotation.status] ?? ""}`}>{quotation.status.replace("_", " ")}</span>
-            {isQuick && <span className="rounded-full bg-purple-900/30 px-2.5 py-1 text-xs capitalize text-purple-300">Quick · {quotation.formwork_type}</span>}
+            {isQuick && <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-xs capitalize text-violet-700 dark:text-violet-300">Quick · {quotation.formwork_type}</span>}
           </div>
           <p className="mt-1 text-sm text-graphite-400">{quotation.customer_name}</p>
           <p className="mt-0.5 text-xs text-graphite-500">
@@ -76,7 +82,27 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
         </div>
       </div>
 
-      <DocumentDetails q={quotation} editable={isEditable && canCreate} />
+      {canEdit ? (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-orange/30 bg-brand-orange/5 px-4 py-3">
+          <p className="flex items-center gap-2 text-sm text-graphite-200">
+            <Pencil className="size-4 text-brand-orange" />
+            This quotation can be edited. Click any <span className="underline decoration-dotted underline-offset-4">underlined</span> quantity or rate to change it.
+          </p>
+          <Link href={`/quotations/${id}?edit=1#details`} scroll={false} className="rounded-md bg-brand-orange px-3.5 py-1.5 text-sm font-medium text-white hover:bg-brand-orange-dark">
+            Edit customer &amp; proposal details
+          </Link>
+        </div>
+      ) : canRevise ? (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-graphite-800 bg-graphite-900 px-4 py-3">
+          <p className="flex items-center gap-2 text-sm text-graphite-300">
+            <Lock className="size-4 text-graphite-500" />
+            This quotation is {quotation.status.replace("_", " ")} and locked. To change it, create a revision (R1, R2 …) — the original stays on record.
+          </p>
+          <a href="#revise" className="rounded-md border border-graphite-700 bg-graphite-950 px-3.5 py-1.5 text-sm font-medium text-graphite-200 hover:bg-graphite-900">Create revision to edit</a>
+        </div>
+      ) : null}
+
+      <DocumentDetails key={edit ?? "view"} q={quotation} editable={canEdit} defaultOpen={edit === "1" && canEdit} />
 
       {isQuick && (
         <div className="mt-6 rounded-lg border border-graphite-800 bg-graphite-900 p-5">
@@ -93,8 +119,8 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
             <tbody>
               <tr className="border-t border-graphite-800">
                 <td className="py-2.5 text-graphite-200">Acoform Aluminium Formwork ({quotation.formwork_type})</td>
-                <td className="py-2.5 text-right font-mono text-graphite-300">{Number(quotation.total_area_sqm).toFixed(2)}</td>
-                <td className="py-2.5 text-right font-mono text-graphite-300">₹{Number(quotation.quick_rate_per_sqm).toFixed(2)}</td>
+                <td className="py-2.5 text-right font-mono text-graphite-300"><EditableNumberCell lineId={id} quotationId={id} field="quickArea" value={quotation.total_area_sqm ?? 0} editable={canEdit} /></td>
+                <td className="py-2.5 text-right font-mono text-graphite-300">₹<EditableNumberCell lineId={id} quotationId={id} field="quickRate" value={quotation.quick_rate_per_sqm ?? 0} editable={canEdit} /></td>
                 <td className="py-2.5 text-right font-mono text-graphite-100">{inr(quotation.total_amount)}</td>
               </tr>
               {quotation.nalco_rate_per_kg && (
@@ -144,9 +170,9 @@ export default async function QuotationDetailPage({ params }: { params: Promise<
                       <tr key={line.id} className="bg-graphite-950">
                         <td className="px-4 py-3 font-mono text-xs text-aluminium-300">{pm?.panel_code ?? "—"}</td>
                         <td className="px-4 py-3 text-xs text-graphite-400">{pm ? `${pm.width_mm}×${pm.height_mm}mm` : "—"}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-graphite-200">{line.quantity}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-graphite-200"><EditableNumberCell lineId={line.id} quotationId={id} field="quantity" value={line.quantity} editable={canEdit} /></td>
                         <td className="px-4 py-3 text-right font-mono text-xs text-graphite-400">{Number(line.unit_weight_kg).toFixed(3)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-graphite-400">{Number(line.rate_per_kg).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-graphite-400"><EditableNumberCell lineId={line.id} quotationId={id} field="panelRate" value={line.rate_per_kg ?? 0} editable={canEdit} /></td>
                         <td className="px-4 py-3 text-right font-mono text-xs text-graphite-100">{Number(line.line_total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                         {isEditable && canCreate && <td className="px-4 py-3 text-right"><RemoveLineButton lineId={line.id} quotationId={id} /></td>}
                       </tr>
