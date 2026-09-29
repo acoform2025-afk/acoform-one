@@ -38,9 +38,9 @@ export function FloorPlanCard({ quotationId, leadId, editable, isQuick, attached
             <Link href={`/floor-plans/${attached.id}?quotation=${quotationId}`} className="font-medium text-graphite-100 hover:text-brand-orange hover:underline">{attached.name}</Link>
             <p className="mt-0.5 text-xs text-graphite-500">Printed on the quotation PDF with its area table.</p>
             <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              <dt className="text-graphite-500">Floor plate</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.plan_area)}</dd>
-              <dt className="text-graphite-500">Walls + columns</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.vertical_area)}</dd>
-              <dt className="text-graphite-500">Total contact area</dt><dd className="text-right font-mono font-semibold text-graphite-50">{fmtArea(attached.totals.contact_area)}</dd>
+              <dt className="text-graphite-500">Vertical set (walls + columns)</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.vertical_area)}</dd>
+              <dt className="text-graphite-500">Typical floor total</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.contact_area)}</dd>
+              <dt className="text-graphite-500">Full set area{attached.totals.extra_pct ? ` (+${attached.totals.extra_pct}%)` : ""}</dt><dd className="text-right font-mono font-semibold text-graphite-50">{fmtArea(attached.totals.quote_area || attached.totals.contact_area)}</dd>
             </dl>
             <div className="mt-3 flex flex-wrap gap-2">
               <Link href={`/floor-plans/${attached.id}?quotation=${quotationId}`} className="rounded-md border border-graphite-700 px-3 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { cleanDxfText } from "./dxf";
 
 /**
  * AutoCAD .dwg → .dxf using GNU LibreDWG's `dwg2dxf` (open source, GPL-3). It runs as a separate program
@@ -24,7 +25,7 @@ export async function dwgToDxf(dwg: Uint8Array, timeoutMs = 90_000): Promise<str
     });
     const text = await readFile(out, "utf8").catch(() => "");
     if (!/\bENTITIES\b/.test(text)) throw new Error("This DWG could not be read. In AutoCAD use Save As → DXF and upload the DXF instead.");
-    return text;
+    return cleanDxfText(text);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }

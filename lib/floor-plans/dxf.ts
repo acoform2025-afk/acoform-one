@@ -46,16 +46,37 @@ function bulgePts(vs: { x: number; y: number; bulge?: number }[], closed: boolea
 
 function suggestRole(name: string): LayerRole {
   const n = name.toLowerCase();
+  if (/parapet|compound|hatch|elev|elv|sec(tion)?[^a-z]|text|dim|furn|door|win|grid/.test(n)) return "ignore";
   if (/(^|[^a-z])(col|cols|clm|column|columns)([^a-z]|$)|column/.test(n)) return "columns";
-  if (/wall|shear|brick|masonry|(^|[^a-z])wl([^a-z]|$)/.test(n)) return "walls";
+  if (/beam|(^|[^a-z])bm([^a-z]|$)/.test(n)) return "beams";
+  if (/wall|shear|brick|masonry|(^|[^a-z])rcc([^a-z]|$)|_rcc$|(^|[^a-z])wl([^a-z]|$)/.test(n)) return "walls";
   if (/shaft|cut ?out|opening|duct|lift|stair.?open/.test(n)) return "opening";
-  if (/slab|outline|boundary|plate|periphery|edge/.test(n)) return "slab";
+  if (/slab|outline|boundary|plate|periphery|edge|built.?up/.test(n)) return "slab";
   return "ignore";
 }
 
 const INSUNITS: Record<number, DxfUnits> = { 1: "in", 2: "ft", 4: "mm", 5: "cm", 6: "m" };
 
-export function readDxf(text: string): DxfModel {
+/**
+ * A DXF is strict pairs of lines: a numeric group code, then its value. Some converters (e.g. LibreDWG on long
+ * MTEXT notes) put a line break inside a value, which throws every reader off. Re-join such broken values.
+ */
+export function cleanDxfText(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  const isCode = (l: string) => /^\s*-?\d{1,4}\s*$/.test(l);
+  let expectCode = true;
+  for (const line of lines) {
+    if (expectCode) {
+      if (isCode(line) || out.length === 0) { out.push(line); expectCode = false; }
+      else out[out.length - 1] += " " + line; // stray continuation of the previous value
+    } else { out.push(line); expectCode = true; }
+  }
+  return out.join("\n");
+}
+
+export function readDxf(raw: string): DxfModel {
+  const text = cleanDxfText(raw);
   const dxf = new DxfParser().parseSync(text) as unknown as { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt> } | null;
   if (!dxf) throw new Error("This DXF file could not be read.");
   const blocks = dxf.blocks ?? {};
@@ -135,11 +156,11 @@ export function dxfFrame(model: DxfModel, maxSide = 2400) {
   };
 }
 
-export const ROLE_COLOR: Record<LayerRole, string> = { ignore: "#b9bcc2", walls: "#1f2937", columns: "#dc2626", slab: "#2563eb", opening: "#9333ea" };
+export const ROLE_COLOR: Record<LayerRole, string> = { ignore: "#b9bcc2", walls: "#1f2937", columns: "#dc2626", slab: "#2563eb", opening: "#9333ea", beams: "#db2777" };
 
 export function drawDxf(ctx: CanvasRenderingContext2D, model: DxfModel, roles: Record<string, LayerRole>, frame: ReturnType<typeof dxfFrame>) {
   ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, frame.width, frame.height);
-  const order: LayerRole[] = ["ignore", "slab", "opening", "walls", "columns"];
+  const order: LayerRole[] = ["ignore", "slab", "opening", "beams", "walls", "columns"];
   for (const role of order) {
     ctx.strokeStyle = ROLE_COLOR[role]; ctx.lineWidth = role === "ignore" ? 0.8 : role === "walls" ? 1.6 : 1.4;
     ctx.fillStyle = role === "columns" ? "rgba(220,38,38,0.35)" : role === "opening" ? "rgba(147,51,234,0.12)" : "transparent";
@@ -197,6 +218,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     openingArea: open.reduce((s, x) => s + x.a, 0) * u2,
     openingPerimeter: open.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
     wallLineLength: of("walls").reduce((s, p) => s + polyLength(p.pts, p.closed), 0) * u,
+    beamLineLength: of("beams").reduce((s, p) => s + polyLength(p.pts, p.closed), 0) * u,
     columns: cols,
   };
 }

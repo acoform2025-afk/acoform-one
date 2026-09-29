@@ -46,6 +46,7 @@ function normalise(t: Partial<Takeoff> | null): Takeoff {
     ...e, ...(t ?? {}), v: 1,
     params: { ...e.params, ...(t?.params ?? {}) },
     shapes: Array.isArray(t?.shapes) ? t!.shapes : [], columns: Array.isArray(t?.columns) ? t!.columns : [], beams: Array.isArray(t?.beams) ? t!.beams : [],
+    extras: Array.isArray(t?.extras) ? t!.extras : [],
   };
 }
 
@@ -53,6 +54,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
   const router = useRouter();
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewCanvasRef = useRef<HTMLCanvasElement>(null);   // DXF: lines redrawn crisp at every zoom
+  const pxPathsRef = useRef<{ layer: string; xy: Float32Array; closed: boolean; b: [number, number, number, number] }[]>([]);
   const modelRef = useRef<DxfModel | null>(null);
   const frameRef = useRef<ReturnType<typeof dxfFrame> | null>(null);
   const snapRef = useRef<Pt[]>([]);
@@ -104,6 +107,13 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
     const ctx = c.getContext("2d"); if (!ctx) return;
     drawDxf(ctx, m, roles, f);
     snapRef.current = snapPoints(m, f, roles);
+    if (pxPathsRef.current.length === 0) {
+      pxPathsRef.current = m.paths.map((p) => {
+        const xy = new Float32Array(p.pts.length * 2); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        p.pts.forEach((q, i) => { const [x, y] = f.toPx(q); xy[2 * i] = x; xy[2 * i + 1] = y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; });
+        return { layer: p.layer, xy, closed: p.closed, b: [x0, y0, x1, y1] as [number, number, number, number] };
+      });
+    }
   }, []);
 
   const loadPdfPage = useCallback(async (buf: ArrayBuffer, pageNo: number) => {
@@ -166,6 +176,39 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan.file_url]);
+
+  // DXF lines drawn straight onto a screen-sized canvas so they stay sharp at any zoom
+  useEffect(() => {
+    if (!isDxf || !size || !t.dxf) return;
+    const id = requestAnimationFrame(() => {
+      const c = viewCanvasRef.current, st = stageRef.current; if (!c || !st) return;
+      const r = st.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+      if (c.width !== W || c.height !== H) { c.width = W; c.height = H; c.style.width = `${r.width}px`; c.style.height = `${r.height}px`; }
+      const ctx = c.getContext("2d"); if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, r.width, r.height);
+      const { k: kk, x: vx, y: vy } = view;
+      const ix0 = -vx / kk, iy0 = -vy / kk, ix1 = (r.width - vx) / kk, iy1 = (r.height - vy) / kk;
+      const roles = t.dxf!.layerRoles;
+      const order: LayerRole[] = ["ignore", "slab", "opening", "beams", "walls", "columns"];
+      for (const role of order) {
+        ctx.beginPath();
+        let any = false;
+        for (const p of pxPathsRef.current) {
+          if ((roles[p.layer] ?? "ignore") !== role) continue;
+          if (p.b[2] < ix0 || p.b[0] > ix1 || p.b[3] < iy0 || p.b[1] > iy1) continue;
+          const xy = p.xy; any = true;
+          ctx.moveTo(vx + xy[0] * kk, vy + xy[1] * kk);
+          for (let i = 2; i < xy.length; i += 2) ctx.lineTo(vx + xy[i] * kk, vy + xy[i + 1] * kk);
+          if (p.closed) ctx.closePath();
+        }
+        if (!any) continue;
+        if (role === "columns" || role === "opening") { ctx.fillStyle = role === "columns" ? "rgba(220,38,38,0.35)" : "rgba(147,51,234,0.12)"; ctx.fill(); }
+        ctx.strokeStyle = ROLE_COLOR[role]; ctx.lineWidth = role === "ignore" ? 0.6 : role === "walls" ? 1.4 : 1.2; ctx.stroke();
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isDxf, size, view, t.dxf, layerVersion]);
 
   // re-draw DXF when layer roles change
   useEffect(() => { if (isDxf && t.dxf) drawDxfNow(t.dxf.layerRoles); }, [isDxf, layerVersion, drawDxfNow]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -275,7 +318,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
     const r = stageRef.current!.getBoundingClientRect();
     const px = cx ?? r.left + r.width / 2, py = cy ?? r.top + r.height / 2;
     setView((v) => {
-      const k = Math.min(40, Math.max(0.02, v.k * factor));
+      const k = Math.min(isDxf ? 400 : 40, Math.max(0.002, v.k * factor));
       const ix = (px - r.left - v.x) / v.k, iy = (py - r.top - v.y) / v.k;
       return { k, x: px - r.left - ix * k, y: py - r.top - iy * k };
     });
@@ -395,7 +438,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
 
         <div
           ref={stageRef}
-          className={cls("relative h-[62vh] min-h-[380px] touch-none select-none overflow-hidden rounded-b-lg border border-graphite-800 bg-[#e9eaec]",
+          className={cls("relative h-[62vh] min-h-[380px] touch-none select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
             tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-pointer" : "cursor-crosshair")}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
           onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "slab" || tool === "opening") finishDraft(); }}
@@ -403,8 +446,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
         >
           {!size && !loadErr ? <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-graphite-600"><Loader2 className="size-5 animate-spin" />Opening floor plan…</div> : null}
           {loadErr ? <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-signal-red">{loadErr}</div> : null}
+          {isDxf ? <canvas ref={viewCanvasRef} className="pointer-events-none absolute left-0 top-0" /> : null}
           <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${k})`, width: size?.w, height: size?.h }}>
-            <canvas ref={canvasRef} className="block shadow-md" style={{ width: size?.w, height: size?.h, background: "#fff" }} />
+            <canvas ref={canvasRef} className={isDxf ? "block" : "block shadow-md"} style={{ width: size?.w, height: size?.h, background: "#fff", opacity: isDxf ? 0 : 1 }} />
             {size ? (
               <svg className="pointer-events-none absolute inset-0" width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`}>
                 {t.shapes.map((s) => {
@@ -538,6 +582,17 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
             <Field label="No. of floors"><NumInput value={t.params.floors} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floors: Math.max(1, Math.round(v)) } }))} /></Field>
           </div>
           <p className="mt-1.5 text-[11px] text-graphite-500">Walls and columns are shuttered to the slab bottom: clear height {totals.clear_height} m.</p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Field label="Wall tops to deduct (m²)"><NumInput value={t.params.wallTopM2 ?? 0} step={0.01} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallTopM2: v } }))} /></Field>
+            <Field label="Add % (extra)"><NumInput value={t.params.extraPct ?? 0} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, extraPct: Math.min(100, v) } }))} /></Field>
+          </div>
+          <p className="mt-1 text-[11px] text-graphite-500">
+            Wall tops ≈ wall length × thickness — at 150 mm that is {fmtArea(totals.wall_length * 0.15)}; at 125 mm {fmtArea(totals.wall_length * 0.125)}.
+          </p>
+          <label className="mt-2 flex items-center gap-2 text-xs text-graphite-300">
+            <input type="checkbox" disabled={!canEdit} checked={!!t.params.includeEdges} onChange={(e) => update((p) => ({ ...p, params: { ...p.params, includeEdges: e.target.checked } }))} />
+            Add slab &amp; opening edge formwork (perimeter × slab thickness)
+          </label>
         </Panel>
 
         {isDxf && t.dxf && layers.length ? (
@@ -551,7 +606,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
                     <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({l.count})</span></span>
                     <select value={role} disabled={!canEdit} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-0.5 text-xs text-graphite-100"
                       onChange={(e) => { const r = e.target.value as LayerRole; update((p) => ({ ...p, dxf: { ...p.dxf!, layerRoles: { ...p.dxf!.layerRoles, [l.name]: r } } })); setLayerVersion((v) => v + 1); }}>
-                      <option value="ignore">Ignore</option><option value="slab">Slab outline</option><option value="opening">Openings</option><option value="walls">Walls</option><option value="columns">Columns</option>
+                      <option value="ignore">Ignore</option><option value="slab">Slab outline</option><option value="opening">Openings / ducts</option><option value="walls">Walls</option><option value="columns">Columns</option><option value="beams">Beams</option>
                     </select>
                   </div>
                 );
@@ -561,9 +616,15 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
               {t.dxf.region ? <>Counting only inside the green plan region. {canEdit ? <button type="button" className="text-brand-orange hover:underline" onClick={() => update((p) => ({ ...p, dxf: p.dxf ? { ...p.dxf, region: null } : p.dxf }))}>Clear region</button> : null}</>
                 : <>Whole drawing is counted. If the file also has sections or elevations, use <b>Plan region</b> to box the floor plan.</>}
             </p>
+            {Object.values(t.dxf.layerRoles).includes("beams") ? (
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field label="Beam depth (mm)"><NumInput value={t.params.beamDepthMm ?? 600} step={25} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamDepthMm: v } }))} /></Field>
+                <p className="pb-1 text-[11px] text-graphite-500">Beam lines × (depth − slab)</p>
+              </div>
+            ) : null}
             {auto ? (
               <p className="mt-2 text-[11px] text-graphite-500">
-                Read from layers: slab {fmtArea(auto.slabArea)}, openings {fmtArea(auto.openingArea)}, wall lines {fmtLen(auto.wallLineLength)}, {auto.columns.length} columns.
+                Read from layers: slab {fmtArea(auto.slabArea)}, openings {fmtArea(auto.openingArea)}, wall lines {fmtLen(auto.wallLineLength)}{auto.beamLineLength ? `, beam lines ${fmtLen(auto.beamLineLength)}` : ""}, {auto.columns.length} columns.
               </p>
             ) : null}
           </Panel>
@@ -596,27 +657,38 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           />
         </Panel>
 
-        <Panel title="Beams" hint="Area = length × (width + 2 × depth below slab).">
+        <Panel title="Beams" hint="Area = side length × (beam depth − slab). Enter the total length of beam sides to shutter (both sides). The beam bottom is already in the slab area.">
           <RowsEditor
             rows={t.beams} disabled={!canEdit}
-            cols={[{ k: "width_mm", label: "Width mm" }, { k: "depth_mm", label: "Depth mm" }, { k: "length_m", label: "Length m" }, { k: "qty", label: "Nos." }]}
-            blank={{ width_mm: 230, depth_mm: 450, length_m: 5, qty: 1 }}
+            cols={[{ k: "depth_mm", label: "Depth mm" }, { k: "length_m", label: "Side length m" }, { k: "qty", label: "Nos." }]}
+            blank={{ depth_mm: 600, length_m: 10, qty: 1 }}
             onChange={(rows) => update((p) => ({ ...p, beams: rows }))}
+          />
+        </Panel>
+
+        <Panel title="Staircase & other items" hint="Lump-sum areas added to the floor total, e.g. ST1 = 100 m².">
+          <RowsEditor
+            rows={t.extras ?? []} disabled={!canEdit}
+            cols={[{ k: "label", label: "Item", text: true }, { k: "area_m2", label: "Area m²" }]}
+            blank={{ label: "Staircase", area_m2: 100 }}
+            onChange={(rows) => update((p) => ({ ...p, extras: rows }))}
           />
         </Panel>
 
         <Panel title="Formwork area (per floor)">
           <table className="w-full text-xs">
             <tbody className="divide-y divide-graphite-800">
-              <TRow k="Floor plate area" v={fmtArea(totals.plan_area)} strong />
-              <TRow k="Slab soffit" v={fmtArea(totals.slab_soffit)} />
-              <TRow k="Slab & opening edges" v={fmtArea(totals.slab_edge)} />
-              <TRow k={`Walls · ${fmtLen(totals.wall_length)}`} v={fmtArea(totals.wall_area)} />
-              <TRow k={`Columns · ${totals.column_count} nos.`} v={fmtArea(totals.column_area)} />
-              <TRow k="Beams" v={fmtArea(totals.beam_area)} />
-              <TRow k="Vertical (walls + columns)" v={fmtArea(totals.vertical_area)} />
-              <TRow k="Total contact area" v={fmtArea(totals.contact_area)} strong />
-              {totals.floors > 1 ? <TRow k={`All ${totals.floors} floors`} v={fmtArea(totals.contact_area * totals.floors)} /> : null}
+              <TRow k="Slab area (less ducts)" v={fmtArea(totals.plan_area)} />
+              <TRow k={`1 · Slab${totals.wall_top_area ? ` (− ${fmtArea(totals.wall_top_area)} wall tops)` : ""}`} v={fmtArea(totals.slab_soffit)} />
+              {t.params.includeEdges ? <TRow k="Slab & opening edges" v={fmtArea(totals.slab_edge)} /> : null}
+              <TRow k={`2 · Walls · ${fmtLen(totals.wall_length * 2)} faces`} v={fmtArea(totals.wall_area)} />
+              {totals.column_count ? <TRow k={`Columns · ${totals.column_count} nos.`} v={fmtArea(totals.column_area)} /> : null}
+              <TRow k="3 · Beams" v={fmtArea(totals.beam_area)} />
+              <TRow k="4 · Staircase & others" v={fmtArea(totals.extra_area)} />
+              <TRow k="Total for typical floor" v={fmtArea(totals.contact_area)} strong />
+              {totals.extra_pct ? <TRow k={`Add ${totals.extra_pct}%`} v={fmtArea(totals.quote_area)} strong /> : null}
+              <TRow k="Vertical set (walls + columns)" v={fmtArea(totals.vertical_area)} />
+              {totals.floors > 1 ? <TRow k={`All ${totals.floors} floors`} v={fmtArea(totals.quote_area * totals.floors)} /> : null}
             </tbody>
           </table>
           {totals.column_sizes.length ? (
@@ -706,8 +778,15 @@ function TRow({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
 function IconBtn({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return <button type="button" aria-label={label} title={label} onClick={onClick} className="rounded-md p-1.5 text-graphite-300 hover:bg-graphite-800">{children}</button>;
 }
+function Cell({ value, text, disabled, onChange }: { value: number | string | undefined; text?: boolean; disabled?: boolean; onChange: (v: number | string) => void }) {
+  const [s, setS] = useState(String(value ?? ""));
+  useEffect(() => { if (text ? s !== String(value ?? "") : Number(s) !== Number(value ?? 0)) setS(String(value ?? "")); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  return text
+    ? <input type="text" maxLength={60} disabled={disabled} value={s} className={numIn} onChange={(e) => { setS(e.target.value); onChange(e.target.value); }} />
+    : <input type="number" min={0} step="any" disabled={disabled} value={s} className={numIn} onChange={(e) => { setS(e.target.value); const n = Number(e.target.value); onChange(Number.isFinite(n) && n >= 0 ? n : 0); }} />;
+}
 function RowsEditor<R extends Record<string, number | string | undefined>>({ rows, cols, blank, onChange, disabled }: {
-  rows: R[]; cols: { k: keyof R & string; label: string }[]; blank: R; onChange: (r: R[]) => void; disabled?: boolean;
+  rows: R[]; cols: { k: keyof R & string; label: string; text?: boolean }[]; blank: R; onChange: (r: R[]) => void; disabled?: boolean;
 }) {
   return (
     <div>
@@ -719,8 +798,7 @@ function RowsEditor<R extends Record<string, number | string | undefined>>({ row
               <tr key={i}>
                 {cols.map((c) => (
                   <td key={c.k} className="pb-1 pr-1">
-                    <input type="number" min={0} step="any" disabled={disabled} value={String(r[c.k] ?? "")} className={numIn}
-                      onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, [c.k]: Math.max(0, Number(e.target.value) || 0) } : x)))} />
+                    <Cell value={r[c.k]} text={c.text} disabled={disabled} onChange={(v) => onChange(rows.map((x, j) => (j === i ? { ...x, [c.k]: v } : x)))} />
                   </td>
                 ))}
                 <td className="pb-1">{!disabled ? <button type="button" aria-label="Remove row" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="p-1 text-graphite-500 hover:text-signal-red"><Trash2 className="size-3.5" /></button> : null}</td>

@@ -12,9 +12,9 @@ export type QuoteOption = {
 };
 
 const BASIS: { k: AreaBasis; label: string; hint: string }[] = [
-  { k: "plan_area", label: "Floor plate area", hint: "Full set (monolithic) quick quotes" },
-  { k: "vertical_area", label: "Walls + columns area", hint: "Vertical set quick quotes" },
-  { k: "contact_area", label: "Total contact area", hint: "All formwork surfaces" },
+  { k: "quote_area", label: "Full set area (typical floor + extra %)", hint: "Full set (monolithic) quick quotes" },
+  { k: "vertical_area", label: "Vertical set area (walls + columns)", hint: "Vertical set quick quotes" },
+  { k: "plan_area", label: "Slab area only", hint: "Slab outline less ducts" },
 ];
 
 export function UseInQuotation({ planId, lead, quotes, totals, dirty, canEdit }: {
@@ -43,7 +43,7 @@ export function UseInQuotation({ planId, lead, quotes, totals, dirty, canEdit }:
       ) : (
         <ul className="space-y-2">
           {quotes.map((q) => {
-            const preferred: AreaBasis = q.formwork_type === "vertical" ? "vertical_area" : "plan_area";
+            const preferred: AreaBasis = q.formwork_type === "vertical" ? "vertical_area" : "quote_area";
             return (
               <li key={q.id} className="rounded-md border border-graphite-800 bg-graphite-950 p-2">
                 <div className="flex items-center justify-between gap-2">
@@ -54,7 +54,7 @@ export function UseInQuotation({ planId, lead, quotes, totals, dirty, canEdit }:
                 {!q.editable ? <p className="mt-1 text-[11px] text-graphite-500">Locked — create a revision on the quotation to change it.</p> : q.type === "quick" ? (
                   <div className="mt-1.5 flex flex-col gap-1">
                     {BASIS.map((b) => (
-                      <button key={b.k} type="button" disabled={dirty || !!busy || !(totals[b.k] > 0)}
+                      <button key={b.k} type="button" disabled={dirty || !!busy || !(Number(totals[b.k]) > 0)}
                         onClick={() => run(q.id + b.k, () => applyPlanArea(q.id, planId, b.k), `${q.code} now uses ${fmtArea(totals[b.k])} and prints this plan.`)}
                         className={`flex items-center justify-between rounded px-2 py-1.5 text-left text-xs disabled:opacity-40 ${b.k === preferred ? "bg-brand-orange text-white hover:opacity-90" : "border border-graphite-700 text-graphite-200 hover:bg-graphite-800"}`}>
                         <span>{busy === q.id + b.k ? <Loader2 className="mr-1 inline size-3 animate-spin" /> : null}Use {b.label}</span>

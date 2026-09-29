@@ -9,7 +9,7 @@ type Lead = { id: string; lead_code: string; customer_name: string; project_name
 type Rate = { formwork_type: string; rate_per_sqm: number };
 
 const AREA_BASIS_HINT: Record<string, string> = {
-  monolithic: "Floor plate area (walls + slab + beams cast together)",
+  monolithic: "Total formwork contact area of a typical floor (slab + walls + beams + stairs)",
   vertical: "Vertical formwork face area (walls/columns only, slab separate)",
 };
 
@@ -72,7 +72,7 @@ export function QuickQuoteForm({ leads, rates, nextCode, leadId, prefill, areaDe
           <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Area (sqm) — {AREA_BASIS_HINT[formworkType]}</label>
           {plan ? (
             <p className="text-xs text-signal-green">
-              From floor plan “{plan.name}”: floor plate {plan.monolithic.toLocaleString("en-IN")} m² · walls + columns {plan.vertical.toLocaleString("en-IN")} m². The plan is printed on the quotation.
+              From floor plan “{plan.name}”: full set {plan.monolithic.toLocaleString("en-IN")} m² · vertical set (walls + columns) {plan.vertical.toLocaleString("en-IN")} m². The plan is printed on the quotation.
               <input type="hidden" name="floorPlanId" value={plan.id} />
             </p>
           ) : null}

@@ -3,8 +3,8 @@
 # --- GNU LibreDWG (open source, GPL-3): provides `dwg2dxf` so AutoCAD .dwg floor plans can be read.
 #     Runs as a separate program; built in its own stage so it is cached between deploys.
 FROM node:22-slim AS libredwg
-ARG LIBREDWG_VERSION=0.13.3
-ARG LIBREDWG_SHA256=83f1f6e78a744777a481ff4520e4cef3f8ac4b2c1c25671077ca12fe81e8816e
+ARG LIBREDWG_VERSION=0.14.8597
+ARG LIBREDWG_SHA256=af2646681858a78d756cfb9e0eeb6901f61be3d09ae8f56a98e94b1490dec4ed
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils \
  && curl -fsSL -o /tmp/libredwg.tar.xz "https://github.com/LibreDWG/libredwg/releases/download/${LIBREDWG_VERSION}/libredwg-${LIBREDWG_VERSION}.tar.xz" \
  && echo "${LIBREDWG_SHA256}  /tmp/libredwg.tar.xz" | sha256sum -c - \

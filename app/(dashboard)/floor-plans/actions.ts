@@ -100,8 +100,12 @@ const totalsSchema = z.object({
   column_count: z.number().int().min(0).max(100000), column_area: num,
   column_sizes: z.array(z.object({ size: z.string().max(40), qty: z.number().int().min(0).max(100000) })).max(200),
   beam_area: num, vertical_area: num, contact_area: num, clear_height: num,
+  extra_area: num.default(0), wall_top_area: num.default(0), extra_pct: z.number().min(0).max(100).default(0), quote_area: num.default(0),
   floors: z.number().int().min(1).max(500),
-  params: z.object({ floorHeight: z.number().min(0).max(50), slabMm: z.number().min(0).max(2000), floors: z.number().min(1).max(500) }),
+  params: z.object({
+    floorHeight: z.number().min(0).max(50), slabMm: z.number().min(0).max(2000), floors: z.number().min(1).max(500),
+    wallTopM2: num.optional(), includeEdges: z.boolean().optional(), extraPct: z.number().min(0).max(100).optional(),
+  }),
   source: z.enum(["manual", "dxf", "mixed"]),
 });
 
@@ -164,13 +168,13 @@ export async function attachFloorPlan(quotationId: string, planId: string | null
   return { ok: true };
 }
 
-export type AreaBasis = "plan_area" | "vertical_area" | "contact_area";
+export type AreaBasis = "plan_area" | "vertical_area" | "contact_area" | "quote_area";
 
 /** Attaches the plan and copies one of its measured areas into a quick quote's area. */
 export async function applyPlanArea(quotationId: string, planId: string, basis: AreaBasis): Promise<Result<{ area: number }>> {
   const denied = await guard(); if (denied) return { error: denied };
   if (!uuid.safeParse(quotationId).success || !uuid.safeParse(planId).success) return { error: "Invalid request." };
-  if (!["plan_area", "vertical_area", "contact_area"].includes(basis)) return { error: "Invalid area type." };
+  if (!["plan_area", "vertical_area", "contact_area", "quote_area"].includes(basis)) return { error: "Invalid area type." };
   const supabase = await createClient();
   const { data: plan } = await supabase.from("floor_plans").select("totals").eq("id", planId).maybeSingle();
   if (!plan) return { error: "Floor plan not found." };
