@@ -245,3 +245,29 @@ export async function sendWallsToDesign(planId: string, designId: string, thickn
   revalidatePath(`/designs/${designId}`);
   return { ok: true, data: { count: rows.length } };
 }
+
+/**
+ * Floor plan panel layout → a normal draft BOM under a chosen design. From there the existing BOM screen
+ * approves it and releases it to production (production order + work orders).
+ */
+export async function createBomFromFloorPlan(planId: string, designId: string, q: { h?: string; kg?: string; prop?: string }): Promise<Result<{ bomId: string }>> {
+  try { await requirePermission("bom", "generate"); } catch { return { error: "Your role can't create BOMs." }; }
+  if (!uuid.safeParse(planId).success || !uuid.safeParse(designId).success) return { error: "Choose a design first." };
+  const supabase = await createClient();
+  const { runPanels } = await import("@/lib/floor-plans/run-panels");
+  const r = await runPanels(supabase, planId, q ?? {});
+  if (!r) return { error: "Floor plan not found." };
+  if (r.error || !r.result) return { error: r.error ?? "Measure and save this floor plan first." };
+  const items = r.result.bom
+    .filter((b) => b.group !== "accessory" && b.qty > 0)
+    .map((b) => ({ code: b.code, qty: Math.round(b.qty), unitWeight: b.qty ? b.weight / b.qty : 0, width: b.w || 0 }));
+  if (!items.length) return { error: "The panel layout is empty." };
+  const s = r.result.summary;
+  const { data, error } = await supabase.rpc("create_bom_from_floor_plan", {
+    p_design_id: designId, p_floor_plan_id: planId, p_items: items,
+    p_summary: { standardPct: s.standardPct, weight: s.weight, panelArea: s.panelArea },
+  });
+  if (error || !data) return { error: dbError(error?.message ?? "Could not create the BOM.") };
+  revalidatePath("/boms"); revalidatePath(`/designs/${designId}`);
+  return { ok: true, data: { bomId: data as string } };
+}

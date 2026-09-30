@@ -4,6 +4,8 @@ import { Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { runPanels, type PanelQuery } from "@/lib/floor-plans/run-panels";
 import { fmtArea } from "@/lib/floor-plans/calc";
+import { hasPermission } from "@/lib/auth/permissions";
+import { CreateBom } from "./create-bom";
 
 export const metadata = { title: "Panel layout & BOM" };
 export const dynamic = "force-dynamic";
@@ -25,6 +27,14 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
   const s = result.summary;
   const qs = new URLSearchParams({ h: String(opt.stdHeight), kg: String(opt.kgPerM2), prop: String(opt.propSpacing) }).toString();
   const groups = [...new Set(result.bom.map((b) => b.group))];
+  const canBom = await hasPermission("bom", "generate");
+  const { data: designRows } = canBom
+    ? await supabase.from("designs").select("id, design_code, projects ( project_code, customer_name )").order("created_at", { ascending: false }).limit(100)
+    : { data: null };
+  const designs = (designRows ?? []).map((d) => {
+    const pr = Array.isArray(d.projects) ? d.projects[0] : d.projects;
+    return { id: d.id, code: d.design_code, project: pr ? `${pr.project_code} ${pr.customer_name ?? ""}`.trim() : "" };
+  });
 
   return (
     <div className="fade-in">
@@ -63,6 +73,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
           </div>
         ))}
       </div>
+      {canBom ? <CreateBom planId={id} designs={designs} query={{ h: String(opt.stdHeight), kg: String(opt.kgPerM2), prop: String(opt.propSpacing) }} /> : null}
       {s.warnings.length ? (
         <ul className="mt-3 space-y-1 rounded-md border border-signal-amber/30 bg-signal-amber/10 px-3 py-2 text-xs text-signal-amber">
           {s.warnings.map((w) => <li key={w}>• {w}</li>)}

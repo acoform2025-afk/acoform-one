@@ -2306,6 +2306,10 @@ export type Database = {
         }
         Returns: string
       }
+      create_bom_from_floor_plan: {
+        Args: { p_design_id: string; p_floor_plan_id: string; p_items: Json; p_summary: Json }
+        Returns: string
+      }
       generate_bom_from_design: {
         Args: { p_design_id: string }
         Returns: string
