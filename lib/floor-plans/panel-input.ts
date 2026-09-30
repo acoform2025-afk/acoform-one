@@ -137,7 +137,10 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
     let L = 0; for (let i = 1; i < s.pts.length; i++) L += mm(Math.hypot(s.pts[i][0] - s.pts[i - 1][0], s.pts[i][1] - s.pts[i - 1][1]));
     beams.push({ code: s.code, length: L, b: s.b ?? t.params.beamWidthMm ?? 200, d: s.d ?? t.params.beamDepthMm ?? 600, sides: 2, bottom: true });
   }
-  for (const [i, b] of (t.beams ?? []).entries()) if (b.length_m > 0 && b.qty > 0) beams.push({ code: b.label || `BT${i + 1}`, length: b.length_m * 1000 * b.qty, b: 0, d: b.depth_mm, sides: 1, bottom: false });
+  for (const [i, b] of (t.beams ?? []).entries()) if (b.length_m > 0 && b.qty > 0) {
+    const sides = b.sides == null ? 1 : Math.max(1, Math.min(2, Math.round(b.sides))) as 1 | 2;
+    beams.push({ code: b.label || `BT${i + 1}`, length: b.length_m * 1000 * b.qty, b: b.bottom ? Number(b.width_mm) || 0 : 0, d: b.depth_mm, sides, bottom: !!b.bottom });
+  }
   for (const l of g.dxf.beams ?? []) {
     let L = 0; for (let i = 1; i < l.pts.length; i++) L += mm(Math.hypot(l.pts[i][0] - l.pts[i - 1][0], l.pts[i][1] - l.pts[i - 1][1]));
     if (L > 100) beams.push({ code: "BL", length: L, b: 0, d: t.params.beamDepthMm ?? 600, sides: 1, bottom: false });

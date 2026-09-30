@@ -339,7 +339,7 @@ export function closedLoops(paths: DxfPath[], tol: number, closeGaps = false): P
 const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
-export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean): DxfAuto {
+export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4): DxfAuto {
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)));
   const u = unitToM, u2 = unitToM * unitToM;
   const tol = 0.005 / u;                                      // 5 mm in drawing units
@@ -358,7 +358,8 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   }
 
   // openings: closed loops + boxes marked with an X
-  const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]);
+  // IS 1200-5: openings under 0.4 m² are not deducted
+  const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]).filter((x) => x.a * u2 >= minOpeningM2);
 
   // slab: slab layer outlines; if none, the outer face of the walls
   let slab = outermost(loops("slab"));

@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, UNIT_TO_M,
+  computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
 import { dxfAuto, dxfFrame, drawDxf, planCandidates, readDxf, ROLE_COLOR, snapPoints, type DxfModel } from "@/lib/floor-plans/dxf";
@@ -663,8 +663,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
             Wall tops ≈ wall length × thickness — at 150 mm that is {fmtArea(totals.wall_length * 0.15)}; at 125 mm {fmtArea(totals.wall_length * 0.125)}.
           </p>
           <label className="mt-2 flex items-center gap-2 text-xs text-graphite-300">
-            <input type="checkbox" disabled={!canEdit} checked={!!t.params.includeEdges} onChange={(e) => update((p) => ({ ...p, params: { ...p.params, includeEdges: e.target.checked } }))} />
-            Add slab &amp; opening edge formwork (perimeter × slab thickness)
+            <input type="checkbox" disabled={!canEdit} checked={t.params.includeEdges !== false} onChange={(e) => update((p) => ({ ...p, params: { ...p.params, includeEdges: e.target.checked } }))} />
+            Slab &amp; duct edge formwork (perimeter × slab thickness) — IS 1200-5, on by default
           </label>
         </Panel>
 
@@ -760,16 +760,20 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           />
         </Panel>
 
-        <Panel title="Beams" hint="Area = side length × (beam depth − slab). Enter the total length of beam sides to shutter (both sides). The beam bottom is already in the slab area.">
+        <Panel title="Beams" hint="IS 1200-5: sides and soffits of beams. Area = length × Nos × [sides × (D − slab) + Ext × D + Btm × b]. Internal beam: Sides 2. Edge beam: Sides 1 + Ext 1 (outer face full depth). Btm 1 only if the beam soffit is outside the slab outline. If Length is already the total side length (ACOFORM sheet), use Sides 1.">
           <RowsEditor
             rows={t.beams} disabled={!canEdit}
-            cols={[{ k: "depth_mm", label: "Depth mm" }, { k: "length_m", label: "Side length m" }, { k: "qty", label: "Nos." }]}
-            blank={{ depth_mm: 600, length_m: 10, qty: 1 }}
+            cols={[{ k: "label", label: "Mark", text: true }, { k: "width_mm", label: "b mm" }, { k: "depth_mm", label: "D mm" }, { k: "length_m", label: "Length m" }, { k: "qty", label: "Nos" }, { k: "sides", label: "Sides" }, { k: "ext", label: "Ext" }, { k: "bottom", label: "Btm" }]}
+            blank={{ label: `B${t.beams.length + 1}`, width_mm: 230, depth_mm: 600, length_m: 4, qty: 1, sides: 2, ext: 0, bottom: 0 }}
             onChange={(rows) => update((p) => ({ ...p, beams: rows }))}
           />
         </Panel>
 
-        <Panel title="Staircase & other items" hint="Lump-sum areas added to the floor total, e.g. ST1 = 100 m².">
+        <Panel title="Staircase" hint="Per flight: waist slab soffit (width × sloped length) + riser faces + open side cheeks + landing soffit, × number of flights. Sizes in mm, landing in m².">
+          <StairsEditor rows={t.stairs ?? []} disabled={!canEdit} onChange={(rows) => update((p) => ({ ...p, stairs: rows }))} />
+        </Panel>
+
+        <Panel title="Other items (lump sum)" hint="Lump-sum areas added to the floor total, e.g. ST1 = 100 m² if you don't use the staircase calculator.">
           <RowsEditor
             rows={t.extras ?? []} disabled={!canEdit}
             cols={[{ k: "label", label: "Item", text: true }, { k: "area_m2", label: "Area m²" }]}
@@ -799,7 +803,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
             <tbody className="divide-y divide-graphite-800">
               <TRow k="Slab area (less ducts)" v={fmtArea(totals.plan_area)} />
               <TRow k={`1 · Slab${totals.wall_top_area ? ` (− ${fmtArea(totals.wall_top_area)} wall tops)` : ""}`} v={fmtArea(totals.slab_soffit)} />
-              {t.params.includeEdges ? <TRow k="Slab & opening edges" v={fmtArea(totals.slab_edge)} /> : null}
+              {totals.slab_edge ? <TRow k="Slab & duct edges (perimeter × slab)" v={fmtArea(totals.slab_edge)} /> : null}
               <TRow k={`2 · Walls · ${fmtLen(totals.wall_length * 2)} faces`} v={fmtArea(totals.wall_area)} />
               {totals.column_count ? <TRow k={`Columns · ${totals.column_count} nos.`} v={fmtArea(totals.column_area)} /> : null}
               <TRow k="3 · Beams" v={fmtArea(totals.beam_area)} />
@@ -810,6 +814,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
               {totals.floors > 1 ? <TRow k={`All ${totals.floors} floors (typical × ${totals.floors})`} v={fmtArea(totals.quote_area * totals.floors)} strong /> : null}
             </tbody>
           </table>}
+          {!needPick ? <p className="mt-2 text-[11px] text-graphite-500">Measured as per IS 1200 (Part 5) — contact area: openings under 0.4 m² not deducted, slab &amp; duct edges and door/window reveals included, beams sides (+ outer face / soffit where marked), staircase soffit + risers + stringers.</p> : null}
           {totals.column_sizes.length ? (
             <p className="mt-2 text-[11px] text-graphite-500">Column sizes: {totals.column_sizes.map((c) => `${c.qty} × ${c.size}`).join(", ")}</p>
           ) : null}
@@ -817,7 +822,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
         </Panel>
 
         <Panel title={`Formwork area list (${totals.items.length})`} hint="Every element with its working — printed on the quotation.">
-          {totals.items.length === 0 ? <p className="text-xs text-graphite-500">Nothing measured yet.</p> : (
+          {needPick ? <p className="text-xs text-signal-amber">Choose the typical floor plan first (orange boxes on the drawing, or the buttons above).</p> : totals.items.length === 0 ? <p className="text-xs text-graphite-500">Nothing measured yet.</p> : (
             <div className="max-h-80 overflow-y-auto">
               <table className="w-full text-[11px]">
                 <tbody className="divide-y divide-graphite-800">
@@ -966,6 +971,41 @@ function Cell({ value, text, disabled, onChange }: { value: number | string | un
     ? <input type="text" maxLength={60} disabled={disabled} value={s} className={numIn} onChange={(e) => { setS(e.target.value); onChange(e.target.value); }} />
     : <input type="number" min={0} step="any" disabled={disabled} value={s} className={numIn} onChange={(e) => { setS(e.target.value); const n = Number(e.target.value); onChange(Number.isFinite(n) && n >= 0 ? n : 0); }} />;
 }
+function StairsEditor({ rows, onChange, disabled }: { rows: StairRow[]; onChange: (r: StairRow[]) => void; disabled?: boolean }) {
+  const F: { k: keyof StairRow; label: string; text?: boolean }[] = [
+    { k: "label", label: "Mark", text: true }, { k: "flights", label: "Flights" }, { k: "width_mm", label: "Width mm" },
+    { k: "risers", label: "Risers / flight" }, { k: "riser_mm", label: "Riser mm" }, { k: "tread_mm", label: "Tread mm" },
+    { k: "waist_mm", label: "Waist mm" }, { k: "open_sides", label: "Open sides (0-2)" }, { k: "landing_m2", label: "Landing m² / flight" },
+  ];
+  const set = (i: number, k: keyof StairRow, v: number | string) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => {
+        const b = stairBreakdown(r);
+        return (
+          <div key={i} className="rounded-md border border-graphite-800 p-2">
+            <div className="grid grid-cols-3 gap-1.5">
+              {F.map((f) => (
+                <label key={f.k} className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wide text-graphite-500">{f.label}
+                  <Cell value={r[f.k] as number | string | undefined} text={f.text} disabled={disabled} onChange={(v) => set(i, f.k, v)} />
+                </label>
+              ))}
+            </div>
+            <div className="mt-1.5 flex items-start justify-between gap-2 text-[11px]">
+              <span className="text-graphite-400">{b ? `Sloped length ${b.slope.toFixed(2)} m · soffit ${b.soffit.toFixed(2)} + risers ${b.risers.toFixed(2)}${b.cheeks ? ` + sides ${b.cheeks.toFixed(2)}` : ""}${b.landing ? ` + landing ${b.landing.toFixed(2)}` : ""} per flight` : "Fill in flights, width and risers."}</span>
+              <span className="whitespace-nowrap font-mono text-graphite-100">{b ? `${b.total.toFixed(2)} m²` : ""}</span>
+            </div>
+            {!disabled ? <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="mt-1 text-[11px] text-signal-red hover:underline">Remove</button> : null}
+          </div>
+        );
+      })}
+      {!disabled ? (
+        <button type="button" onClick={() => onChange([...rows, { label: `ST${rows.length + 1}`, flights: 2, width_mm: 1200, risers: 9, riser_mm: 160, tread_mm: 280, waist_mm: 150, open_sides: 0, landing_m2: 0 }])} className="text-xs font-medium text-brand-orange hover:underline">+ Add staircase</button>
+      ) : null}
+    </div>
+  );
+}
+
 function RowsEditor<R extends Record<string, number | string | undefined>>({ rows, cols, blank, onChange, disabled }: {
   rows: R[]; cols: { k: keyof R & string; label: string; text?: boolean }[]; blank: R; onChange: (r: R[]) => void; disabled?: boolean;
 }) {

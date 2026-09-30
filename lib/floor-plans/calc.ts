@@ -22,13 +22,21 @@ export type Shape = {
 export const OPENING_DEFAULTS = { doorH: 2100, windowH: 1200, windowSill: 900, loftT: 75, loftLvl: 2100 };
 export type ColumnRow = { w_mm: number; d_mm: number; qty: number };
 /** Beam sides to shutter: side length (both sides) × (depth − slab). The beam bottom is already in the slab area. */
-export type BeamRow = { label?: string; width_mm?: number; depth_mm: number; length_m: number; qty: number };
+/**
+ * Beam row. sides: 2 = internal beam (both sides below the slab), 1 = one side (edge beam inner side, or when the
+ * length typed is already the total side length, as on the ACOFORM sheet). bottom: 1 = add the beam soffit
+ * (only when it is outside the slab outline). Rows saved before sides existed mean "total side length".
+ */
+export type BeamRow = { label?: string; width_mm?: number; depth_mm: number; length_m: number; qty: number; sides?: number; bottom?: number; ext?: number };   // ext: 1 = outer face of an edge beam (full depth)
+/** Staircase flight: waist soffit + risers + open side cheeks + landing soffit (all per flight × flights). */
+export type StairRow = { label?: string; width_mm: number; risers: number; riser_mm: number; tread_mm: number; waist_mm: number; open_sides?: number; landing_m2?: number; flights: number };
 /** Lump-sum items such as a staircase (ST1 = 100 m²). */
 export type ExtraRow = { label: string; area_m2: number };
 export type Params = {
   floorHeight: number; slabMm: number; floors: number;
   wallTopM2?: number;       // slab deduction for wall tops (m²)
-  includeEdges?: boolean;   // add slab / opening edge formwork (default off)
+  includeEdges?: boolean;   // add slab / opening edge formwork (default on — IS 1200-5: edges of slabs are measured)
+  minOpeningM2?: number;    // openings smaller than this are not deducted (IS 1200-5: 0.4 m²)
   extraPct?: number;        // add % on the typical-floor total (e.g. 10)
   beamDepthMm?: number;     // default beam depth (drawn beams and DXF beam layers)
   beamWidthMm?: number;     // default width of drawn beams
@@ -51,6 +59,7 @@ export type Takeoff = {
   columns: ColumnRow[];                // columns typed in by size
   beams: BeamRow[];
   extras?: ExtraRow[];
+  stairs?: StairRow[];
   shell?: ShellMeta;
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null };
 };
@@ -129,6 +138,18 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const n3 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
+/** Staircase flight formwork (m²): waist soffit (width × sloped length) + riser faces + open side cheeks + landing soffit, × flights. */
+export function stairBreakdown(st: StairRow) {
+  const f = Math.max(0, Math.round(Number(st.flights) || 0)), n = Math.max(0, Math.round(Number(st.risers) || 0));
+  const W = Math.max(0, Number(st.width_mm) || 0) / 1000, R = Math.max(0, Number(st.riser_mm) || 0) / 1000, T = Math.max(0, Number(st.tread_mm) || 0) / 1000, w = Math.max(0, Number(st.waist_mm) || 0) / 1000;
+  if (!f || !n || !W) return null;
+  const slope = n * Math.hypot(R, T);
+  const soffit = W * slope, risers = n * W * R;
+  const cheeks = Math.max(0, Math.min(2, Math.round(Number(st.open_sides) || 0))) * (n * R * T / 2 + slope * w);
+  const landing = Math.max(0, Number(st.landing_m2) || 0);
+  return { f, n, R, T, slope, soffit, risers, cheeks, landing, total: (soffit + risers + cheeks + landing) * f };
+}
+
 export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
   const { floorHeight, slabMm, floors } = t.params;
   const slab = Math.max(0, slabMm) / 1000;
@@ -138,6 +159,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
   const cnt: Record<string, number> = {};
   const code = (p: string, own?: string) => (own && own.trim() ? own.trim().slice(0, 20) : `${p}${(cnt[p] = (cnt[p] ?? 0) + 1)}`);
   const hOf = (s: Shape) => (s.h && s.h > 0 ? s.h / 1000 : H);
+  const minOpen = t.params.minOpeningM2 != null ? Math.max(0, Number(t.params.minOpeningM2) || 0) : 0.4;
 
   let slabArea = 0, slabPer = 0, openArea = 0, openPer = 0, wallCentre = 0, wallFaces = 0, wallArea = 0, wallTopDrawn = 0;
   let colCount = 0, colPerimeter = 0, colFoot = 0, colArea = 0, beamArea = 0, loftArea = 0;
@@ -155,6 +177,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
         slabArea += m.area; slabPer += m.perimeter;
         items.push({ code: code("S", s.label), group: "slab", label: `Slab${s.t ? ` ${s.t} thk` : ""}${s.lvl ? ` (${s.lvl > 0 ? "+" : ""}${s.lvl})` : ""}`, calc: `outline ${n2(m.area)} m²`, area: m.area });
       } else if (s.kind === "opening") {
+        if (m.area < minOpen) { items.push({ code: code("D", s.label), group: "deduct", label: `Duct / opening under ${minOpen} m² — not deducted (IS 1200-5)`, calc: `${n2(m.area)} m²`, area: 0 }); continue; }
         openArea += m.area; openPer += m.perimeter;
         items.push({ code: code("D", s.label), group: "deduct", label: "Duct / opening", calc: `− ${n2(m.area)} m²`, area: -m.area });
       } else if (s.kind === "wall") {
@@ -178,6 +201,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
         const isDoor = s.kind === "door";
         const w = m.length, h = (s.h && s.h > 0 ? s.h : isDoor ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH) / 1000;
         const thk = (s.t && s.t > 0 ? s.t : Number(t.params.wallThkMm) || 150) / 1000;
+        if (w * h < minOpen) continue;                                   // small opening: not deducted, sides not added (IS 1200-5)
         const faces = 2 * w * h, reveal = (2 * h + w * (isDoor ? 1 : 2)) * thk;
         const c = code(isDoor ? "DR" : "WN", s.label);
         wallArea -= faces; wallArea += reveal;
@@ -218,13 +242,25 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     colCount += q; colPerimeter += per * q; colFoot += (c.w_mm * c.d_mm) / 1e6 * q; colArea += per * q * H; addSize(c.w_mm / 1000, c.d_mm / 1000, q);
     items.push({ code: code("C"), group: "column", label: `${q} × column ${c.w_mm}×${c.d_mm}`, calc: `${q} × ${n2(per)} m × ${n3(H)} m`, area: per * q * H });
   }
+  let extraArea = 0;
   for (const b of t.beams) {
     const q = Math.max(0, b.qty || 0); if (!q || b.length_m <= 0) continue;
-    const a = b.length_m * Math.max(0, b.depth_mm / 1000 - slab) * q;
+    const sides = b.sides == null ? 1 : Math.max(0, Math.min(2, Math.round(b.sides)));
+    const bw = Math.max(0, Number(b.width_mm) || 0) / 1000, side = Math.max(0, b.depth_mm / 1000 - slab);
+    const bottom = b.bottom ? bw : 0;
+    const ext = b.ext ? b.depth_mm / 1000 : 0;                          // outer face of an edge beam: full depth
+    const a = b.length_m * (sides * side + ext + bottom) * q;
     beamArea += a;
-    items.push({ code: code("B", b.label), group: "beam", label: `Beam sides, depth ${b.depth_mm}`, calc: `${q > 1 ? `${q} × ` : ""}${n2(b.length_m)} m × (${n3(b.depth_mm / 1000)} − ${n3(slab)}) m`, area: a });
+    const parts = [sides ? `${sides > 1 ? `${sides} × ` : ""}(${n3(b.depth_mm / 1000)} − ${n3(slab)})` : "", ext ? `${n3(ext)} outer face` : "", bottom ? `${n3(bw)} bottom` : ""].filter(Boolean).join(" + ");
+    items.push({ code: code("B", b.label), group: "beam", label: `Beam${bw ? ` ${Math.round(bw * 1000)}×${b.depth_mm}` : `, depth ${b.depth_mm}`}${sides === 2 ? " (2 sides)" : ""}${ext ? " edge beam" : ""}${bottom ? " + bottom" : ""}`, calc: `${q > 1 ? `${q} × ` : ""}${n2(b.length_m)} m × [${parts}] m`, area: a });
   }
-  let extraArea = 0;
+  for (const st of t.stairs ?? []) {
+    const b = stairBreakdown(st); if (!b) continue;
+    const { f, n, R, T, soffit, risers, cheeks, landing, total: a } = b;
+    extraArea += a;
+    items.push({ code: code("ST", st.label), group: "extra", label: `Staircase${st.label ? ` ${st.label}` : ""} — ${f} flight${f > 1 ? "s" : ""} × ${n} risers ${Math.round(R * 1000)}/${Math.round(T * 1000)}`,
+      calc: `${f > 1 ? `${f} × ` : ""}(soffit ${n2(soffit)} + risers ${n2(risers)}${cheeks ? ` + stringers ${n2(cheeks)}` : ""}${landing ? ` + landing soffit ${n2(landing)}` : ""})`, area: a });
+  }
   for (const x of t.extras ?? []) {
     const a = Math.max(0, Number(x.area_m2) || 0); if (!a) continue;
     extraArea += a;
@@ -238,10 +274,10 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
 
   const plan = Math.max(0, slabArea - openArea);
   const soffit = Math.max(0, plan - wallTop - colFoot);
-  const edge = t.params.includeEdges ? (slabPer + openPer) * slab : 0;
+  const edge = t.params.includeEdges !== false ? (slabPer + openPer) * slab : 0;
   if (edge) items.push({ code: "E", group: "edge", label: "Slab & opening edges", calc: `${n2(slabPer + openPer)} m × ${n3(slab)} m`, area: edge });
   const contact = soffit + edge + wallArea + colArea + beamArea + extraArea + loftArea;
-  const hasManual = t.shapes.length > 0 || t.columns.length > 0 || t.beams.length > 0 || extraArea > 0;
+  const hasManual = t.shapes.length > 0 || t.columns.length > 0 || t.beams.length > 0 || (t.stairs ?? []).length > 0 || extraArea > 0;
   const order = { slab: 0, deduct: 1, edge: 2, wall: 3, opening: 4, column: 5, beam: 6, loft: 7, extra: 8 } as const;
   items.sort((x, y) => order[x.group] - order[y.group]);
   return {
