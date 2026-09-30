@@ -67,3 +67,7 @@ returns and repairs.
 - Rules v1 (standard Mivan, to tune with ACOFORM drawings): fewest catalogue wall panels per face (50 mm DP), gaps < 25 mm taken in joints, faces ≤ 250 mm = stop-ends, walls taller than the standard panel get WT top strips, 65 mm corner per ~90° joint (IC/EC to confirm), deck strips of 1200 filled with 600/450/300 and scaled to net soffit, props @ spacing, soffit corner along top of faces, beam sides (D − slab) and bottoms (b) in 1200 lengths. Custom items weighed at kg/m² (default 20).
 - Page `/floor-plans/[id]/panels` (options h, kg, prop in the query string) + `/panels/export?format=csv|pdf` (lib/pdf/panel-bom-document.tsx).
 - Gorwa check: ≈ 3,018 m² of panels, 56.7 t, 18.8 kg/m² (quote says 19–21 kg/m²).
+
+## Floor plan → production & panel layout drawing
+- Panels page (`/floor-plans/[id]/panels`) → "Send to production": choose a design → `createBomFromFloorPlan` (floor-plans/actions.ts) reruns the layout and calls RPC `create_bom_from_floor_plan` (migration 00040, applied in Supabase). It makes a **draft BOM** (panels only; props/accessories excluded) plus a layout option (option_number > 100, "Floor plan auto layout"). Then the normal BOM page: Approve → Release to production → work orders.
+- Layout drawing: `/floor-plans/[id]/panels/drawing` (A3 PDF) or `?format=dxf` (PANEL-FACE / PANEL-JOINT / PANEL-FILLER / PANEL-TEXT layers on top of the shell plan). Face geometry comes from `Face.geo` (panel-input.ts) and `lib/floor-plans/panel-marks.ts`.

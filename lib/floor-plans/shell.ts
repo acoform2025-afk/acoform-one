@@ -134,7 +134,8 @@ export function stripOutline(pts: Pt[], halfPx: number): Pt[][] {
 }
 
 /** Minimal AutoCAD R12 DXF (LINE + TEXT on named layers, mm) — opens in any AutoCAD / BricsCAD / LibreCAD. */
-export function shellToDxf(g: ShellGeometry): string {
+export type DxfPen = { line: (layer: string, a: Pt, b: Pt) => void; text: (layer: string, at: Pt, s: string, hMm: number) => void; textH: number };
+export function shellToDxf(g: ShellGeometry, extra?: (pen: DxfPen) => void): string {
   const out: string[] = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "9", "$INSUNITS", "70", "4", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"];
   const line = (layer: string, a: Pt, b: Pt) => {
     const [x1, y1] = g.toMm(a), [x2, y2] = g.toMm(b);
@@ -160,6 +161,7 @@ export function shellToDxf(g: ShellGeometry): string {
   }
   const textH = Math.max(50, Math.min(400, ((g.box[2] - g.box[0]) * (g.mpp || 0.01) * 1000) / 120));
   for (const tg of g.tags) text("SHELL-TEXT", tg.at, tg.text, textH);
+  extra?.({ line, text, textH });
   out.push("0", "ENDSEC", "0", "EOF");
   return out.join("\r\n");
 }

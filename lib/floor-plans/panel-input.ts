@@ -24,9 +24,11 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
   // drawn walls: both faces of every segment
   for (const s of g.shapes.filter((x) => x.kind === "wall")) {
     const h = s.h && s.h > 0 ? s.h : H;
+    const half = mpp > 0 ? ((s.t ?? t.params.wallThkMm ?? 150) / 2000) / mpp : 2;
     for (let i = 1; i < s.pts.length; i++) {
       const L = mm(Math.hypot(s.pts[i][0] - s.pts[i - 1][0], s.pts[i][1] - s.pts[i - 1][1]));
-      faces.push({ code: `${s.code}.${i}A`, length: L, height: h }, { code: `${s.code}.${i}B`, length: L, height: h });
+      const a = s.pts[i - 1], b = s.pts[i];
+      faces.push({ code: `${s.code}.${i}A`, length: L, height: h, geo: { a, b, off: half } }, { code: `${s.code}.${i}B`, length: L, height: h, geo: { a, b, off: -half } });
       if (i > 1 && Math.abs(angleAt(s.pts[i - 2], s.pts[i - 1], s.pts[i]) - 90) < 30) corners += 2;
     }
   }
@@ -40,8 +42,9 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
       const L = mm(Math.hypot(b[0] - a[0], b[1] - a[1]));
       if (L < 100) continue;
       n++;
-      faces.push({ code: `F${n}`, length: L, height: H });
-      if (both) faces.push({ code: `F${n}B`, length: L, height: H });
+      const side = both && mpp > 0 ? ((t.params.wallThkMm ?? 150) / 2000) / mpp : 0;
+      faces.push({ code: `F${n}`, length: L, height: H, geo: { a, b, off: side } });
+      if (both) faces.push({ code: `F${n}B`, length: L, height: H, geo: { a, b, off: -side } });
     }
     for (let i = 1; i < pts.length - (l.closed ? 0 : 1); i++) if (Math.abs(angleAt(pts[i - 1], pts[i], pts[(i + 1) % pts.length]) - 90) < 30) corners++;
     if (l.closed && pts.length > 2 && Math.abs(angleAt(pts[pts.length - 1], pts[0], pts[1]) - 90) < 30) corners++;

@@ -13,13 +13,14 @@
 import type { Pt } from "@/lib/floor-plans/calc";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
-export type Face = { code: string; length: number; height: number };                 // mm
+export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
+export type Face = { code: string; length: number; height: number; geo?: FaceGeo };                 // mm
 export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };                     // metres
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean }; // mm
 export type PanelOptions = { stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "end" | "corner" | "deck" | "beam" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string };
-export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number };
+export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo };
 export type PanelResult = {
   bom: BomRow[]; faces: FaceLayout[];
   summary: { panelArea: number; weight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
@@ -106,7 +107,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const panels = fit.panels;
     const left = fit.left < tol ? 0 : Math.round(fit.left / 5) * 5;   // small gaps are taken up in the joints
     const top = Math.max(0, Math.round(f.height - o.stdHeight));
-    layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top });
+    layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo });
     for (const w of panels) {
       const p = wallCat.find((x) => x.width_mm === w)!;
       add(p.panel_code, { code: p.panel_code, description: "Wall panel", group: "wall", w, h: o.stdHeight, custom: false }, 1, Number(p.weight_kg));
