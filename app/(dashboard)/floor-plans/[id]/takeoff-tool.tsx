@@ -495,6 +495,12 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
                     </g>
                   );
                 })}
+                {isDxf && auto && frameRef.current ? (
+                  <g pointerEvents="none">
+                    {(auto.slabLoops ?? []).map((l, i) => <polygon key={`as${i}`} points={l.map((q) => frameRef.current!.toPx(q).join(",")).join(" ")} fill="rgba(37,99,235,0.06)" stroke="#2563eb" strokeWidth={1.5 * sw} strokeDasharray={auto.slabFromWalls ? `${6 * sw} ${4 * sw}` : undefined} />)}
+                    {(auto.openingLoops ?? []).map((l, i) => <polygon key={`ao${i}`} points={l.map((q) => frameRef.current!.toPx(q).join(",")).join(" ")} fill="rgba(147,51,234,0.15)" stroke="#9333ea" strokeWidth={1.2 * sw} />)}
+                  </g>
+                ) : null}
                 {isDxf && t.dxf?.region ? (
                   <g>
                     <rect x={t.dxf.region[0]} y={t.dxf.region[1]} width={t.dxf.region[2] - t.dxf.region[0]} height={t.dxf.region[3] - t.dxf.region[1]} fill="none" stroke="#059669" strokeWidth={2 * sw} strokeDasharray={`${8 * sw} ${5 * sw}`} />
@@ -611,12 +617,12 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           </div>
           <p className="mt-1.5 text-[11px] text-graphite-500">Walls and columns are shuttered to the slab bottom: clear height {totals.clear_height} m.</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <Field label="Wall tops to deduct (m²)"><NumInput value={t.params.wallTopM2 ?? 0} step={0.01} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallTopM2: v } }))} /></Field>
+            <Field label={t.params.wallTopM2 == null ? "Wall tops to deduct (m²) · auto" : "Wall tops to deduct (m²)"}><NumInput value={t.params.wallTopM2 ?? totals.wall_top_area} step={0.01} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallTopM2: v } }))} /></Field>
             <Field label="Add % (extra)"><NumInput value={t.params.extraPct ?? 0} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, extraPct: Math.min(100, v) } }))} /></Field>
           </div>
-          {totals.wall_top_drawn > 0 && canEdit ? (
-            <button type="button" onClick={() => update((p) => ({ ...p, params: { ...p.params, wallTopM2: totals.wall_top_drawn } }))} className="mt-1 text-[11px] text-brand-orange hover:underline">
-              Use drawn walls&apos; tops ({fmtArea(totals.wall_top_drawn)})
+          {t.params.wallTopM2 != null && totals.wall_top_drawn > 0 && canEdit ? (
+            <button type="button" onClick={() => update((p) => ({ ...p, params: { ...p.params, wallTopM2: undefined } }))} className="mt-1 text-[11px] text-brand-orange hover:underline">
+              Use wall tops from the drawing ({fmtArea(totals.wall_top_drawn)})
             </button>
           ) : null}
           <div className="mt-2 grid grid-cols-3 gap-2">
@@ -662,7 +668,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
             ) : null}
             {auto ? (
               <p className="mt-2 text-[11px] text-graphite-500">
-                Read from layers: slab {fmtArea(auto.slabArea)}, openings {fmtArea(auto.openingArea)}, wall lines {fmtLen(auto.wallLineLength)}{auto.beamLineLength ? `, beam lines ${fmtLen(auto.beamLineLength)}` : ""}, {auto.columns.length} columns.
+                Read from layers: slab {fmtArea(auto.slabArea)}{auto.slabFromWalls ? " (outer face of walls & parapets — blue dashed line)" : ""}, ducts / lifts {fmtArea(auto.openingArea)}, wall length (faces) {fmtLen(auto.wallLineLength)}, wall tops {fmtArea(auto.wallTopArea ?? 0)}{auto.beamLineLength ? `, beam lines ${fmtLen(auto.beamLineLength)}` : ""}, {auto.columns.length} columns. Ducts not drawn as a box or an X: add them with the Opening tool. Beams from a structural drawing and the staircase: add them in the Beams and Extra rows.
               </p>
             ) : null}
           </Panel>
@@ -744,6 +750,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
         </Panel>
 
         <Panel title="Formwork area (per floor)">
+          {isDxf && t.dxf && !t.dxf.region ? (
+            <p className="mb-2 rounded-md border border-signal-amber/40 bg-signal-amber/10 px-2.5 py-2 text-xs text-signal-amber">
+              <b>Whole drawing is being counted</b> — every plan, section and elevation in the file is added together. Click <b>Plan region</b> and box ONE typical floor plan to get the floor&apos;s area.
+            </p>
+          ) : null}
           <table className="w-full text-xs">
             <tbody className="divide-y divide-graphite-800">
               <TRow k="Slab area (less ducts)" v={fmtArea(totals.plan_area)} />

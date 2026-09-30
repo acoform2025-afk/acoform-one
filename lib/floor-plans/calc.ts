@@ -65,6 +65,12 @@ export type DxfAuto = {
   wallLineLength: number;                           // total length of lines on wall layers
   beamLineLength?: number;                          // total length of lines on beam layers (= beam side length)
   columns: { w: number; d: number; perimeter: number; area: number }[];
+  wallTopArea?: number;                             // wall outlines merged (overlaps counted once), m²
+  slabFromWalls?: boolean;                          // no slab layer: slab = outer outline of the walls
+  slabLoops?: Pt[][];                               // slab outlines used (drawing units) — for deck layout / display
+  openingLoops?: Pt[][];                            // duct / lift cut-outs used (drawing units)
+  wallRings?: Pt[][];                               // merged wall outlines (drawing units) — every edge is a wall face
+  wallLoose?: Pt[][];                               // wall lines not part of an outline (drawing units)
 };
 
 export type Totals = {
@@ -186,7 +192,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     }
   }
   if (auto) {
-    if (auto.slabArea) { slabArea += auto.slabArea; slabPer += auto.slabPerimeter; items.push({ code: code("S"), group: "slab", label: "Slab outline (DXF layers)", calc: `outline ${n2(auto.slabArea)} m²`, area: auto.slabArea }); }
+    if (auto.slabArea) { slabArea += auto.slabArea; slabPer += auto.slabPerimeter; items.push({ code: code("S"), group: "slab", label: auto.slabFromWalls ? "Slab outline (outer face of walls)" : "Slab outline (DXF layers)", calc: `outline ${n2(auto.slabArea)} m²`, area: auto.slabArea }); }
     if (auto.openingArea) { openArea += auto.openingArea; openPer += auto.openingPerimeter; items.push({ code: code("D"), group: "deduct", label: "Ducts / openings (DXF layers)", calc: `− ${n2(auto.openingArea)} m²`, area: -auto.openingArea }); }
     if (auto.wallLineLength) {
       const faces = t.dxf?.wallsDrawn === "centre" ? 2 * auto.wallLineLength : auto.wallLineLength;
@@ -224,7 +230,8 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     extraArea += a;
     items.push({ code: code("X"), group: "extra", label: (x.label || "Other").slice(0, 60), calc: "lump sum", area: a });
   }
-  const wallTop = Math.max(0, Number(t.params.wallTopM2) || 0);
+  // wall tops: typed in, else from the walls (drawn walls + merged DXF wall outlines)
+  const wallTop = t.params.wallTopM2 != null && String(t.params.wallTopM2) !== "" ? Math.max(0, Number(t.params.wallTopM2) || 0) : wallTopDrawn + (auto?.wallTopArea ?? 0);
   if (wallTop) items.push({ code: "WT", group: "deduct", label: "Wall tops", calc: `− ${n2(wallTop)} m²`, area: -wallTop });
   if (colFoot) items.push({ code: "CT", group: "deduct", label: "Column tops", calc: `− ${n2(colFoot)} m²`, area: -colFoot });
   const extraPct = Math.min(100, Math.max(0, Number(t.params.extraPct) || 0));
@@ -247,7 +254,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     contact_area: r2(contact), extra_pct: extraPct, quote_area: r2(contact * (1 + extraPct / 100)),
     clear_height: r2(H), floors: Math.max(1, Math.round(floors || 1)), params: t.params,
     source: auto && hasManual ? "mixed" : auto ? "dxf" : "manual",
-    wall_top_drawn: r2(wallTopDrawn),
+    wall_top_drawn: r2(wallTopDrawn + (auto?.wallTopArea ?? 0)),
     items: items.slice(0, 400).map((i) => ({ ...i, area: r2(i.area) })),
   };
 }

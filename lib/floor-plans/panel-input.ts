@@ -19,6 +19,14 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
   const H = Math.max(0, t.params.floorHeight - t.params.slabMm / 1000) * 1000;
   const mm = (px: number) => px * mpp * 1000;
   const faces: Face[] = [];
+  // net soffit area — same as the area list
+  let auto: ReturnType<typeof dxfAuto> | null = null;
+  let frame: ReturnType<typeof dxfFrame> | null = null;
+  if (model && t.dxf) {
+    const f = dxfFrame(model, 2400); frame = f; const reg = t.dxf.region;
+    const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
+    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep);
+  }
   let corners = 0;
 
   // drawn walls: both faces of every segment
@@ -32,22 +40,30 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
       if (i > 1 && Math.abs(angleAt(s.pts[i - 2], s.pts[i - 1], s.pts[i]) - 90) < 30) corners += 2;
     }
   }
-  // DXF wall lines inside the plan region: every straight run is one face
+  // DXF walls: every edge of the merged wall outlines is one face (overlapping / duplicated pieces once);
+  // loose wall lines are faces too (both sides when walls are drawn as centre lines)
   let n = 0;
   const both = t.dxf?.wallsDrawn === "centre";
-  for (const l of g.dxf.walls ?? []) {
-    const pts = l.pts; const seg = pts.length - (l.closed ? 0 : 1);
+  const px = (q: Pt): Pt => (frame ? frame.toPx(q) : q);
+  const addRun = (pts: Pt[], closed: boolean, twoSided: boolean) => {
+    const seg = pts.length - (closed ? 0 : 1);
     for (let i = 0; i < seg; i++) {
       const a = pts[i], b = pts[(i + 1) % pts.length];
       const L = mm(Math.hypot(b[0] - a[0], b[1] - a[1]));
       if (L < 100) continue;
       n++;
-      const side = both && mpp > 0 ? ((t.params.wallThkMm ?? 150) / 2000) / mpp : 0;
+      const side = twoSided && mpp > 0 ? ((t.params.wallThkMm ?? 150) / 2000) / mpp : 0;
       faces.push({ code: `F${n}`, length: L, height: H, geo: { a, b, off: side } });
-      if (both) faces.push({ code: `F${n}B`, length: L, height: H, geo: { a, b, off: -side } });
+      if (twoSided) faces.push({ code: `F${n}B`, length: L, height: H, geo: { a, b, off: -side } });
     }
-    for (let i = 1; i < pts.length - (l.closed ? 0 : 1); i++) if (Math.abs(angleAt(pts[i - 1], pts[i], pts[(i + 1) % pts.length]) - 90) < 30) corners++;
-    if (l.closed && pts.length > 2 && Math.abs(angleAt(pts[pts.length - 1], pts[0], pts[1]) - 90) < 30) corners++;
+    for (let i = 1; i < pts.length - (closed ? 0 : 1); i++) if (Math.abs(angleAt(pts[i - 1], pts[i], pts[(i + 1) % pts.length]) - 90) < 30) corners++;
+    if (closed && pts.length > 2 && Math.abs(angleAt(pts[pts.length - 1], pts[0], pts[1]) - 90) < 30) corners++;
+  };
+  if (auto && (auto.wallRings?.length || auto.wallLoose?.length)) {
+    for (const r of auto.wallRings ?? []) addRun(r.map(px), true, false);
+    for (const l of auto.wallLoose ?? []) addRun(l.map(px), false, both);
+  } else {
+    for (const l of g.dxf.walls ?? []) addRun(l.pts, l.closed, both);
   }
 
   // doors / windows: cut them out of the faces they sit on
@@ -96,18 +112,21 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
     }
     return out;
   };
-  const cut = cutFaces(faces);
+  const cut = cutFaces([...faces]);                         // copy: cutFaces may return its input unchanged
   faces.length = 0; faces.push(...cut);
   for (const o of ops) if (o.used) openings.push({ kind: o.isDoor ? "door" : "window", w: Math.hypot(o.q[0] - o.p[0], o.q[1] - o.p[1]) * mpp * 1000, h: o.h, t: o.t });
 
   // slabs (metres) with ducts as holes
   const toM = (p: Pt): Pt => [p[0] * mpp, p[1] * mpp];
   const tolPx = mpp > 0 ? 0.005 / mpp : 0.5;               // 5 mm in plan px
+  // ducts: drawn openings + the DXF duct / lift boxes (closed or marked with an X) the automatic reading found
+  const fromAuto = (loops?: Pt[][]) => (frame && loops ? loops.map((l) => l.map((q) => toM(frame!.toPx(q)))) : []);
   const holes: Pt[][] = [
     ...g.shapes.filter((s) => s.kind === "opening").map((s) => s.pts.map(toM)),
-    ...closedLoops((g.dxf.opening ?? []).map((l) => ({ layer: "o", ...l })), tolPx).map((pts) => pts.map(toM)),
+    ...(auto ? fromAuto(auto.openingLoops) : closedLoops((g.dxf.opening ?? []).map((l) => ({ layer: "o", ...l })), tolPx).map((pts) => pts.map(toM))),
   ];
   const decks: DeckPoly[] = [
+    ...(auto?.slabFromWalls ? fromAuto(auto.slabLoops).map((pts, i) => ({ code: `SW${i + 1}`, pts, holes })) : []),
     ...g.shapes.filter((s) => s.kind === "slab").map((s) => ({ code: s.code, pts: s.pts.map(toM), holes })),
     ...closedLoops((g.dxf.slab ?? []).map((l) => ({ layer: "s", ...l })), tolPx).filter((pts) => pts.length > 2).map((pts, i) => ({ code: `SL${i + 1}`, pts: pts.map(toM), holes })),
   ];
@@ -124,13 +143,6 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
     if (L > 100) beams.push({ code: "BL", length: L, b: 0, d: t.params.beamDepthMm ?? 600, sides: 1, bottom: false });
   }
 
-  // net soffit area — same as the area list
-  let auto = null;
-  if (model && t.dxf) {
-    const f = dxfFrame(model, 2400); const reg = t.dxf.region;
-    const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
-    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep);
-  }
   const totals: Totals = computeTotals(t, auto);
 
   // columns (mm): drawn, typed in by size, and from the DXF column layer — same sizes grouped

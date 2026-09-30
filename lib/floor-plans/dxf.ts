@@ -4,6 +4,7 @@
  */
 import DxfParser from "dxf-parser";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
+import { nearRings, outlineFromWalls, wallUnion, xMarkedBoxes } from "./geom";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
@@ -335,14 +336,41 @@ export function closedLoops(paths: DxfPath[], tol: number, closeGaps = false): P
   return out;
 }
 
+const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
+
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
 export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean): DxfAuto {
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)));
   const u = unitToM, u2 = unitToM * unitToM;
   const tol = 0.005 / u;                                      // 5 mm in drawing units
   const loops = (r: LayerRole, gaps = false) => closedLoops(of(r), tol, gaps).map((pts) => ({ layer: r, pts, closed: true }) as DxfPath);
-  const slab = outermost(loops("slab"));
-  const open = outermost(loops("opening"));
+
+  // walls: closed outlines merged (duplicates / overlaps once) → wall tops + face length; loose lines add their length
+  const wallPaths = of("walls");
+  const U = wallUnion(wallPaths.filter((p) => p.closed).map((p) => p.pts));
+  let looseLen = 0; const loose: Pt[][] = [];
+  for (const p of wallPaths) {
+    if (p.closed) continue;
+    const L = polyLength(p.pts, false);
+    const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2];
+    if (U.rings.length && nearRings(mid, U.rings, 0.02 / u) && nearRings(p.pts[0], U.rings, 0.02 / u)) continue;   // lies on a wall already counted
+    looseLen += L; loose.push(p.pts);
+  }
+
+  // openings: closed loops + boxes marked with an X
+  const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]);
+
+  // slab: slab layer outlines; if none, the outer face of the walls
+  let slab = outermost(loops("slab"));
+  let slabFromWalls = false;
+  if (!slab.length && wallPaths.length) {
+    // balcony parapets / railings mark slab edges outside the walls
+    const edgeHints = model.paths.filter((p) => SLAB_EDGE_HINT.test(p.layer) && (!keep || keep(p)));
+    const o = outlineFromWalls([...wallPaths, ...edgeHints], 1 / u);
+    const outer = o.loops.filter((l) => polyArea(l) > 0);
+    if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
+  }
+
   const cols = outermost(loops("columns", true).filter((p) => p.pts.length >= 3)).map(({ p }) => {
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
     return { w: (Math.max(...xs) - Math.min(...xs)) * u, d: (Math.max(...ys) - Math.min(...ys)) * u, perimeter: polyLength(p.pts, true) * u, area: polyArea(p.pts) * u2 };
@@ -350,10 +378,13 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   return {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
-    openingArea: open.reduce((s, x) => s + x.a, 0) * u2,
-    openingPerimeter: open.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
-    wallLineLength: of("walls").reduce((s, p) => s + polyLength(p.pts, p.closed), 0) * u,
+    openingArea: openL.reduce((s, x) => s + x.a, 0) * u2,
+    openingPerimeter: openL.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
+    wallLineLength: (U.perimeter + looseLen) * u,
+    wallTopArea: U.area * u2,
     beamLineLength: of("beams").reduce((s, p) => s + polyLength(p.pts, p.closed), 0) * u,
     columns: cols,
+    slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
+    wallRings: U.rings, wallLoose: loose,
   };
 }
