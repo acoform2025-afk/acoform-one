@@ -2,17 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { RateCardForm } from "./rate-card-form";
 import { QuickQuoteRateForm } from "./quick-quote-rate-form";
+import { CatalogEditor, type CatRow } from "./catalog-editor";
 
-const CATEGORY_LABELS: Record<string, string> = {
-  wall_panel:       "Wall Panels",
-  extension_panel:  "Extension Panels",
-  deck_panel:       "Deck Panels",
-  internal_corner:  "Internal Corners",
-  external_corner:  "External Corners",
-  filler_panel:     "Filler Panels",
-  beam_side_panel:  "Beam Side Panels",
-  beam_soffit_panel:"Beam Soffit Panels",
-};
 
 export default async function PanelCatalogPage() {
   const supabase = await createClient();
@@ -20,7 +11,6 @@ export default async function PanelCatalogPage() {
   const { data: panels } = await supabase
     .from("panel_master")
     .select("*")
-    .eq("is_active", true)
     .order("panel_category")
     .order("width_mm");
 
@@ -39,14 +29,9 @@ export default async function PanelCatalogPage() {
   const verticalRate = quickRates?.find((r) => r.formwork_type === "vertical") ?? null;
 
   const canManageRates = await hasPermission("cost_rate_cards", "manage");
+  const canEditCatalog = await hasPermission("panel_master", "manage");
 
-  const grouped = (panels ?? []).reduce<Record<string, typeof panels>>((acc, p) => {
-    if (!p) return acc;
-    const cat = p.panel_category;
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat]!.push(p);
-    return acc;
-  }, {});
+
 
   return (
     <div className="fade-in max-w-5xl">
@@ -54,7 +39,7 @@ export default async function PanelCatalogPage() {
         Panel Catalog
       </h1>
       <p className="mt-1 text-sm text-graphite-400">
-        The 14 standard ACOFORM panel types, plus rate configuration for both quotation paths.
+        Panels, corners, kickers, mid beams, prop heads, props, pins, wedges and ties used by the panel layout and BOM, plus rates for both quotation paths.
       </p>
 
       <section className="mt-8">
@@ -120,43 +105,9 @@ export default async function PanelCatalogPage() {
 
       <section className="mt-8 space-y-6">
         <h2 className="text-sm font-medium uppercase tracking-wide text-graphite-400">
-          Standard panel library
+          Component catalogue
         </h2>
-        {Object.entries(grouped).map(([cat, catPanels]) => (
-          <div key={cat}>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-graphite-500">
-              {CATEGORY_LABELS[cat] ?? cat}
-            </h3>
-            <div className="overflow-hidden rounded-lg border border-graphite-800">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-graphite-900 text-xs uppercase tracking-wide text-graphite-500">
-                  <tr>
-                    <th className="px-4 py-2.5 font-medium">Code</th>
-                    <th className="px-4 py-2.5 font-medium">W × H (mm)</th>
-                    <th className="px-4 py-2.5 font-medium text-right">Area (m²)</th>
-                    <th className="px-4 py-2.5 font-medium text-right">Weight (kg)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-graphite-800">
-                  {catPanels?.map((p) => (
-                    <tr key={p.id} className="bg-graphite-950">
-                      <td className="px-4 py-2.5 font-mono text-xs text-aluminium-300">{p.panel_code}</td>
-                      <td className="px-4 py-2.5 font-mono text-xs text-graphite-300">
-                        {p.width_mm} × {p.height_mm}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-xs text-graphite-400">
-                        {Number(p.area_sqm).toFixed(4)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-xs text-graphite-200">
-                        {p.weight_kg}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
+        <CatalogEditor rows={(panels ?? []) as unknown as CatRow[]} canEdit={canEditCatalog} />
       </section>
     </div>
   );

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { loadRules } from "@/lib/floor-plans/rules";
 import { getCurrentProfile, hasPermission } from "@/lib/auth/permissions";
 import { TakeoffTool } from "./takeoff-tool";
 import { DeletePlanButton } from "./delete-plan-button";
@@ -25,6 +26,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
   const profile = await getCurrentProfile();
   const canEdit = await hasPermission("quotations", "create");
   const canDesign = await hasPermission("designs", "create");
+  const rules = await loadRules(supabase);
 
   const bucket = supabase.storage.from("floor-plans");
   const { data: fileUrl } = await bucket.createSignedUrl(plan.file_path, 60 * 60);
@@ -78,7 +80,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
         {fileUrl?.signedUrl ? (
           <TakeoffTool
             plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}` } : null }}
-            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs}
+            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules}
           />
         ) : <p className="text-sm text-signal-red">The plan file could not be opened.</p>}
       </div>

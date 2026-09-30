@@ -112,10 +112,14 @@ const totalsSchema = z.object({
   floors: z.number().int().min(1).max(500),
   params: z.object({
     floorHeight: z.number().min(0).max(50), slabMm: z.number().min(0).max(2000), floors: z.number().min(1).max(500),
-    wallTopM2: num.optional(), includeEdges: z.boolean().optional(), extraPct: z.number().min(0).max(100).optional(),
+    wallTopM2: num.optional(), includeEdges: z.boolean().optional(), extraPct: z.number().min(0).max(100).optional(), minOpeningM2: z.number().min(0).max(5).optional(), autoLintels: z.boolean().optional(),
     beamDepthMm: num.optional(), beamWidthMm: num.optional(), wallThkMm: num.optional(),
   }),
   source: z.enum(["manual", "dxf", "mixed"]),
+  rules: z.object({
+    minOpeningM2: z.number().min(0).max(5), slabEdges: z.boolean(), reveals: z.boolean(), deductWallTops: z.boolean(), deductColumnTops: z.boolean(),
+    kickerMm: z.number().min(0).max(500), stairs: z.boolean(), stairAllowanceM2: z.number().min(0).max(2000).default(100), extraPct: z.number().min(0).max(100), printOnQuote: z.boolean(),
+  }).optional(),
 });
 
 export async function saveTakeoff(id: string, takeoff: unknown, totals: unknown, previewPath: string | null): Promise<Result> {

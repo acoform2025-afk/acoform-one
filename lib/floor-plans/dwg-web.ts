@@ -73,6 +73,17 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
         }
         case "CIRCLE": if (e.center && e.radius > 0) poly(layer, T(arc(e.center.x, e.center.y, e.radius, 0, Math.PI * 2).slice(0, -1)), true); break;
         case "ARC": if (e.center && e.radius > 0) poly(layer, T(arc(e.center.x, e.center.y, e.radius, e.startAngle ?? 0, e.endAngle ?? Math.PI * 2)), false); break;
+        case "TEXT": case "MTEXT": {
+          if (depth > 1 || count >= maxEntities) break;
+          const raw = String(e.text ?? e.contents ?? "");
+          const txt = raw.replace(/\\P/g, " ").replace(/\\[LlOoKk]/g, "").replace(/\\[A-Za-z][^;\\]*;/g, "").replace(/[{}\r\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+          const p = e.startPoint ?? e.insertionPoint ?? e.position;
+          if (!txt || !p || !ok(p.x) || !ok(p.y)) break;
+          const [x, y] = ap(m, p.x, p.y);
+          count++;
+          out.push("0", "TEXT", "8", layer, "10", f(x), "20", f(y), "30", "0", "40", f(Math.abs(Number(e.textHeight ?? e.height ?? 0)) || 0), "1", txt);
+          break;
+        }
         case "INSERT": {
           const b = blocks.get(e.name); if (!b || depth > 6 || !b.entities?.length) break;
           const rot = ok(e.rotation) ? e.rotation : 0, sx = ok(e.xScale) && e.xScale ? e.xScale : 1, sy = ok(e.yScale) && e.yScale ? e.yScale : 1;

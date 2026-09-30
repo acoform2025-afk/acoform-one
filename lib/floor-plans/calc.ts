@@ -6,6 +6,8 @@
  * Areas are PER FLOOR (one typical floor = one formwork set); `floors` only multiplies the "all floors" figure.
  */
 
+import { DEFAULT_RULES, normaliseRules, type MeasureRules } from "./rules";
+
 export type Pt = [number, number];
 export type ShapeKind = "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft";
 /**
@@ -35,11 +37,12 @@ export type ExtraRow = { label: string; area_m2: number };
 export type Params = {
   floorHeight: number; slabMm: number; floors: number;
   wallTopM2?: number;       // slab deduction for wall tops (m²)
-  includeEdges?: boolean;   // add slab / opening edge formwork (default on — IS 1200-5: edges of slabs are measured)
+  includeEdges?: boolean;   // (unset = company rule)   // add slab / opening edge formwork (default on — IS 1200-5: edges of slabs are measured)
   minOpeningM2?: number;    // openings smaller than this are not deducted (IS 1200-5: 0.4 m²)
   extraPct?: number;        // add % on the typical-floor total (e.g. 10)
   beamDepthMm?: number;     // default beam depth (drawn beams and DXF beam layers)
   beamWidthMm?: number;     // default width of drawn beams
+  autoLintels?: boolean;    // beams / lintels over wall openings found on the drawing (default on)
   wallThkMm?: number;       // default thickness of drawn walls (3D view, wall tops)
 };
 
@@ -80,6 +83,11 @@ export type DxfAuto = {
   openingLoops?: Pt[][];                            // duct / lift cut-outs used (drawing units)
   wallRings?: Pt[][];                               // merged wall outlines (drawing units) — every edge is a wall face
   wallLoose?: Pt[][];                               // wall lines not part of an outline (drawing units)
+  stairCount?: number;                              // staircases found on stair layers
+  stairBoxes?: [number, number, number, number][];  // drawing units
+  gapSpan?: number;                                 // openings in wall lines (door / window / passage widths), m
+  gapCount?: number;
+  gaps?: { a: Pt; b: Pt; span: number }[];          // drawing units
 };
 
 export type Totals = {
@@ -104,6 +112,7 @@ export type Totals = {
   source: "manual" | "dxf" | "mixed";
   wall_top_drawn: number;  // wall tops of drawn walls (length × thickness), offered as the deduction
   items: AreaItem[];
+  rules?: MeasureRules;     // company measurement rules used for this take-off
 };
 
 export const emptyTakeoff = (): Takeoff => ({
@@ -150,8 +159,15 @@ export function stairBreakdown(st: StairRow) {
   return { f, n, R, T, slope, soffit, risers, cheeks, landing, total: (soffit + risers + cheeks + landing) * f };
 }
 
-export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
+export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: Partial<MeasureRules> | null): Totals {
   const { floorHeight, slabMm, floors } = t.params;
+  const base = normaliseRules(companyRules ?? DEFAULT_RULES);
+  const rules: MeasureRules = {
+    ...base,
+    minOpeningM2: t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Math.max(0, Number(t.params.minOpeningM2) || 0) : base.minOpeningM2,
+    slabEdges: t.params.includeEdges != null ? t.params.includeEdges : base.slabEdges,
+    extraPct: t.params.extraPct != null && String(t.params.extraPct) !== "" ? Math.min(100, Math.max(0, Number(t.params.extraPct) || 0)) : base.extraPct,
+  };
   const slab = Math.max(0, slabMm) / 1000;
   const H = Math.max(0, floorHeight - slab);
   const mpp = t.metersPerPx ?? 0;
@@ -159,7 +175,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
   const cnt: Record<string, number> = {};
   const code = (p: string, own?: string) => (own && own.trim() ? own.trim().slice(0, 20) : `${p}${(cnt[p] = (cnt[p] ?? 0) + 1)}`);
   const hOf = (s: Shape) => (s.h && s.h > 0 ? s.h / 1000 : H);
-  const minOpen = t.params.minOpeningM2 != null ? Math.max(0, Number(t.params.minOpeningM2) || 0) : 0.4;
+  const minOpen = rules.minOpeningM2;
 
   let slabArea = 0, slabPer = 0, openArea = 0, openPer = 0, wallCentre = 0, wallFaces = 0, wallArea = 0, wallTopDrawn = 0;
   let colCount = 0, colPerimeter = 0, colFoot = 0, colArea = 0, beamArea = 0, loftArea = 0;
@@ -204,8 +220,10 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
         if (w * h < minOpen) continue;                                   // small opening: not deducted, sides not added (IS 1200-5)
         const faces = 2 * w * h, reveal = (2 * h + w * (isDoor ? 1 : 2)) * thk;
         const c = code(isDoor ? "DR" : "WN", s.label);
-        wallArea -= faces; wallArea += reveal;
+        wallArea -= faces;
         items.push({ code: c, group: "opening", label: `${isDoor ? "Door" : "Window"} ${Math.round(w * 1000)}×${Math.round(h * 1000)} − faces`, calc: `− 2 × ${n2(w)} m × ${n3(h)} m`, area: -faces });
+        if (!rules.reveals) continue;
+        wallArea += reveal;
         items.push({ code: c, group: "opening", label: `${isDoor ? "Door" : "Window"} reveals`, calc: `(2 × ${n3(h)} + ${isDoor ? "" : "2 × "}${n2(w)}) m × ${n3(thk)} m`, area: reveal });
       } else if (s.kind === "loft") {
         const lt = (s.t && s.t > 0 ? s.t : OPENING_DEFAULTS.loftT) / 1000;
@@ -229,6 +247,13 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     if (auto.columns.length) {
       const per = auto.columns.reduce((x, c) => x + c.perimeter, 0);
       items.push({ code: code("C"), group: "column", label: `${auto.columns.length} columns (DXF layers)`, calc: `${n2(per)} m × ${n3(H)} m`, area: per * H });
+    }
+    if (auto.gapSpan && t.params.autoLintels !== false && !(t.beams ?? []).some((b) => b.qty > 0 && b.length_m > 0)) {
+      // aluminium formwork: every opening in a wall line gets a beam / lintel up to the slab — both sides measured
+      const dMm = Number(t.params.beamDepthMm) || 600, side = Math.max(0, dMm / 1000 - slab), L2 = 2 * auto.gapSpan;
+      const a = L2 * side;
+      beamArea += a;
+      items.push({ code: code("B"), group: "beam", label: `Beams over ${auto.gapCount ?? ""} wall openings (auto)`, calc: `2 × ${n2(auto.gapSpan)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
     }
     if (auto.beamLineLength) {
       const dMm = Number(t.params.beamDepthMm) || 600, a = auto.beamLineLength * Math.max(0, dMm / 1000 - slab);
@@ -254,12 +279,17 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     const parts = [sides ? `${sides > 1 ? `${sides} × ` : ""}(${n3(b.depth_mm / 1000)} − ${n3(slab)})` : "", ext ? `${n3(ext)} outer face` : "", bottom ? `${n3(bw)} bottom` : ""].filter(Boolean).join(" + ");
     items.push({ code: code("B", b.label), group: "beam", label: `Beam${bw ? ` ${Math.round(bw * 1000)}×${b.depth_mm}` : `, depth ${b.depth_mm}`}${sides === 2 ? " (2 sides)" : ""}${ext ? " edge beam" : ""}${bottom ? " + bottom" : ""}`, calc: `${q > 1 ? `${q} × ` : ""}${n2(b.length_m)} m × [${parts}] m`, area: a });
   }
-  for (const st of t.stairs ?? []) {
+  for (const st of rules.stairs ? t.stairs ?? [] : []) {
     const b = stairBreakdown(st); if (!b) continue;
     const { f, n, R, T, soffit, risers, cheeks, landing, total: a } = b;
     extraArea += a;
     items.push({ code: code("ST", st.label), group: "extra", label: `Staircase${st.label ? ` ${st.label}` : ""} — ${f} flight${f > 1 ? "s" : ""} × ${n} risers ${Math.round(R * 1000)}/${Math.round(T * 1000)}`,
       calc: `${f > 1 ? `${f} × ` : ""}(soffit ${n2(soffit)} + risers ${n2(risers)}${cheeks ? ` + stringers ${n2(cheeks)}` : ""}${landing ? ` + landing soffit ${n2(landing)}` : ""})`, area: a });
+  }
+  if (rules.stairs && rules.stairAllowanceM2 > 0 && auto?.stairCount && !(t.stairs ?? []).length && !(t.extras ?? []).some((x) => Number(x.area_m2) > 0)) {
+    const a = auto.stairCount * rules.stairAllowanceM2;
+    extraArea += a;
+    items.push({ code: code("ST"), group: "extra", label: `Staircase${auto.stairCount > 1 ? `s × ${auto.stairCount}` : ""} (company allowance, auto)`, calc: `${auto.stairCount} × ${n2(rules.stairAllowanceM2)} m²`, area: a });
   }
   for (const x of t.extras ?? []) {
     const a = Math.max(0, Number(x.area_m2) || 0); if (!a) continue;
@@ -267,15 +297,18 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     items.push({ code: code("X"), group: "extra", label: (x.label || "Other").slice(0, 60), calc: "lump sum", area: a });
   }
   // wall tops: typed in, else from the walls (drawn walls + merged DXF wall outlines)
-  const wallTop = t.params.wallTopM2 != null && String(t.params.wallTopM2) !== "" ? Math.max(0, Number(t.params.wallTopM2) || 0) : wallTopDrawn + (auto?.wallTopArea ?? 0);
+  const wallTop = t.params.wallTopM2 != null && String(t.params.wallTopM2) !== "" ? Math.max(0, Number(t.params.wallTopM2) || 0) : rules.deductWallTops ? wallTopDrawn + (auto?.wallTopArea ?? 0) : 0;
+  if (!rules.deductColumnTops) colFoot = 0;
   if (wallTop) items.push({ code: "WT", group: "deduct", label: "Wall tops", calc: `− ${n2(wallTop)} m²`, area: -wallTop });
   if (colFoot) items.push({ code: "CT", group: "deduct", label: "Column tops", calc: `− ${n2(colFoot)} m²`, area: -colFoot });
-  const extraPct = Math.min(100, Math.max(0, Number(t.params.extraPct) || 0));
+  const extraPct = rules.extraPct;
 
   const plan = Math.max(0, slabArea - openArea);
   const soffit = Math.max(0, plan - wallTop - colFoot);
-  const edge = t.params.includeEdges !== false ? (slabPer + openPer) * slab : 0;
+  let edge = rules.slabEdges ? (slabPer + openPer) * slab : 0;
   if (edge) items.push({ code: "E", group: "edge", label: "Slab & opening edges", calc: `${n2(slabPer + openPer)} m × ${n3(slab)} m`, area: edge });
+  const kicker = rules.kickerMm > 0 ? slabPer * rules.kickerMm / 1000 : 0;
+  if (kicker) { items.push({ code: "K", group: "edge", label: `External kicker ${rules.kickerMm} mm`, calc: `${n2(slabPer)} m × ${n3(rules.kickerMm / 1000)} m`, area: kicker }); edge += kicker; }
   const contact = soffit + edge + wallArea + colArea + beamArea + extraArea + loftArea;
   const hasManual = t.shapes.length > 0 || t.columns.length > 0 || t.beams.length > 0 || (t.stairs ?? []).length > 0 || extraArea > 0;
   const order = { slab: 0, deduct: 1, edge: 2, wall: 3, opening: 4, column: 5, beam: 6, loft: 7, extra: 8 } as const;
@@ -292,6 +325,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null): Totals {
     source: auto && hasManual ? "mixed" : auto ? "dxf" : "manual",
     wall_top_drawn: r2(wallTopDrawn + (auto?.wallTopArea ?? 0)),
     items: items.slice(0, 400).map((i) => ({ ...i, area: r2(i.area) })),
+    rules,
   };
 }
 

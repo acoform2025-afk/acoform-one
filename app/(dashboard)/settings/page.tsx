@@ -3,6 +3,8 @@ import { getCurrentProfile } from "@/lib/auth/permissions";
 import { titleCase } from "@/lib/format";
 import { CompanyForm } from "./company-form";
 import { EngineeringForm } from "./engineering-form";
+import { RulesForm } from "./rules-form";
+import { loadRules } from "@/lib/floor-plans/rules";
 import { hasPermission } from "@/lib/auth/permissions";
 import { listMedia, mediaViewUrls } from "@/lib/quotations/media";
 import { MediaManager, type MediaTile } from "./media-manager";
@@ -17,6 +19,7 @@ export default async function SettingsPage() {
   const { data: eng } = await supabase.from("engineering_parameters").select("*").maybeSingle();
   const canEng = await hasPermission("designs", "approve");
   const canMedia = await hasPermission("quotations", "approve");
+  const rules = await loadRules(supabase);
   const media = await listMedia(supabase);
   const mediaUrls = await mediaViewUrls(supabase, media);
   const tiles: MediaTile[] = media.filter((m) => mediaUrls[m.id]).map((m) => ({ id: m.id, kind: m.kind, url: mediaUrls[m.id], caption: m.caption }));
@@ -35,6 +38,10 @@ export default async function SettingsPage() {
 
       <div className="mt-8">
         <MediaManager items={tiles} tenantId={profile!.tenant_id} canEdit={canMedia} />
+      </div>
+
+      <div className="mt-8">
+        <RulesForm r={rules} canEdit={canEng || canMedia} />
       </div>
 
       <div className="mt-8">

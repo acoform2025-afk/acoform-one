@@ -68,19 +68,27 @@ returns and repairs.
 - Page `/floor-plans/[id]/panels` (options h, kg, prop in the query string) + `/panels/export?format=csv|pdf` (lib/pdf/panel-bom-document.tsx).
 - Gorwa check: ≈ 3,018 m² of panels, 56.7 t, 18.8 kg/m² (quote says 19–21 kg/m²).
 
-## Floor plan → production & panel layout drawing
-- Panels page (`/floor-plans/[id]/panels`) → "Send to production": choose a design → `createBomFromFloorPlan` (floor-plans/actions.ts) reruns the layout and calls RPC `create_bom_from_floor_plan` (migration 00040, applied in Supabase). It makes a **draft BOM** (panels only; props/accessories excluded) plus a layout option (option_number > 100, "Floor plan auto layout"). Then the normal BOM page: Approve → Release to production → work orders.
-- Layout drawing: `/floor-plans/[id]/panels/drawing` (A3 PDF) or `?format=dxf` (PANEL-FACE / PANEL-JOINT / PANEL-FILLER / PANEL-TEXT layers on top of the shell plan). Face geometry comes from `Face.geo` (panel-input.ts) and `lib/floor-plans/panel-marks.ts`.
+## Measurement rules (company settings)
+- Table `measurement_rules` (tenant_id PK, rules jsonb), RLS: read by tenant, write by designs.approve or quotations.approve (migration 00041).
+- `lib/floor-plans/rules.ts`: MeasureRules, DEFAULT_RULES (0.4 m² openings, edges, reveals, wall/column tops deducted, kicker 0, stairs, +10%), normaliseRules, describeRules, loadRules.
+- `computeTotals(t, auto, rules)`: plan params override (minOpeningM2, includeEdges, extraPct); result carries `rules` snapshot, saved with totals.
+- Settings → "Measurement rules"; take-off shows "Measurement rules used"; quotation PDF prints "MEASUREMENT BASIS" when printOnQuote.
 
-## DWG upload (browser) & memory
-- The Render free instance has 512 MB. LibreDWG `dwg2dxf` needs ~530 MB for a 3 MB DWG (the GHB Gorwa plot) → the server was killed ("Ran out of memory"). DWG is now read **in the user's browser** with `@mlightcad/libredwg-web` (LibreDWG → WebAssembly, GPL-3; wasm served from `public/wasm/libredwg-web.wasm`, pinned 0.7.14 — copy the wasm again if the package is upgraded). `lib/floor-plans/dwg-web.ts` writes a slim DXF (model space lines/polylines/arcs/circles, blocks exploded) that is uploaded as `source.dxf`; the .dwg is kept as `original_path`. Server `dwg2dxf` is only a fallback for DWGs under 1.5 MB.
-- `readDxf` uses a lean built-in reader (`leanParseDxf`) — about half the memory of dxf-parser (kept as fallback).
-- `next.config.ts` webpack fallbacks (module/fs/path/url/crypto = false) are needed for the wasm glue in the browser bundle.
-- Panel layout: doors/windows drawn on walls are cut out of wall faces (faces split .1/.2; OH lintel / OS sill pieces; RV reveals, OT head, OB sill bottom).
+## Component catalogue (market defaults) + accessories in the panel BOM
+- Migration 00042: panel_master categories + soffit_corner, kicker, deck_beam, prop_head, accessory; columns `unit`, `description`; market-default rows seeded per tenant (WP 350/400/500, DP 400/500, IC-100, SC-100-1200, KP-100-1200, MB-100-1150, PH-100-230, PROP-3.5, PIN-16, WEDGE-6, FTIE-150, TR-16). area_sqm is generated.
+- Panel catalog page: editable (panel_master.manage) — add / edit / stop using items (catalog-editor.tsx, item-actions.ts).
+- floor-panels.ts: deck strip length = most common deck length; widest IC/EC; prop grid = (deck length + PH) × min(prop spacing, MB + PH), warns > 1.3 m; MB = PH = PROP count; soffit corner & kicker from catalogue (kicker along deck outline perimeter); pins & wedges = panel edge length / 600 × 1.05; wall ties from engineering tie spacing (default 800 × 800). summary.weight = panels only; summary.accessoryWeight separate.
 
-## Columns, beams & deck in the panel BOM
-- Columns (drawn, typed-in sizes, DXF column layer) → `ColumnRun` (panel-input.ts) → 4 faces filled with wall panels + top panels + 4 external corners; round columns → `RCF` custom set. Group "column".
-- DXF outlines left open (3-sided column boxes, half-circle round columns, split slab outlines) are joined by `closedLoops` (dxf.ts). 
-- Beams: length made of 1200/900/600/300 (fillers rounded up to 50 mm), 2 sides + bottom for drawn beams, beam props `BPH` @1.2 m. Beam schedule grouped by code/size.
-- `PanelResult.elements` = per column-size / beam / slab schedule (panels page + BOM PDF).
-- dwg-web.ts: DWG LWPOLYLINE "closed" is flag bit 512 (not 1). Plans uploaded between 5370611 and this fix lost closed outlines → re-upload them.
+## Automatic typical-floor pick
+- DWG browser converter now also writes TEXT (TEXT/MTEXT, formatting stripped); lean DXF reader reads TEXT/MTEXT; DxfModel.texts.
+- planCandidates scores drawings: wall count × title factor (title = biggest "plan/section/…" text in/below the box; "typical" ×4, section/elevation/site/parking/roof… ×0.25, long thin ×0.3); floors from titles like "2nd to 5th floor".
+- floorHeightFromTexts: "FLOOR HEIGHT 3075" / "F.T.F" or the usual step between level marks (+3.075 / +3450MM), needs ≥2 equal steps.
+- Take-off (editors): when no region is set and there are ≥2 drawings, the best one is picked automatically, floors / floor height applied if found, and the take-off is saved. "Choose another drawing" lets the user switch. Plans uploaded before this have no texts in source.dxf → re-upload for title detection (wall-count fallback still works).
+
+## ACOFORM area calculation sheet (their hand format) + automatic beams, staircase, floor info
+- /floor-plans/[id]/area-sheet → A3 PDF like ACOFORM's "TENTATIVE AREA CALCULATION": 1 slab − (wall top + duct), 2 wall length × (H − slab), 3 beam length × (D − slab), 4 staircase, 5 columns, total =1+2+3+4, ADD x%, all floors. lib/floor-plans/area-sheet.ts + lib/pdf/area-sheet-document.tsx.
+- geom.wallGaps: wall ends facing each other in line (same thickness, 0.45–3.6 m) = openings; computeTotals adds "Beams over N wall openings (auto)" = 2 × span × (D − slab) unless beams are typed in (params.autoLintels=false turns it off). Gorwa: 112.48 m vs sheet 119.09.
+- Staircases: stair-layer clusters ≥ 2×2 m (auto.stairBoxes); company rule stairAllowanceM2 (default 100) per staircase unless stairs/extras entered.
+- floorInfoFromTexts: floor height from notes / level marks (incl. first-to-top levels ÷ n with a round 25 mm result: Gorwa +3450…+43425 → 3075, 14 slabs); "G+N" text → floors. Take-off applies them when still at defaults (3000 mm / 1 floor) and saves.
+- Default rule slabEdges = false (ACOFORM sheet does not add slab edges).
+- Known gap: shafts not X-marked and not on a cut-out layer are not found (Gorwa sheet ducts 18.2 vs 9.72 auto) — draw them with the Opening tool. labelledSpaces() in geom.ts is an unused experiment.

@@ -5,6 +5,7 @@ import { formworkKind, pdfFileName } from "@/lib/quotations/document-content";
 import { mediaForPdf } from "@/lib/quotations/media";
 import { totalsRows, type Totals } from "@/lib/floor-plans/calc";
 import type { PdfFloorPlan } from "@/lib/pdf/quotation-document";
+import { describeRules, loadRules, normaliseRules } from "@/lib/floor-plans/rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,10 +52,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       }
       const t = (fp.totals ?? {}) as Record<string, number> & { params?: { floorHeight?: number; slabMm?: number; floors?: number } };
       const pr = t.params ?? {};
+      const saved = (t as unknown as { rules?: unknown }).rules;
+      const mr = saved ? normaliseRules(saved) : await loadRules(supabase);
       plan = {
         name: fp.name, image, rows: totalsRows(t as unknown as Partial<Totals>),
+        rules: mr.printOnQuote ? describeRules(mr) : undefined,
         items: Array.isArray((t as unknown as Totals).items) ? (t as unknown as Totals).items.slice(0, 400) : undefined,
-        note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight ?? "-"} m, slab ${pr.slabMm ?? "-"} mm${(pr.floors ?? 1) > 1 ? `, ${pr.floors} floors` : ""}. Final quantities as per approved GFC drawings.`,
+        note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight != null ? Math.round(pr.floorHeight * 1000) : "-"} mm, slab ${pr.slabMm ?? "-"} mm${(pr.floors ?? 1) > 1 ? `, ${pr.floors} floors` : ""}. Final quantities as per approved GFC drawings.`,
       };
     }
   }

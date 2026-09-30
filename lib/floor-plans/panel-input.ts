@@ -2,6 +2,7 @@
  * Turns a measured floor plan (take-off + DXF layers) into the inputs of the floor panel layout:
  * wall faces, slab polygons (with ducts as holes), beam runs and the number of wall corners.
  */
+import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
 import { closedLoops, dxfAuto, dxfFrame, type DxfModel } from "./dxf";
 import { buildShell } from "./shell";
@@ -13,7 +14,7 @@ const angleAt = (a: Pt, b: Pt, c: Pt) => {
   return (Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (l1 * l2)))) * 180) / Math.PI;
 };
 
-export function panelInputs(t: Takeoff, model: DxfModel | null) {
+export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRules = DEFAULT_RULES) {
   const g = buildShell(t, model);
   const mpp = g.mpp;
   const H = Math.max(0, t.params.floorHeight - t.params.slabMm / 1000) * 1000;
@@ -25,7 +26,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
   if (model && t.dxf) {
     const f = dxfFrame(model, 2400); frame = f; const reg = t.dxf.region;
     const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
-    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep);
+    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2);
   }
   let corners = 0;
 
@@ -146,7 +147,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
     if (L > 100) beams.push({ code: "BL", length: L, b: 0, d: t.params.beamDepthMm ?? 600, sides: 1, bottom: false });
   }
 
-  const totals: Totals = computeTotals(t, auto);
+  const totals: Totals = computeTotals(t, auto, rules);
 
   // columns (mm): drawn, typed in by size, and from the DXF column layer — same sizes grouped
   const colMap = new Map<string, ColumnRun>();

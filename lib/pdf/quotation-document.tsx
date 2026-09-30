@@ -20,7 +20,7 @@ const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 // Site photos + client logos come from Settings (lib/quotations/media.ts): a file path or raw image bytes
 export type PdfImage = string | { data: Buffer; format: "png" | "jpg" };
 export type PdfMedia = { photos: PdfImage[]; logos: PdfImage[] };
-export type PdfFloorPlan = { name: string; image: PdfImage | null; rows: [string, string][]; note: string; items?: { code: string; label: string; calc: string; area: number }[] };
+export type PdfFloorPlan = { name: string; image: PdfImage | null; rows: [string, string][]; note: string; rules?: string[]; items?: { code: string; label: string; calc: string; area: number }[] };
 
 const ORANGE = "#ef9d2f";
 const ORANGE_SOFT = "#fdf3e4";
@@ -424,6 +424,12 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
             ))}
           </View>
           <Text style={{ fontSize: 7.5, color: GRAY, marginTop: 4 }}>{plan.note}</Text>
+          {plan.rules && plan.rules.length ? (
+            <View style={{ marginTop: 8 }} wrap={false}>
+              <Text style={{ fontSize: 8.5, fontWeight: "bold", marginBottom: 2 }}>MEASUREMENT BASIS</Text>
+              {plan.rules.map((r, i) => <Text key={i} style={{ fontSize: 7.5, color: GRAY, marginBottom: 1 }}>{`${i + 1}. ${r}`}</Text>)}
+            </View>
+          ) : null}
         </Page>
       ) : null}
       {plan && plan.items && plan.items.length > 0 ? (

@@ -64,7 +64,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
       <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
         {[
           ["Panel area", `${n2(s.panelArea)} m²`],
-          ["Weight", `${n0(s.weight)} kg`],
+          ["Panel weight", `${n0(s.weight)} kg${s.accessoryWeight ? ` + ${n0(s.accessoryWeight)} kg accessories` : ""}`],
           ["Average", `${s.kgPerM2} kg/m²`],
           ["Standard panels", `${s.standardPct}% of area`],
           ["Formwork contact area", fmtArea(totals.contact_area)],

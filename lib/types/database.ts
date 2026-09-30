@@ -707,6 +707,12 @@ export type Database = {
           },
         ]
       }
+      measurement_rules: {
+        Row: { tenant_id: string; rules: Json; updated_at: string; updated_by: string | null }
+        Insert: { tenant_id?: string; rules?: Json; updated_at?: string; updated_by?: string | null }
+        Update: { tenant_id?: string; rules?: Json; updated_at?: string; updated_by?: string | null }
+        Relationships: []
+      }
       engineering_parameters: {
         Row: {
           certification_note: string | null
@@ -1241,6 +1247,8 @@ export type Database = {
       panel_master: {
         Row: {
           area_sqm: number | null
+          description: string | null
+          unit: string
           created_at: string
           face_sheet_thickness_mm: number
           finish: string
@@ -1259,6 +1267,8 @@ export type Database = {
         }
         Insert: {
           area_sqm?: number | null
+          description?: string | null
+          unit?: string
           created_at?: string
           face_sheet_thickness_mm?: number
           finish?: string
@@ -1277,6 +1287,8 @@ export type Database = {
         }
         Update: {
           area_sqm?: number | null
+          description?: string | null
+          unit?: string
           created_at?: string
           face_sheet_thickness_mm?: number
           finish?: string

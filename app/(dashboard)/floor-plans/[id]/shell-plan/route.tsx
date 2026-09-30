@@ -1,6 +1,7 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import { createClient } from "@/lib/supabase/server";
 import { computeTotals, totalsRows, type Takeoff } from "@/lib/floor-plans/calc";
+import { loadRules } from "@/lib/floor-plans/rules";
 import { dxfAuto, readDxf, type DxfModel } from "@/lib/floor-plans/dxf";
 import { buildShell, shellToDxf } from "@/lib/floor-plans/shell";
 import { UNIT_TO_M } from "@/lib/floor-plans/calc";
@@ -41,15 +42,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   // totals (DXF layer quantities are recomputed the same way as on screen)
+  const rules = await loadRules(supabase);
   let auto = null;
   if (model && t.dxf) {
     const reg = t.dxf.region;
     const { dxfFrame } = await import("@/lib/floor-plans/dxf");
     const f = dxfFrame(model, 2400);
     const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
-    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep);
+    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2);
   }
-  const totals = computeTotals(t, auto);
+  const totals = computeTotals(t, auto, rules);
   const { data: company } = await supabase.from("tenants").select("company_name").eq("id", plan.tenant_id).maybeSingle();
 
   const buffer = await renderToBuffer(

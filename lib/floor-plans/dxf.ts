@@ -4,11 +4,12 @@
  */
 import DxfParser from "dxf-parser";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
-import { nearRings, outlineFromWalls, wallUnion, xMarkedBoxes } from "./geom";
+import { nearRings, outlineFromWalls, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
-export type DxfModel = { paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+export type DxfText = { text: string; x: number; y: number; h: number };
+export type DxfModel = { texts?: DxfText[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -121,6 +122,7 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
       case "CIRCLE": target.push({ type: "CIRCLE", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r }); break;
       case "ARC": target.push({ type: "ARC", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r, startAngle: (e._a0 ?? 0) * deg, endAngle: (e._a1 ?? 360) * deg }); break;
       case "INSERT": target.push({ type: "INSERT", layer: e.layer, name: e.name, position: { x: e._x ?? 0, y: e._y ?? 0 }, xScale: e._sx ?? 1, yScale: e._sy ?? 1, rotation: e._rot ?? 0 }); break;
+      case "TEXT": case "MTEXT": { const t = ((e._t3 ?? "") + (e._t ?? "")).trim(); if (t) target.push({ type: "TEXT", layer: e.layer, text: t, position: { x: e._x ?? 0, y: e._y ?? 0 }, height: e._r ?? 0 }); break; }
       default: break;
     }
   };
@@ -141,6 +143,8 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
     const num = Number(val);
     switch (code) {
       case 8: cur.layer = val; break;
+      case 1: if (cur.type === "TEXT" || cur.type === "MTEXT") cur._t = val.slice(0, 200); break;
+      case 3: if (cur.type === "MTEXT") cur._t3 = ((cur._t3 ?? "") + val).slice(0, 200); break;
       case 2: cur.name = val; break;
       case 67: cur.inPaperSpace = num === 1; break;
       case 70: cur._flag = num; break;
@@ -169,6 +173,7 @@ export function readDxf(raw: string): DxfModel {
   if (!dxf) throw new Error("This DXF file could not be read.");
   const blocks = dxf.blocks ?? {};
   const paths: DxfPath[] = [];
+  const texts: DxfText[] = [];
 
   const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number) => {
     for (const e of ents) {
@@ -200,7 +205,15 @@ export function readDxf(raw: string): DxfModel {
           walk(b.entities ?? [], mul(m, local), layer, depth + 1);
           break;
         }
-        default: break; // text, dimensions, hatches etc. are not needed for quantities
+        case "TEXT": case "MTEXT": {
+          if (texts.length >= 20000 || depth > 2) break;
+          const raw = String(e.text ?? "");
+          const clean = raw.replace(/\\P/g, " ").replace(/\\[LlOoKk]/g, "").replace(/\\[A-Za-z][^;\\]*;/g, "").replace(/[{}]/g, "").replace(/%%[cdpCDP]/g, "").replace(/\s+/g, " ").trim();
+          const pos = e.position ?? e.startPoint ?? { x: 0, y: 0 };
+          if (clean && Number.isFinite(pos.x) && Number.isFinite(pos.y)) { const [x, y] = ap(m, pos.x, pos.y); texts.push({ text: clean.slice(0, 160), x, y, h: Math.abs(Number(e.height ?? e.textHeight ?? 0)) || 0 }); }
+          break;
+        }
+        default: break; // dimensions, hatches etc. are not needed for quantities
       }
     }
   };
@@ -229,7 +242,7 @@ export function readDxf(raw: string): DxfModel {
   const unitsGuessed = !units;
   if (!units) { const span = Math.max(x1 - x0, y1 - y0); units = span > 2000 ? "mm" : span > 300 ? "cm" : "m"; }
 
-  return { paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  return { texts, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */
@@ -336,6 +349,20 @@ export function closedLoops(paths: DxfPath[], tol: number, closeGaps = false): P
   return out;
 }
 
+/** Staircases: stair-layer lines grouped (1 m apart), groups at least 2 × 2 m. Boxes in drawing units. */
+function stairClusters(paths: DxfPath[], u: number): [number, number, number, number][] {
+  const boxes = paths.map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; });
+  const g = 1 / u; const parent = boxes.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    if (a[0] - g <= b[2] && b[0] - g <= a[2] && a[1] - g <= b[3] && b[1] - g <= a[3]) parent[find(i)] = find(j);
+  }
+  const grp = new Map<number, number[]>();
+  boxes.forEach((b, i) => { const r = find(i); const c = grp.get(r) ?? [Infinity, Infinity, -Infinity, -Infinity]; grp.set(r, [Math.min(c[0], b[0]), Math.min(c[1], b[1]), Math.max(c[2], b[2]), Math.max(c[3], b[3])]); });
+  return [...grp.values()].filter((b) => (b[2] - b[0]) * u >= 2 && (b[3] - b[1]) * u >= 2) as [number, number, number, number][];
+}
+
 const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
@@ -387,6 +414,8 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     columns: cols,
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,
+    ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
+    ...(() => { const g = wallGaps(U.rings, u); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span })) }; })(),
   };
 }
 
@@ -394,7 +423,73 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
  * Finds the separate drawings (floor plans, sections…) in a DXF by grouping wall lines that lie close together.
  * Returns their boxes in drawing units, biggest first — the user clicks the typical floor instead of boxing it by hand.
  */
-export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number): { box: [number, number, number, number]; count: number; w: number; h: number }[] {
+export type PlanCandidate = { box: [number, number, number, number]; count: number; w: number; h: number; title?: string; score: number; floors?: number };
+
+const BAD_TITLE = /section|elevation|site|roof|terrace|parking|basement|stilt|podium|detail|stair|lift|key\s*plan|location|schedule|foundation|footing|column\s*layout|centre\s*line|center\s*line/i;
+/** Floors from a title like "TYPICAL 1ST TO 14TH FLOOR PLAN" or "2nd-12th floor". */
+function floorsFromTitle(t: string): number | undefined {
+  const m = t.match(/(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor\s*)?(?:to|-|–|&|upto|up to)\s*(\d{1,3})\s*(?:st|nd|rd|th)?/i);
+  if (m) { const a = +m[1], b = +m[2]; if (b > a && b - a < 200) return b - a + 1; }
+  const n = t.match(/\((\d{1,3})\s*(?:nos|floors?)\)/i) ?? t.match(/(\d{1,3})\s*(?:nos\.?|floors)\b/i);
+  if (n && +n[1] > 0 && +n[1] < 200) return +n[1];
+  return undefined;
+}
+/** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
+function titleFor(texts: DxfText[], box: [number, number, number, number]): string | undefined {
+  const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
+  const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.1)
+    .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
+    .filter((t) => /plan|section|elevation|layout|floor/i.test(t.text) && t.text.length >= 4);
+  near.sort((a, b) => b.h - a.h || (/typical/i.test(b.text) ? 1 : 0) - (/typical/i.test(a.text) ? 1 : 0));
+  return near[0]?.text;
+}
+/** Floor height (mm) and number of slabs (first floor to terrace) read from the drawing's notes and level marks. */
+export function floorInfoFromTexts(texts: DxfText[]): { heightMm?: number; floors?: number; source?: string } {
+  const heightMm = floorHeightFromTexts(texts);
+  let floors: number | undefined, source: string | undefined;
+  for (const t of texts) { const m = t.text.match(/\bG\s*\+\s*(\d{1,3})\b/i); if (m && +m[1] > 0 && +m[1] < 150) { floors = +m[1]; source = `"${t.text.slice(0, 40)}"`; break; } }
+  if (!floors && heightMm) {
+    const lv = levelMarks(texts).filter((v) => v >= 2000);
+    if (lv.length >= 2) {
+      const n = (lv[lv.length - 1] - lv[0]) / heightMm;
+      if (Math.abs(n - Math.round(n)) < 0.02 && n >= 1) { floors = Math.round(n) + 1; source = `level marks +${lv[0]} to +${lv[lv.length - 1]} mm`; }
+    }
+  }
+  return { heightMm, floors, source };
+}
+function levelMarks(texts: DxfText[]): number[] {
+  const lv = new Set<number>();
+  for (const t of texts) for (const m of t.text.matchAll(/(?:^|[^\d.])\+\s*(\d{1,3}\.\d{2,3})(?!\d)/g)) { const v = Math.round(+m[1] * 1000); if (v > 0 && v < 400000) lv.add(v); }
+  for (const t of texts) for (const m of t.text.matchAll(/\+\s*(\d{3,6})\s*mm/gi)) { const v = +m[1]; if (v > 0 && v < 400000) lv.add(v); }
+  return [...lv].sort((a, b) => a - b);
+}
+
+/** Floor-to-floor height (mm) read from the drawing: "FLOOR HEIGHT 3075" / "F.T.F. 3.075", else the usual step between level marks (+3.075, +6.150 …). */
+export function floorHeightFromTexts(texts: DxfText[]): number | undefined {
+  for (const t of texts) {
+    const m = t.text.match(/(?:floor\s*(?:to\s*floor\s*)?height|f\s*\.?\s*t\s*\.?\s*f\s*\.?|floor\s*ht\.?)\D{0,8}(\d{4}|\d\.\d{2,3})/i);
+    if (m) { const v = m[1].includes(".") ? Math.round(+m[1] * 1000) : +m[1]; if (v >= 2600 && v <= 4500) return v; }
+  }
+  const lv = new Set<number>();
+  for (const t of texts) for (const m of t.text.matchAll(/(?:^|[^\d.])\+\s*(\d{1,3}\.\d{2,3})(?!\d)/g)) { const v = Math.round(+m[1] * 1000); if (v > 0 && v < 400000) lv.add(v); }
+  for (const t of texts) for (const m of t.text.matchAll(/\+\s*(\d{3,6})\s*mm/gi)) { const v = +m[1]; if (v > 0 && v < 400000) lv.add(v); }
+  const vals = [...lv].sort((a, b) => a - b);
+  const diffs = new Map<number, number>();
+  for (let i = 1; i < vals.length; i++) { const d = Math.round((vals[i] - vals[i - 1]) / 5) * 5; if (d >= 2600 && d <= 4500) diffs.set(d, (diffs.get(d) ?? 0) + 1); }
+  const best = [...diffs.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (best && best[1] >= 2) return best[0];
+  // first floor and top (terrace) levels only: floor height = (top − first) / n that is a round 25 mm figure
+  const hi = vals.filter((v) => v >= 2000);
+  if (hi.length >= 2) {
+    const span = hi[hi.length - 1] - hi[0];
+    const fits: number[] = [];
+    for (let n = 1; n <= 80; n++) { const h = span / n; const r = h % 25; if (h >= 2750 && h <= 3600 && (r < 0.5 || r > 24.5)) fits.push(Math.round(h)); }
+    if (fits.length === 1) return fits[0];
+  }
+  return undefined;
+}
+
+export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number): PlanCandidate[] {
   const walls = model.paths.filter((p) => (roles[p.layer] ?? "ignore") === "walls");
   if (walls.length < 5) return [];
   const gap = 2.5 / unitToM;                                  // drawings closer than 2.5 m belong together
@@ -406,7 +501,7 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
     cells.set(k, (cells.get(k) ?? 0) + 1);
   }
   const seen = new Set<string>();
-  const out: { box: [number, number, number, number]; count: number; w: number; h: number }[] = [];
+  const out: PlanCandidate[] = [];
   for (const start of cells.keys()) {
     if (seen.has(start)) continue;
     const stack = [start]; seen.add(start);
@@ -420,8 +515,25 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
       }
     }
     const box: [number, number, number, number] = [bx0 + i0 * C, by0 + j0 * C, bx0 + (i1 + 1) * C, by0 + (j1 + 1) * C];
-    out.push({ box, count: n, w: (box[2] - box[0]) * unitToM, h: (box[3] - box[1]) * unitToM });
+    out.push({ box, count: n, w: (box[2] - box[0]) * unitToM, h: (box[3] - box[1]) * unitToM, score: n });
   }
   const max = Math.max(...out.map((o) => o.count));
-  return out.filter((o) => o.count >= max * 0.08 && o.w >= 3 && o.h >= 3).sort((a, b) => b.count - a.count).slice(0, 12);
+  const texts = model.texts ?? [];
+  const kept = out.filter((o) => o.count >= max * 0.08 && o.w >= 3 && o.h >= 3);
+  for (const o of kept) {
+    const title = texts.length ? titleFor(texts, o.box) : undefined;
+    o.title = title;
+    // the typical floor plan: most walls, a "typical … plan" title, not a section / elevation / site / parking / roof drawing
+    let f = 1;
+    if (title) {
+      if (/typical/i.test(title)) f = 4;
+      else if (BAD_TITLE.test(title)) f = 0.25;
+      else if (/floor\s*plan|plan/i.test(title)) f = 1.5;
+      o.floors = floorsFromTitle(title);
+    }
+    const aspect = Math.max(o.w, o.h) / Math.max(0.1, Math.min(o.w, o.h));
+    if (aspect > 6) f *= 0.3;                                   // long thin strips: elevations / sections
+    o.score = o.count * f;
+  }
+  return kept.sort((a, b) => b.score - a.score).slice(0, 12);
 }
