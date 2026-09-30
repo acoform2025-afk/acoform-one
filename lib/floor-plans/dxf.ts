@@ -388,3 +388,39 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     wallRings: U.rings, wallLoose: loose,
   };
 }
+
+/**
+ * Finds the separate drawings (floor plans, sections…) in a DXF by grouping wall lines that lie close together.
+ * Returns their boxes in drawing units, biggest first — the user clicks the typical floor instead of boxing it by hand.
+ */
+export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number): { box: [number, number, number, number]; count: number; w: number; h: number }[] {
+  const walls = model.paths.filter((p) => (roles[p.layer] ?? "ignore") === "walls");
+  if (walls.length < 5) return [];
+  const gap = 2.5 / unitToM;                                  // drawings closer than 2.5 m belong together
+  const C = gap;
+  const [bx0, by0] = model.bbox;
+  const cells = new Map<string, number>();                    // cell → wall count
+  for (const p of walls) for (const [x, y] of p.pts) {
+    const k = `${Math.floor((x - bx0) / C)},${Math.floor((y - by0) / C)}`;
+    cells.set(k, (cells.get(k) ?? 0) + 1);
+  }
+  const seen = new Set<string>();
+  const out: { box: [number, number, number, number]; count: number; w: number; h: number }[] = [];
+  for (const start of cells.keys()) {
+    if (seen.has(start)) continue;
+    const stack = [start]; seen.add(start);
+    let i0 = Infinity, j0 = Infinity, i1 = -Infinity, j1 = -Infinity, n = 0;
+    while (stack.length) {
+      const k = stack.pop()!; const [i, j] = k.split(",").map(Number);
+      n += cells.get(k) ?? 0; i0 = Math.min(i0, i); j0 = Math.min(j0, j); i1 = Math.max(i1, i); j1 = Math.max(j1, j);
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+        const q = `${i + di},${j + dj}`;
+        if (!seen.has(q) && cells.has(q)) { seen.add(q); stack.push(q); }
+      }
+    }
+    const box: [number, number, number, number] = [bx0 + i0 * C, by0 + j0 * C, bx0 + (i1 + 1) * C, by0 + (j1 + 1) * C];
+    out.push({ box, count: n, w: (box[2] - box[0]) * unitToM, h: (box[3] - box[1]) * unitToM });
+  }
+  const max = Math.max(...out.map((o) => o.count));
+  return out.filter((o) => o.count >= max * 0.08 && o.w >= 3 && o.h >= 3).sort((a, b) => b.count - a.count).slice(0, 12);
+}

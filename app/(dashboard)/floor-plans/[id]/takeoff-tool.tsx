@@ -10,7 +10,7 @@ import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, UNIT_TO_M,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
-import { dxfAuto, dxfFrame, drawDxf, readDxf, ROLE_COLOR, snapPoints, type DxfModel } from "@/lib/floor-plans/dxf";
+import { dxfAuto, dxfFrame, drawDxf, planCandidates, readDxf, ROLE_COLOR, snapPoints, type DxfModel } from "@/lib/floor-plans/dxf";
 import { saveTakeoff } from "../actions";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
@@ -247,6 +247,18 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDxf, t.dxf, size]);
   const totals: Totals = useMemo(() => computeTotals(t, auto), [t, auto]);
+  // separate drawings in the file (floor plans, sections…) — until one is chosen, nothing is counted
+  const candidates = useMemo(() => {
+    const f = frameRef.current;
+    if (!isDxf || !modelRef.current || !t.dxf || !f) return [];
+    return planCandidates(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units]).map((c, i) => {
+      const a = f.toPx([c.box[0], c.box[1]]), b = f.toPx([c.box[2], c.box[3]]);
+      return { n: i + 1, w: c.w, h: c.h, px: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] as [number, number, number, number] };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDxf, t.dxf?.layerRoles, t.dxf?.units, size]);
+  const needPick = !!(isDxf && t.dxf && !t.dxf.region && candidates.length > 1);
+  const pickPlan = (c: { px: [number, number, number, number] }) => update((pp) => ({ ...pp, dxf: pp.dxf ? { ...pp.dxf, region: c.px } : pp.dxf }));
   const mpp = t.metersPerPx;
   const codes = useMemo(() => shapeCodes(t.shapes), [t.shapes]);
   const selShape = selected ? t.shapes.find((x) => x.id === selected) ?? null : null;
@@ -281,6 +293,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
 
   function click(p: Pt) {
     if (!canEdit) return;
+    if (needPick && tool !== "region") {
+      const c = candidates.find((q) => p[0] >= q.px[0] && p[0] <= q.px[2] && p[1] >= q.px[1] && p[1] <= q.px[3]);
+      if (c) { pickPlan(c); return; }
+    }
+    if (tool === "pan") return;
     if (tool === "select") {
       const hit = [...t.shapes].reverse().find((s) => hitTest(s, p, 8 / view.k));
       setSelected(hit?.id ?? null); return;
@@ -335,7 +352,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
   }
   function onPointerUp(e: React.PointerEvent) {
     const d = drag.current; drag.current = null;
-    if (!d || d.pan || d.moved || e.button !== 0) return;
+    if (!d || d.moved || e.button !== 0) return;
+    if (d.pan && !(needPick && tool === "pan")) return;       // a plain click (no drag) on a drawing picks it
+    if (tool === "pan") { click(toImg(e.clientX, e.clientY)); return; }
     click(snap(toImg(e.clientX, e.clientY), e.shiftKey).pt);
   }
   function zoomAt(factor: number, cx?: number, cy?: number) {
@@ -495,7 +514,17 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
                     </g>
                   );
                 })}
-                {isDxf && auto && frameRef.current ? (
+                {needPick ? (
+                  <g>
+                    {candidates.map((c) => (
+                      <g key={c.n}>
+                        <rect x={c.px[0]} y={c.px[1]} width={c.px[2] - c.px[0]} height={c.px[3] - c.px[1]} fill="rgba(239,157,47,0.07)" stroke="#ef9d2f" strokeWidth={2 * sw} strokeDasharray={`${8 * sw} ${5 * sw}`} />
+                        <text x={c.px[0] + 6 / k} y={c.px[1] - 6 / k} fontSize={13 / k} fill="#c2410c" stroke="#fff" strokeWidth={3 / k} paintOrder="stroke" fontWeight={700}>Drawing {c.n} · {c.w.toFixed(1)} × {c.h.toFixed(1)} m — click to count this one</text>
+                      </g>
+                    ))}
+                  </g>
+                ) : null}
+                {isDxf && auto && frameRef.current && !needPick ? (
                   <g pointerEvents="none">
                     {(auto.slabLoops ?? []).map((l, i) => <polygon key={`as${i}`} points={l.map((q) => frameRef.current!.toPx(q).join(",")).join(" ")} fill="rgba(37,99,235,0.06)" stroke="#2563eb" strokeWidth={1.5 * sw} strokeDasharray={auto.slabFromWalls ? `${6 * sw} ${4 * sw}` : undefined} />)}
                     {(auto.openingLoops ?? []).map((l, i) => <polygon key={`ao${i}`} points={l.map((q) => frameRef.current!.toPx(q).join(",")).join(" ")} fill="rgba(147,51,234,0.15)" stroke="#9333ea" strokeWidth={1.2 * sw} />)}
@@ -611,11 +640,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
             </Field>
           ) : null}
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <Field label="Floor height (m)"><NumInput value={t.params.floorHeight} step={0.05} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floorHeight: v } }))} /></Field>
+            <Field label="Floor height (mm)"><NumInput value={Math.round(t.params.floorHeight * 1000)} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floorHeight: v / 1000 } }))} /></Field>
             <Field label="Slab (mm)"><NumInput value={t.params.slabMm} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, slabMm: v } }))} /></Field>
             <Field label="No. of floors"><NumInput value={t.params.floors} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floors: Math.max(1, Math.round(v)) } }))} /></Field>
           </div>
-          <p className="mt-1.5 text-[11px] text-graphite-500">Walls and columns are shuttered to the slab bottom: clear height {totals.clear_height} m.</p>
+          <p className="mt-1.5 text-[11px] text-graphite-500">Walls and columns are shuttered to the slab bottom: clear height {Math.round(totals.clear_height * 1000)} mm (floor height − slab).</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
             <Field label={t.params.wallTopM2 == null ? "Wall tops to deduct (m²) · auto" : "Wall tops to deduct (m²)"}><NumInput value={t.params.wallTopM2 ?? totals.wall_top_area} step={0.01} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallTopM2: v } }))} /></Field>
             <Field label="Add % (extra)"><NumInput value={t.params.extraPct ?? 0} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, extraPct: Math.min(100, v) } }))} /></Field>
@@ -627,8 +656,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
           ) : null}
           <div className="mt-2 grid grid-cols-3 gap-2">
             <Field label="Wall thk (mm)"><NumInput value={t.params.wallThkMm ?? 150} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallThkMm: v } }))} /></Field>
-            <Field label="Beam width"><NumInput value={t.params.beamWidthMm ?? 200} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamWidthMm: v } }))} /></Field>
-            <Field label="Beam depth"><NumInput value={t.params.beamDepthMm ?? 600} step={25} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamDepthMm: v } }))} /></Field>
+            <Field label="Beam width (mm)"><NumInput value={t.params.beamWidthMm ?? 200} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamWidthMm: v } }))} /></Field>
+            <Field label="Beam depth (mm)"><NumInput value={t.params.beamDepthMm ?? 600} step={25} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamDepthMm: v } }))} /></Field>
           </div>
           <p className="mt-1 text-[11px] text-graphite-500">
             Wall tops ≈ wall length × thickness — at 150 mm that is {fmtArea(totals.wall_length * 0.15)}; at 125 mm {fmtArea(totals.wall_length * 0.125)}.
@@ -750,12 +779,23 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
         </Panel>
 
         <Panel title="Formwork area (per floor)">
-          {isDxf && t.dxf && !t.dxf.region ? (
+          {needPick ? (
+            <div className="rounded-md border border-signal-amber/40 bg-signal-amber/10 px-2.5 py-2 text-xs text-signal-amber">
+              <p><b>Choose the typical floor plan.</b> This file has {candidates.length} separate drawings (plans, sections, elevations). Click the typical floor on the drawing (orange boxes), or pick it here:</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {candidates.map((c) => (
+                  <button key={c.n} type="button" disabled={!canEdit} onClick={() => pickPlan(c)} className="rounded border border-signal-amber/50 px-2 py-1 font-medium hover:bg-signal-amber/20 disabled:opacity-50">
+                    Drawing {c.n} · {c.w.toFixed(1)} × {c.h.toFixed(1)} m
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : isDxf && t.dxf && !t.dxf.region ? (
             <p className="mb-2 rounded-md border border-signal-amber/40 bg-signal-amber/10 px-2.5 py-2 text-xs text-signal-amber">
-              <b>Whole drawing is being counted</b> — every plan, section and elevation in the file is added together. Click <b>Plan region</b> and box ONE typical floor plan to get the floor&apos;s area.
+              Whole drawing is counted. If the file also has sections or elevations, click <b>Plan region</b> and box ONE typical floor plan.
             </p>
           ) : null}
-          <table className="w-full text-xs">
+          {needPick ? null : <table className="w-full text-xs">
             <tbody className="divide-y divide-graphite-800">
               <TRow k="Slab area (less ducts)" v={fmtArea(totals.plan_area)} />
               <TRow k={`1 · Slab${totals.wall_top_area ? ` (− ${fmtArea(totals.wall_top_area)} wall tops)` : ""}`} v={fmtArea(totals.slab_soffit)} />
@@ -767,9 +807,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs }: { plan
               <TRow k="Total for typical floor" v={fmtArea(totals.contact_area)} strong />
               {totals.extra_pct ? <TRow k={`Add ${totals.extra_pct}%`} v={fmtArea(totals.quote_area)} strong /> : null}
               <TRow k="Vertical set (walls + columns)" v={fmtArea(totals.vertical_area)} />
-              {totals.floors > 1 ? <TRow k={`All ${totals.floors} floors`} v={fmtArea(totals.quote_area * totals.floors)} /> : null}
+              {totals.floors > 1 ? <TRow k={`All ${totals.floors} floors (typical × ${totals.floors})`} v={fmtArea(totals.quote_area * totals.floors)} strong /> : null}
             </tbody>
-          </table>
+          </table>}
           {totals.column_sizes.length ? (
             <p className="mt-2 text-[11px] text-graphite-500">Column sizes: {totals.column_sizes.map((c) => `${c.qty} × ${c.size}`).join(", ")}</p>
           ) : null}
