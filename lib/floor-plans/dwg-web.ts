@@ -67,7 +67,8 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
         case "LWPOLYLINE": case "POLYLINE2D": case "POLYLINE3D": {
           const vs = (e.vertices ?? []).filter((v: any) => ok(v?.x) && ok(v?.y));
           if (vs.length < 2) break;
-          const closed = ((e.flag ?? 0) & 1) === 1;
+          // DWG LWPOLYLINE stores "closed" as bit 512 (bit 1 means extrusion); 2D/3D POLYLINE use bit 1 like DXF
+          const closed = e.type === "LWPOLYLINE" ? ((e.flag ?? 0) & 512) !== 0 : ((e.flag ?? 0) & 1) === 1;
           poly(layer, T(bulged(vs, closed)), closed); break;
         }
         case "CIRCLE": if (e.center && e.radius > 0) poly(layer, T(arc(e.center.x, e.center.y, e.radius, 0, Math.PI * 2).slice(0, -1)), true); break;

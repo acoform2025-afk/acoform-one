@@ -77,3 +77,10 @@ returns and repairs.
 - `readDxf` uses a lean built-in reader (`leanParseDxf`) — about half the memory of dxf-parser (kept as fallback).
 - `next.config.ts` webpack fallbacks (module/fs/path/url/crypto = false) are needed for the wasm glue in the browser bundle.
 - Panel layout: doors/windows drawn on walls are cut out of wall faces (faces split .1/.2; OH lintel / OS sill pieces; RV reveals, OT head, OB sill bottom).
+
+## Columns, beams & deck in the panel BOM
+- Columns (drawn, typed-in sizes, DXF column layer) → `ColumnRun` (panel-input.ts) → 4 faces filled with wall panels + top panels + 4 external corners; round columns → `RCF` custom set. Group "column".
+- DXF outlines left open (3-sided column boxes, half-circle round columns, split slab outlines) are joined by `closedLoops` (dxf.ts). 
+- Beams: length made of 1200/900/600/300 (fillers rounded up to 50 mm), 2 sides + bottom for drawn beams, beam props `BPH` @1.2 m. Beam schedule grouped by code/size.
+- `PanelResult.elements` = per column-size / beam / slab schedule (panels page + BOM PDF).
+- dwg-web.ts: DWG LWPOLYLINE "closed" is flag bit 512 (not 1). Plans uploaded between 5370611 and this fix lost closed outlines → re-upload them.

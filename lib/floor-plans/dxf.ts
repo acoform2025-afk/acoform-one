@@ -289,16 +289,64 @@ function outermost(paths: DxfPath[]) {
   return keep;
 }
 
+/**
+ * Joins open pieces of outline into closed loops: pieces whose ends meet (within `tol`, drawing units) are
+ * chained; a chain whose ends meet is closed. With `closeGaps` (columns), a 3-sided outline whose missing
+ * side is no longer than its longest side is also closed — many drawings leave the last column side undrawn.
+ */
+export function closedLoops(paths: DxfPath[], tol: number, closeGaps = false): Pt[][] {
+  const out: Pt[][] = [];
+  const open: Pt[][] = [];
+  for (const p of paths) { if (p.closed) out.push(p.pts); else if (p.pts.length >= 2) open.push([...p.pts]); }
+  if (open.length > 20000) return out;
+  const key = (q: Pt) => `${Math.round(q[0] / tol)},${Math.round(q[1] / tol)}`;
+  const ends = new Map<string, number[]>();
+  const reg = (i: number) => { for (const q of [open[i][0], open[i][open[i].length - 1]]) { const k = key(q); (ends.get(k) ?? ends.set(k, []).get(k)!).push(i); } };
+  open.forEach((_, i) => reg(i));
+  const used = new Set<number>();
+  const near = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]) <= tol * 1.5;
+  const find = (q: Pt, self: number) => {
+    const [kx, ky] = key(q).split(",").map(Number);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const j of ends.get(`${kx + dx},${ky + dy}`) ?? []) {
+      if (j === self || used.has(j)) continue;
+      const o = open[j];
+      if (near(o[0], q)) return { j, rev: false };
+      if (near(o[o.length - 1], q)) return { j, rev: true };
+    }
+    return null;
+  };
+  for (let i = 0; i < open.length; i++) {
+    if (used.has(i)) continue;
+    used.add(i);
+    let chain = [...open[i]];
+    for (let guard = 0; guard < 500; guard++) {
+      const nx = find(chain[chain.length - 1], i); if (!nx) break;
+      used.add(nx.j);
+      const seg = nx.rev ? [...open[nx.j]].reverse() : open[nx.j];
+      chain = chain.concat(seg.slice(1));
+    }
+    const a = chain[0], b = chain[chain.length - 1];
+    if (chain.length >= 3 && near(a, b)) { out.push(chain.slice(0, -1)); continue; }
+    if (closeGaps && chain.length >= 4) {
+      let longest = 0; for (let k = 1; k < chain.length; k++) longest = Math.max(longest, Math.hypot(chain[k][0] - chain[k - 1][0], chain[k][1] - chain[k - 1][1]));
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) <= longest * 1.05) out.push(chain);
+    }
+  }
+  return out;
+}
+
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
 export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean): DxfAuto {
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)));
   const u = unitToM, u2 = unitToM * unitToM;
-  const slab = outermost(of("slab").filter((p) => p.closed));
-  const open = outermost(of("opening").filter((p) => p.closed));
-  const cols = outermost(of("columns").filter((p) => p.closed && p.pts.length >= 3)).map(({ p }) => {
+  const tol = 0.005 / u;                                      // 5 mm in drawing units
+  const loops = (r: LayerRole, gaps = false) => closedLoops(of(r), tol, gaps).map((pts) => ({ layer: r, pts, closed: true }) as DxfPath);
+  const slab = outermost(loops("slab"));
+  const open = outermost(loops("opening"));
+  const cols = outermost(loops("columns", true).filter((p) => p.pts.length >= 3)).map(({ p }) => {
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
     return { w: (Math.max(...xs) - Math.min(...xs)) * u, d: (Math.max(...ys) - Math.min(...ys)) * u, perimeter: polyLength(p.pts, true) * u, area: polyArea(p.pts) * u2 };
-  }).filter((c) => c.area > 0);
+  }).filter((c) => c.area > 0 && c.w >= 0.1 && c.d >= 0.1 && c.w <= 4 && c.d <= 4);
   return {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,

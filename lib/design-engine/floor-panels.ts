@@ -18,12 +18,14 @@ export type Face = { code: string; length: number; height: number; geo?: FaceGeo
 export type OpeningCut = { kind: "door" | "window"; w: number; h: number; t: number };                        // mm, one per opening (for reveals)                 // mm
 export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };                     // metres
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean }; // mm
-export type PanelOptions = { stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
+export type ColumnRun = { code: string; w: number; d: number; h: number; qty: number; round: boolean; perimeter: number };   // mm
+export type ElementRow = { kind: "column" | "beam" | "deck"; code: string; size: string; qty: number; area: number; detail: string };
+export type PanelOptions = { columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
-export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "end" | "corner" | "deck" | "beam" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string };
+export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string };
 export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo };
 export type PanelResult = {
-  bom: BomRow[]; faces: FaceLayout[];
+  bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[];
   summary: { panelArea: number; weight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
 };
 
@@ -138,6 +140,36 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   }
   if (o.openings?.length) warnings.push(`${o.openings.length} doors / windows cut out of the wall panels (lintel, sill and reveal pieces added).`);
 
+  // ---- columns: panels on each of the 4 faces + 4 external corners; round columns as a custom form set
+  const elements: ElementRow[] = [];
+  const ecCat = cat("external_corner")[0];
+  for (const c of o.columns ?? []) {
+    const q = Math.max(0, Math.round(c.qty)); if (!q) continue;
+    const H = Math.round(c.h);
+    const area = ((c.perimeter * c.h) / 1e6) * q;
+    if (c.round) {
+      const dia = r5(Math.max(c.w, c.d));
+      add(`col:RCF-${dia}-${H}`, { code: `RCF-${dia}-${H}`, description: `Round column form Ø${dia} × ${H} (set)`, group: "column", w: Math.round(c.perimeter), h: H, custom: true }, q);
+      elements.push({ kind: "column", code: c.code, size: `Ø${dia}`, qty: q, area, detail: `round form set Ø${dia} × ${H}` });
+      continue;
+    }
+    const top = Math.max(0, H - o.stdHeight);
+    const parts: string[] = [];
+    for (const [X, n] of [[Math.round(c.w), 2], [Math.round(c.d), 2]] as [number, number][]) {
+      const fit = wallW.length ? fillRun(X, wallW) : { panels: [], left: X };
+      const left = fit.left < tol ? 0 : r5(fit.left);
+      for (const w of fit.panels) {
+        const p = wallCat.find((x) => x.width_mm === w)!;
+        add(`col:${p.panel_code}`, { code: p.panel_code, description: "Column panel", group: "column", w, h: o.stdHeight, custom: false }, n * q, Number(p.weight_kg));
+        if (top > 0) add(`col:WT-${w}-${top}`, { code: `WT-${w}-${top}`, description: "Column top panel (custom height)", group: "column", w, h: top, custom: true }, n * q);
+      }
+      if (left > 0) add(`col:CF-${left}-${H}`, { code: `CF-${left}-${H}`, description: "Column filler (custom width)", group: "column", w: left, h: H, custom: true }, n * q);
+      parts.push(`${X}: ${[...fit.panels.map(String), ...(left ? [`F${left}`] : [])].join("+") || "—"}`);
+    }
+    add("col:EC", { code: ecCat?.panel_code ?? "EC", description: "Column external corner", group: "column", w: ecCat?.width_mm ?? 65, h: H, custom: !ecCat }, 4 * q, ecCat ? Number(ecCat.weight_kg) : undefined);
+    elements.push({ kind: "column", code: c.code, size: `${Math.round(c.w)}×${Math.round(c.d)}`, qty: q, area, detail: `${parts.join(" · ")} · 4 corners${top ? ` · top ${top}` : ""}` });
+  }
+
   // ---- corners
   const ic = cat("internal_corner")[0], ec = cat("external_corner")[0];
   if (corners > 0) {
@@ -148,8 +180,11 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   // ---- deck: strips across each slab, scaled to the net soffit area
   let fillArea = 0; const deckCount = new Map<number, number>(); let deckFiller = 0;
   const L = deckLen / 1000;
+  const deckRows: { code: string; size: string; area: number; n: number; special: number }[] = [];
   for (const d of decks) {
     const xs = d.pts.map((p) => p[0]); const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const ys = d.pts.map((p) => p[1]);
+    const before = { fill: fillArea, spec: deckFiller, n: [...deckCount.values()].reduce((a, b) => a + b, 0) };
     for (let x = x0; x < x1 - 0.05; x += L) {
       const xa = x + 0.02, xb = Math.min(x + L, x1) - 0.02;
       const ints = overlap(intervalsAt(xa, d.pts, d.holes), intervalsAt(xb, d.pts, d.holes));
@@ -163,8 +198,10 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
         fillArea += (run * stripLen * 1000) / 1e6;
       }
     }
+    deckRows.push({ code: d.code, size: `${(x1 - x0).toFixed(2)} × ${(Math.max(...ys) - Math.min(...ys)).toFixed(2)} m`, area: fillArea - before.fill, n: [...deckCount.values()].reduce((a, b) => a + b, 0) - before.n, special: deckFiller - before.spec });
   }
   const scale = fillArea > 0 && o.soffitArea > 0 ? Math.min(1, o.soffitArea / fillArea) : 1;
+  for (const r of deckRows) elements.push({ kind: "deck", code: r.code, size: r.size, qty: 1, area: r.area * scale, detail: `${Math.round(r.n * scale)} deck panels × ${deckLen} long · specials ${(r.special * scale).toFixed(2)} m²${scale < 0.98 ? ` (net of wall tops / columns, ×${scale.toFixed(2)})` : ""}` });
   if (fillArea > 0 && scale < 0.98) warnings.push(`Deck counts scaled to ${(scale * 100).toFixed(0)}% for wall tops / columns not decked (net soffit ${o.soffitArea.toFixed(2)} m²).`);
   for (const [w, n] of deckCount) {
     const p = deckCat.find((x) => x.width_mm === w)!;
@@ -189,23 +226,52 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     add("SC-100-1200", { code: "SC-100-1200", description: "Soffit corner 100 × 1200 (top of wall faces)", group: "corner", w: 100, h: 1200, custom: true }, sc);
   }
 
-  // ---- beams
+  // ---- beams: length made up of 1200/900/600/300 panels (+ filler); 2 sides and a bottom for drawn beams; beam props
+  const BEAM_LEN = [1200, 900, 600, 300];
+  let beamProps = 0;
+  const beamAgg = new Map<string, { code: string; size: string; n: number; len: number; area: number; pieces: Map<number, number>; sides: number; bottom: boolean; props: number }>();
   for (const b of beams) {
-    const pieces = Math.ceil(b.length / 1200);
-    const side = Math.max(0, Math.round(b.d - o.slabMm));
-    if (side > 0) add(`BS-${side}-1200`, { code: `BS-${side}-1200`, description: `Beam side panel ${side} × 1200`, group: "beam", w: side, h: 1200, custom: true }, pieces * b.sides);
-    if (b.bottom && b.b > 0) add(`BB-${Math.round(b.b)}-1200`, { code: `BB-${Math.round(b.b)}-1200`, description: `Beam bottom panel ${Math.round(b.b)} × 1200`, group: "beam", w: Math.round(b.b), h: 1200, custom: true }, pieces);
+    const side = Math.max(0, Math.round(b.d - o.slabMm)), bw = Math.round(b.b);
+    const fit = fillRun(b.length, BEAM_LEN);
+    const left = fit.left < tol ? 0 : Math.ceil(fit.left / 50) * 50;      // beam fillers in 50 mm steps
+    const pieces = [...fit.panels, ...(left ? [left] : [])];
+    for (const Lp of pieces) {
+      const cust = !BEAM_LEN.includes(Lp);
+      if (side > 0) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: side, h: Lp, custom: true }, b.sides);
+      if (b.bottom && bw > 0) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+    }
+    const props = b.bottom && bw > 0 ? Math.ceil(b.length / 1200) + 1 : 0;
+    beamProps += props;
+    const size = bw > 0 ? `${bw}×${Math.round(b.d)}` : `D ${Math.round(b.d)}`;
+    const key = `${b.code}|${size}|${b.sides}|${b.bottom}`;
+    const g = beamAgg.get(key) ?? { code: b.code, size, n: 0, len: 0, area: 0, pieces: new Map<number, number>(), sides: b.sides, bottom: b.bottom && bw > 0, props: 0 };
+    g.n++; g.len += b.length; g.props += props;
+    g.area += (b.length * side * b.sides + (b.bottom ? b.length * bw : 0)) / 1e6;
+    for (const Lp of pieces) g.pieces.set(Lp, (g.pieces.get(Lp) ?? 0) + 1);
+    beamAgg.set(key, g);
+  }
+  for (const g of beamAgg.values()) {
+    const std = BEAM_LEN.filter((L) => g.pieces.get(L)).map((L) => `${g.pieces.get(L)}×${L}`);
+    const fill = [...g.pieces.entries()].filter(([L]) => !BEAM_LEN.includes(L)).reduce((a, [, n]) => a + n, 0);
+    elements.push({ kind: "beam", code: g.n > 1 ? `${g.code} (${g.n} runs)` : g.code, size: g.size, qty: g.n, area: g.area,
+      detail: `${(g.len / 1000).toFixed(2)} m: ${[...std, ...(fill ? [`${fill} fillers`] : [])].join(" + ") || "—"} per side · ${g.sides} side${g.sides > 1 ? "s" : ""}${g.bottom ? " + bottom" : ""}${g.props ? ` · ${g.props} beam props` : ""}` });
+  }
+  if (beamProps) {
+    byCode.set("BPH", { code: "BPH", description: "Beam prop head (under beam bottoms @ 1.2 m)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: beamProps * 4.5, custom: false, unit: "nos" });
+    const pr = byCode.get("PROP");
+    if (pr) { pr.qty += beamProps; pr.description = "Adjustable steel prop (deck + beams)"; }
+    else byCode.set("PROP", { code: "PROP", description: "Adjustable steel prop (beams)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: 0, custom: false, unit: "nos" });
   }
 
   if (ends) warnings.push(`${ends} short faces (≤ ${endMax} mm) treated as wall ends (stop-ends).`);
-  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "deck", "beam", "accessory"];
+  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "accessory"];
   const bom = [...byCode.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || b.w - a.w || a.code.localeCompare(b.code))
     .map((r) => ({ ...r, area: Math.round(r.area * 100) / 100, weight: Math.round(r.weight * 10) / 10 }));
   const panelArea = bom.reduce((s, r) => s + r.area, 0);
   const stdArea = bom.filter((r) => !r.custom).reduce((s, r) => s + r.area, 0);
   const weight = bom.reduce((s, r) => s + r.weight, 0);
   return {
-    bom, faces: layouts,
+    bom, faces: layouts, elements,
     summary: {
       panelArea: Math.round(panelArea * 100) / 100, weight: Math.round(weight), standardPct: panelArea ? Math.round((stdArea / panelArea) * 1000) / 10 : 0,
       faceCount: layouts.length, faceLength: Math.round(faceLen) / 1000, deckFillArea: Math.round(fillArea * 100) / 100, props,

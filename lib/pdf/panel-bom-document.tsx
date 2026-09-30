@@ -13,7 +13,7 @@ Font.register({
 Font.registerHyphenationCallback((w) => [w]);
 const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 const ORANGE = "#ef9d2f", GRAY = "#6b6d68";
-const GROUP: Record<string, string> = { wall: "WALL PANELS", "wall-top": "WALL TOP PANELS", filler: "FILLERS / SPECIALS", end: "WALL ENDS", corner: "CORNERS", deck: "DECK PANELS", beam: "BEAM PANELS", accessory: "PROPS & ACCESSORIES" };
+const GROUP: Record<string, string> = { wall: "WALL PANELS", "wall-top": "WALL TOP PANELS", column: "COLUMN PANELS", filler: "FILLERS / SPECIALS", end: "WALL ENDS", corner: "CORNERS", deck: "DECK PANELS", beam: "BEAM PANELS", accessory: "PROPS & ACCESSORIES" };
 const n0 = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -68,6 +68,18 @@ export function PanelBomDocument({ r, info }: { r: PanelResult; info: BomInfo })
           })}
           <Row c={["TOTAL", "", "", "", n2(s.panelArea), n0(s.weight)]} bold bg="#fdf3e4" />
         </View>
+        {r.elements.length ? (
+          <View style={{ marginTop: 10 }}>
+            <Text style={{ fontSize: 9.5, fontWeight: "bold", marginBottom: 3 }}>COLUMNS, BEAMS & DECK — ELEMENT SCHEDULE</Text>
+            <View style={{ borderWidth: 0.75, borderColor: "#999", fontSize: 7.5 }}>
+              {[["ELEMENT", "CODE", "SIZE", "QTY", "AREA m²", "PANELS"], ...(["column", "beam", "deck"] as const).flatMap((k) => r.elements.filter((e) => e.kind === k)).map((e) => [e.kind === "deck" ? "Deck" : e.kind === "beam" ? "Beam" : "Column", e.code, e.size, String(e.qty), n2(e.area), e.detail])].map((c, i) => (
+                <View key={i} style={{ flexDirection: "row", backgroundColor: i === 0 ? "#fdf3e4" : undefined, borderBottomWidth: 0.4, borderColor: "#ccc" }} wrap={false}>
+                  {c.map((v, j) => <Text key={j} style={{ width: ["9%", "11%", "12%", "6%", "9%", "53%"][j], paddingVertical: 2, paddingHorizontal: 3, fontWeight: i === 0 ? "bold" : "normal", textAlign: j === 3 || j === 4 ? "right" : "left" }}>{v}</Text>)}
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
         <Text style={{ marginTop: 6, fontSize: 7.5, color: GRAY }}>* custom-size item (weight taken at the custom kg/m² rate). Quantities are for one typical-floor set.</Text>
         {s.warnings.map((w) => <Text key={w} style={{ fontSize: 7.5, color: "#92400e" }}>• {w}</Text>)}
         <Text style={{ marginTop: 6, fontSize: 7.5, color: GRAY }}>Automatic first layout on standard aluminium-formwork rules. Final panel schedule as per approved shell plan and ACOFORM modulation drawings.</Text>

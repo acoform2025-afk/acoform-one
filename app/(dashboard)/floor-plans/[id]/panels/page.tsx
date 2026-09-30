@@ -10,7 +10,7 @@ import { CreateBom } from "./create-bom";
 export const metadata = { title: "Panel layout & BOM" };
 export const dynamic = "force-dynamic";
 
-const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", accessory: "Props & accessories" };
+const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", column: "Column panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", accessory: "Props & accessories" };
 const n0 = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -110,6 +110,32 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
           })}
         </table>
       </div>
+
+      {result.elements.length ? (
+        <section className="mt-5">
+          <h2 className="text-sm font-semibold text-graphite-100">Columns, beams &amp; deck — element by element</h2>
+          <p className="mt-0.5 text-xs text-graphite-500">How each column, beam and slab is made up. Sizes in mm; panel sequences read across each face / along each beam. F = filler (custom width).</p>
+          <div className="mt-2 overflow-x-auto rounded-lg border border-graphite-800">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-graphite-900 text-xs uppercase tracking-wide text-graphite-500">
+                <tr><th className="px-4 py-2">Element</th><th className="px-4 py-2">Code</th><th className="px-4 py-2">Size</th><th className="px-4 py-2 text-right">Qty</th><th className="px-4 py-2 text-right">Area m²</th><th className="px-4 py-2">Panels</th></tr>
+              </thead>
+              <tbody className="divide-y divide-graphite-800">
+                {(["column", "beam", "deck"] as const).flatMap((k) => result.elements.filter((e) => e.kind === k)).map((e, i) => (
+                  <tr key={i} className="bg-graphite-950">
+                    <td className="px-4 py-2 text-xs capitalize text-graphite-300">{e.kind === "deck" ? "Deck (slab)" : e.kind}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-graphite-200">{e.code}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-graphite-300">{e.size}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs text-graphite-100">{e.qty}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs text-graphite-300">{n2(e.area)}</td>
+                    <td className="px-4 py-2 text-xs text-graphite-400">{e.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <details className="mt-5 rounded-lg border border-graphite-800 bg-graphite-900 p-3">
         <summary className="cursor-pointer text-sm font-medium text-graphite-200">Wall face layouts ({result.faces.length} faces · {n2(s.faceLength)} m)</summary>

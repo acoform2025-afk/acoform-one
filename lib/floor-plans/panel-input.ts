@@ -2,10 +2,10 @@
  * Turns a measured floor plan (take-off + DXF layers) into the inputs of the floor panel layout:
  * wall faces, slab polygons (with ducts as holes), beam runs and the number of wall corners.
  */
-import { computeTotals, OPENING_DEFAULTS, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
-import { dxfAuto, dxfFrame, type DxfModel } from "./dxf";
+import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
+import { closedLoops, dxfAuto, dxfFrame, type DxfModel } from "./dxf";
 import { buildShell } from "./shell";
-import type { BeamRun, DeckPoly, Face, OpeningCut } from "@/lib/design-engine/floor-panels";
+import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut } from "@/lib/design-engine/floor-panels";
 
 const angleAt = (a: Pt, b: Pt, c: Pt) => {
   const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]];
@@ -102,13 +102,14 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
 
   // slabs (metres) with ducts as holes
   const toM = (p: Pt): Pt => [p[0] * mpp, p[1] * mpp];
+  const tolPx = mpp > 0 ? 0.005 / mpp : 0.5;               // 5 mm in plan px
   const holes: Pt[][] = [
     ...g.shapes.filter((s) => s.kind === "opening").map((s) => s.pts.map(toM)),
-    ...(g.dxf.opening ?? []).filter((l) => l.closed).map((l) => l.pts.map(toM)),
+    ...closedLoops((g.dxf.opening ?? []).map((l) => ({ layer: "o", ...l })), tolPx).map((pts) => pts.map(toM)),
   ];
   const decks: DeckPoly[] = [
     ...g.shapes.filter((s) => s.kind === "slab").map((s) => ({ code: s.code, pts: s.pts.map(toM), holes })),
-    ...(g.dxf.slab ?? []).filter((l) => l.closed && l.pts.length > 2).map((l, i) => ({ code: `SL${i + 1}`, pts: l.pts.map(toM), holes })),
+    ...closedLoops((g.dxf.slab ?? []).map((l) => ({ layer: "s", ...l })), tolPx).filter((pts) => pts.length > 2).map((pts, i) => ({ code: `SL${i + 1}`, pts: pts.map(toM), holes })),
   ];
 
   // beams
@@ -131,5 +132,26 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
     auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep);
   }
   const totals: Totals = computeTotals(t, auto);
-  return { faces, decks, beams, corners, openings, totals, shell: g };
+
+  // columns (mm): drawn, typed in by size, and from the DXF column layer — same sizes grouped
+  const colMap = new Map<string, ColumnRun>();
+  const addCol = (w: number, d: number, h: number, round: boolean, perimeter: number, qty: number) => {
+    if (!(w > 50 && d > 50) || qty <= 0) return;
+    const [a, b] = [Math.round(w / 5) * 5, Math.round(d / 5) * 5];
+    const key = `${round ? "R" : ""}${a}x${b}@${Math.round(h)}`;
+    const c = colMap.get(key);
+    if (c) c.qty += qty; else colMap.set(key, { code: round ? `CR${a}` : `C${a}x${b}`, w: a, d: b, h, qty, round, perimeter });
+  };
+  for (const s of g.shapes.filter((x) => x.kind === "column")) {
+    if (!(mpp > 0)) break;
+    const xs = s.pts.map((p) => p[0]), ys = s.pts.map((p) => p[1]);
+    const w = (Math.max(...xs) - Math.min(...xs)) * mpp * 1000, d = (Math.max(...ys) - Math.min(...ys)) * mpp * 1000;
+    const round = s.pts.length > 6 && Math.abs(polyArea(s.pts)) * mpp * mpp * 1e6 < 0.85 * w * d;
+    addCol(w, d, s.h && s.h > 0 ? s.h : H, round, polyLength(s.pts, true) * mpp * 1000, 1);
+  }
+  for (const c of t.columns ?? []) addCol(c.w_mm, c.d_mm, H, false, 2 * (c.w_mm + c.d_mm), Math.round(c.qty || 0));
+  for (const c of auto?.columns ?? []) addCol(c.w * 1000, c.d * 1000, H, c.area < 0.85 * c.w * c.d, c.perimeter * 1000, 1);
+  const columns = [...colMap.values()].sort((a, b) => b.qty - a.qty);
+
+  return { faces, decks, beams, corners, openings, columns, totals, shell: g };
 }
