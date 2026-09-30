@@ -27,7 +27,7 @@ export type SheetGeo = {
   columns: Pt[][];
 };
 export type SheetSection = { no: number; key: string; title: string; heading: string; lines: string[]; total: string; value: number; figure: string; panes: ("slab" | "duct" | "walltop" | "walls" | "beams" | "stairs" | "columns" | "none")[] };
-export type SheetInfo = { title: string; project: string; client: string; planName: string; date: string; company: string; extraPct: number; floors: number; contact: number; quote: number };
+export type SheetInfo = { title: string; project: string; client: string; planName: string; date: string; company: string; extraPct: number; contact: number; quote: number; nonTypical: { label: string; area: number }[]; set: number };
 
 const d = (pts: Pt[], closed: boolean) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(0)} ${(-p[1]).toFixed(0)}`).join(" ") + (closed ? " Z" : "");
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -142,7 +142,14 @@ export function AreaSheetDocument({ geo, info, sections }: { geo: SheetGeo | nul
                 <Text style={{ fontSize: 10, marginTop: 4 }}>={sections.map((s) => s.no).join("+")}</Text>
                 <Text style={{ fontSize: 12, color: RED, marginTop: 6 }}>= {info.contact.toLocaleString("en-IN", { maximumFractionDigits: 3, minimumFractionDigits: 3 })} SQM</Text>
                 {info.extraPct ? <Text style={{ fontSize: 12, color: RED, marginTop: 2 }}>ADD {info.extraPct}% = {Math.round(info.quote).toLocaleString("en-IN")} SQM</Text> : null}
-                {info.floors > 1 ? <Text style={{ fontSize: 9, marginTop: 4 }}>ALL {info.floors} FLOORS = {n2(info.quote * info.floors)} SQM</Text> : null}
+                {info.nonTypical.length ? (
+                  <View style={{ marginTop: 6, alignItems: "center" }}>
+                    <Text style={{ fontSize: 8.5 }}>ADDITIONAL FOR NON-TYPICAL FLOORS</Text>
+                    {info.nonTypical.map((x, i) => <Text key={i} style={{ fontSize: 8 }}>{x.label} = {n2(x.area)}</Text>)}
+                    <Text style={{ fontSize: 11, color: RED, marginTop: 3 }}>FORMWORK SET = {Math.round(info.set).toLocaleString("en-IN")} SQM</Text>
+                  </View>
+                ) : null}
+                <Text style={{ fontSize: 7, marginTop: 4, color: "#555" }}>One set is reused on all floors (typical floor basis).</Text>
               </View>
             </View>
           </View>

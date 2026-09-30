@@ -681,7 +681,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           <div className="mt-2 grid grid-cols-3 gap-2">
             <Field label="Floor height (mm)"><NumInput value={Math.round(t.params.floorHeight * 1000)} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floorHeight: v / 1000 } }))} /></Field>
             <Field label="Slab (mm)"><NumInput value={t.params.slabMm} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, slabMm: v } }))} /></Field>
-            <Field label="No. of floors"><NumInput value={t.params.floors} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floors: Math.max(1, Math.round(v)) } }))} /></Field>
+            <Field label="No. of floors (info)"><NumInput value={t.params.floors} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floors: Math.max(1, Math.round(v)) } }))} /></Field>
           </div>
           <p className="mt-1.5 text-[11px] text-graphite-500">Walls and columns are shuttered to the slab bottom: clear height {Math.round(totals.clear_height * 1000)} mm (floor height − slab).</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
@@ -826,7 +826,16 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           />
         </Panel>
 
-        <Panel title="Formwork area (per floor)">
+        <Panel title="Non-typical floors — additional requirement" hint="Mivan: one set is reused on every floor, so only the typical floor is measured. Add here only the EXTRA area other floors need (first floor, terrace, refuge floor, podium changes…). Added once to the set, not per floor.">
+          <RowsEditor
+            rows={t.nonTypical ?? []} disabled={!canEdit}
+            cols={[{ k: "label", label: "Floor / item", text: true }, { k: "area_m2", label: "Extra m²" }]}
+            blank={{ label: "First floor extra", area_m2: 0 }}
+            onChange={(rows) => update((p) => ({ ...p, nonTypical: rows }))}
+          />
+        </Panel>
+
+        <Panel title="Formwork area (typical floor)">
           {needPick ? (
             <p className="mb-2 rounded-md border border-signal-amber/40 bg-signal-amber/10 px-2.5 py-2 text-xs text-signal-amber">The typical floor plan has not been chosen yet for this file.</p>
           ) : isDxf && t.dxf && candidates.length > 1 ? (
@@ -861,9 +870,10 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
               <TRow k="3 · Beams" v={fmtArea(totals.beam_area)} />
               <TRow k="4 · Staircase & others" v={fmtArea(totals.extra_area)} />
               <TRow k="Total for typical floor" v={fmtArea(totals.contact_area)} strong />
-              {totals.extra_pct ? <TRow k={`Add ${totals.extra_pct}%`} v={fmtArea(totals.quote_area)} strong /> : null}
+              {totals.extra_pct ? <TRow k={`Add ${totals.extra_pct}%`} v={fmtArea(totals.typical_quote)} strong /> : null}
+              {totals.nontypical_area ? <TRow k="+ Additional for non-typical floors" v={fmtArea(totals.nontypical_area)} /> : null}
+              {totals.nontypical_area ? <TRow k="Formwork set (used on all floors)" v={fmtArea(totals.quote_area)} strong /> : null}
               <TRow k="Vertical set (walls + columns)" v={fmtArea(totals.vertical_area)} />
-              {totals.floors > 1 ? <TRow k={`All ${totals.floors} floors (typical × ${totals.floors})`} v={fmtArea(totals.quote_area * totals.floors)} strong /> : null}
             </tbody>
           </table>}
           {!needPick ? (

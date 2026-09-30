@@ -45,7 +45,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     <AreaSheetDocument geo={sheetGeo(auto)} sections={sheetSections(t, totals, auto)} info={{
       title: "TENTATIVE AREA CALCULATION", company: company?.company_name ?? "Aco Form Work Pvt Ltd",
       project: lead?.project_name ?? plan.name, client: lead?.company_name ?? lead?.customer_name ?? "", planName: plan.name,
-      date: new Date().toLocaleDateString("en-GB"), extraPct: totals.extra_pct, floors: totals.floors, contact: totals.contact_area, quote: totals.quote_area,
+      date: new Date().toLocaleDateString("en-GB"), extraPct: totals.extra_pct, contact: totals.contact_area, quote: totals.typical_quote, set: totals.quote_area,
+      nonTypical: (t.nonTypical ?? []).filter((x) => Number(x.area_m2) > 0).map((x) => ({ label: (x.label || "Additional").slice(0, 40), area: Number(x.area_m2) })),
     }} />,
   );
   return new Response(new Uint8Array(buffer), {

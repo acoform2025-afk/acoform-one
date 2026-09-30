@@ -69,6 +69,9 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
         </div>
         <div className="flex items-center gap-2">
           {lead && canEdit ? <Link href={`/floor-plans/new?lead=${lead.id}`} className="rounded-md border border-graphite-700 px-3 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">+ Add section / another drawing</Link> : null}
+          {plan.takeoff ? (
+            <a href={`/floor-plans/${plan.id}/area-sheet`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />Area calculation sheet</a>
+          ) : null}
           {dl?.signedUrl ? (
             <a href={dl.signedUrl} className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Original file</a>
           ) : null}

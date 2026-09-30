@@ -12,7 +12,7 @@ export type QuoteOption = {
 };
 
 const BASIS: { k: AreaBasis; label: string; hint: string }[] = [
-  { k: "quote_area", label: "Full set area (typical floor + extra %)", hint: "Full set (monolithic) quick quotes" },
+  { k: "quote_area", label: "Formwork set (typical floor + extra % + non-typical additions)", hint: "Full set (monolithic) quick quotes" },
   { k: "vertical_area", label: "Vertical set area (walls + columns)", hint: "Vertical set quick quotes" },
   { k: "plan_area", label: "Slab area only", hint: "Slab outline less ducts" },
 ];

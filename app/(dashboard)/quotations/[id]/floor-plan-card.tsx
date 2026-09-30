@@ -40,12 +40,13 @@ export function FloorPlanCard({ quotationId, leadId, editable, isQuick, attached
             <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
               <dt className="text-graphite-500">Vertical set (walls + columns)</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.vertical_area)}</dd>
               <dt className="text-graphite-500">Typical floor total</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.contact_area)}</dd>
-              <dt className="text-graphite-500">Full set area{attached.totals.extra_pct ? ` (+${attached.totals.extra_pct}%)` : ""}</dt><dd className="text-right font-mono font-semibold text-graphite-50">{fmtArea(attached.totals.quote_area || attached.totals.contact_area)}</dd>
+              <dt className="text-graphite-500">Formwork set{attached.totals.extra_pct ? ` (+${attached.totals.extra_pct}%)` : ""}{attached.totals.nontypical_area ? " + non-typical" : ""}</dt><dd className="text-right font-mono font-semibold text-graphite-50">{fmtArea(attached.totals.quote_area || attached.totals.contact_area)}</dd>
             </dl>
             <div className="mt-3 flex flex-wrap gap-2">
               <Link href={`/floor-plans/${attached.id}?quotation=${quotationId}`} className="rounded-md border border-graphite-700 px-3 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">
                 {editable ? (isQuick ? "Measure / use area in this quote" : "Open & measure") : "Open plan"}
               </Link>
+              <a href={`/floor-plans/${attached.id}/area-sheet`} target="_blank" rel="noreferrer" className="rounded-md bg-brand-orange px-3 py-1.5 text-xs font-medium text-white hover:opacity-90">Area calculation sheet</a>
               {editable ? <button type="button" disabled={pending} onClick={() => run(null)} className="rounded-md border border-graphite-700 px-3 py-1.5 text-xs text-graphite-400 hover:text-signal-red disabled:opacity-50">Remove from PDF</button> : null}
             </div>
           </div>

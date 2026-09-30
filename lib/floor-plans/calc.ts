@@ -3,7 +3,8 @@
  * Pure functions, used by the measuring screen (browser) and shown on quotations.
  *
  * All drawn shapes are stored in "image pixels" of the plan picture; metersPerPx turns them into metres.
- * Areas are PER FLOOR (one typical floor = one formwork set); `floors` only multiplies the "all floors" figure.
+ * Areas are PER TYPICAL FLOOR: one aluminium formwork set is reused on every floor, so the set = typical floor + extra %
+ * + the additional pieces non-typical floors need (first floor, terrace, refuge…). `floors` is for information only.
  */
 
 import { DEFAULT_RULES, normaliseRules, type MeasureRules } from "./rules";
@@ -62,6 +63,7 @@ export type Takeoff = {
   columns: ColumnRow[];                // columns typed in by size
   beams: BeamRow[];
   extras?: ExtraRow[];
+  nonTypical?: ExtraRow[];             // additional formwork for non-typical floors (added once to the set, not per floor)
   stairs?: StairRow[];
   shell?: ShellMeta;
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null };
@@ -105,7 +107,9 @@ export type Totals = {
   vertical_area: number;   // walls + columns (quick quote "Vertical set" basis)
   contact_area: number;    // total formwork contact area for one typical floor
   extra_pct: number;
-  quote_area: number;      // contact area + extra % (quick quote "Full set" basis)
+  typical_quote: number;   // typical floor contact area + extra %
+  nontypical_area: number; // additional formwork for non-typical floors
+  quote_area: number;      // formwork set = typical + extra % + non-typical additions (quick quote "Full set" basis)
   clear_height: number;
   floors: number;
   params: Takeoff["params"];
@@ -309,6 +313,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
   if (edge) items.push({ code: "E", group: "edge", label: "Slab & opening edges", calc: `${n2(slabPer + openPer)} m × ${n3(slab)} m`, area: edge });
   const kicker = rules.kickerMm > 0 ? slabPer * rules.kickerMm / 1000 : 0;
   if (kicker) { items.push({ code: "K", group: "edge", label: `External kicker ${rules.kickerMm} mm`, calc: `${n2(slabPer)} m × ${n3(rules.kickerMm / 1000)} m`, area: kicker }); edge += kicker; }
+  const nonTyp = (t.nonTypical ?? []).reduce((s, x) => s + Math.max(0, Number(x.area_m2) || 0), 0);
   const contact = soffit + edge + wallArea + colArea + beamArea + extraArea + loftArea;
   const hasManual = t.shapes.length > 0 || t.columns.length > 0 || t.beams.length > 0 || (t.stairs ?? []).length > 0 || extraArea > 0;
   const order = { slab: 0, deduct: 1, edge: 2, wall: 3, opening: 4, column: 5, beam: 6, loft: 7, extra: 8 } as const;
@@ -320,7 +325,8 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     column_sizes: [...sizes.entries()].map(([size, qty]) => ({ size, qty })).sort((a, b) => b.qty - a.qty),
     beam_area: r2(beamArea), extra_area: r2(extraArea + loftArea), wall_top_area: r2(wallTop),
     vertical_area: r2(wallArea + colArea),
-    contact_area: r2(contact), extra_pct: extraPct, quote_area: r2(contact * (1 + extraPct / 100)),
+    contact_area: r2(contact), extra_pct: extraPct, typical_quote: r2(contact * (1 + extraPct / 100)), nontypical_area: r2(nonTyp),
+    quote_area: r2(contact * (1 + extraPct / 100) + nonTyp),
     clear_height: r2(H), floors: Math.max(1, Math.round(floors || 1)), params: t.params,
     source: auto && hasManual ? "mixed" : auto ? "dxf" : "manual",
     wall_top_drawn: r2(wallTopDrawn + (auto?.wallTopArea ?? 0)),
@@ -344,6 +350,11 @@ export function totalsRows(t: Partial<Totals>): [string, string][] {
   if (t.beam_area) rows.push(["Beam sides", fmtArea(t.beam_area)]);
   if (t.extra_area) rows.push(["Staircase & other items", fmtArea(t.extra_area)]);
   rows.push(["Total for typical floor", fmtArea(t.contact_area)]);
-  if (t.extra_pct) rows.push([`Add ${t.extra_pct}%`, fmtArea(t.quote_area)]);
+  const typ = t.typical_quote ?? t.quote_area;
+  if (t.extra_pct) rows.push([`Add ${t.extra_pct}%`, fmtArea(typ)]);
+  if (t.nontypical_area) {
+    rows.push(["Additional for non-typical floors", fmtArea(t.nontypical_area)]);
+    rows.push(["Formwork set (one set for all floors)", fmtArea(t.quote_area)]);
+  }
   return rows;
 }

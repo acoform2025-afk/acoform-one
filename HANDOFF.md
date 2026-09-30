@@ -92,3 +92,9 @@ returns and repairs.
 - floorInfoFromTexts: floor height from notes / level marks (incl. first-to-top levels ÷ n with a round 25 mm result: Gorwa +3450…+43425 → 3075, 14 slabs); "G+N" text → floors. Take-off applies them when still at defaults (3000 mm / 1 floor) and saves.
 - Default rule slabEdges = false (ACOFORM sheet does not add slab edges).
 - Known gap: shafts not X-marked and not on a cut-out layer are not found (Gorwa sheet ducts 18.2 vs 9.72 auto) — draw them with the Opening tool. labelledSpaces() in geom.ts is an unused experiment.
+
+## Typical-floor basis (Mivan) + non-typical additions
+- One aluminium set is reused on all floors: no "all floors" multiplication anywhere. `floors` is info only.
+- Takeoff.nonTypical rows (label, area_m2) = extra formwork for first floor / terrace / refuge etc., added once.
+- Totals: typical_quote = contact × (1 + extra%); nontypical_area; quote_area = typical_quote + nontypical_area (the "Formwork set" used by quotations).
+- Area sheet shows ADD x%, then "ADDITIONAL FOR NON-TYPICAL FLOORS" and "FORMWORK SET". Download buttons: plan page header, take-off sidebar, quotation floor-plan card.

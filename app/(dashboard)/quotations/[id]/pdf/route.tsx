@@ -58,7 +58,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         name: fp.name, image, rows: totalsRows(t as unknown as Partial<Totals>),
         rules: mr.printOnQuote ? describeRules(mr) : undefined,
         items: Array.isArray((t as unknown as Totals).items) ? (t as unknown as Totals).items.slice(0, 400) : undefined,
-        note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight != null ? Math.round(pr.floorHeight * 1000) : "-"} mm, slab ${pr.slabMm ?? "-"} mm${(pr.floors ?? 1) > 1 ? `, ${pr.floors} floors` : ""}. Final quantities as per approved GFC drawings.`,
+        note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight != null ? Math.round(pr.floorHeight * 1000) : "-"} mm, slab ${pr.slabMm ?? "-"} mm. One formwork set is reused on all floors (typical floor basis${Number((t as Record<string, number>).nontypical_area) > 0 ? " + additional pieces for non-typical floors" : ""}). Final quantities as per approved GFC drawings.`,
       };
     }
   }
