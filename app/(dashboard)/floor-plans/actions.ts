@@ -24,6 +24,7 @@ const createSchema = z.object({
   filePath: z.string().max(300),
   fileName: z.string().max(255).optional(),
   drawingType: z.enum(["plan", "section", "elevation", "other"]).default("plan"),
+  originalPath: z.string().max(300).optional(),     // the .dwg a DXF was converted from (in the browser)
 });
 
 /** Records a plan whose file the browser has just uploaded to storage (<tenant>/<plan id>/source.ext). */
@@ -35,14 +36,16 @@ export async function createFloorPlan(input: z.infer<typeof createSchema>): Prom
   if (!profile) return { error: "Not signed in." };
   const ext = p.data.sourceKind === "dxf" ? "dxf" : p.data.sourceKind === "pdf" ? "pdf" : "(jpg|png)";
   if (!new RegExp(`^${profile.tenant_id}/${p.data.id}/source\\.${ext}$`).test(p.data.filePath)) return { error: "Invalid file." };
+  if (p.data.originalPath && (p.data.sourceKind !== "dxf" || p.data.originalPath !== `${profile.tenant_id}/${p.data.id}/original.dwg`)) return { error: "Invalid file." };
 
   const supabase = await createClient();
   const { error } = await supabase.from("floor_plans").insert({
     id: p.data.id, name: p.data.name, lead_id: p.data.leadId ?? null, source_kind: p.data.sourceKind,
     file_path: p.data.filePath, file_name: p.data.fileName ?? null, drawing_type: p.data.drawingType,
+    original_path: p.data.originalPath ?? null,
   });
   if (error) {
-    await supabase.storage.from(FLOOR_PLAN_BUCKET_NAME).remove([p.data.filePath]);
+    await supabase.storage.from(FLOOR_PLAN_BUCKET_NAME).remove([p.data.filePath, ...(p.data.originalPath ? [p.data.originalPath] : [])]);
     return { error: dbError(error.message) };
   }
   revalidatePath("/floor-plans");

@@ -14,10 +14,11 @@ import type { Pt } from "@/lib/floor-plans/calc";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
 export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
-export type Face = { code: string; length: number; height: number; geo?: FaceGeo };                 // mm
+export type Face = { code: string; length: number; height: number; geo?: FaceGeo; part?: "above" | "below" };   // part: short piece over a door/window or below a window sill
+export type OpeningCut = { kind: "door" | "window"; w: number; h: number; t: number };                        // mm, one per opening (for reveals)                 // mm
 export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };                     // metres
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean }; // mm
-export type PanelOptions = { stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number };
+export type PanelOptions = { stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "end" | "corner" | "deck" | "beam" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string };
 export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo };
@@ -30,7 +31,7 @@ const STEP = 50;
 
 /** Fewest panels covering as much of `run` as possible (exact DP over 50 mm steps). */
 export function fillRun(run: number, widths: number[]): { panels: number[]; left: number } {
-  const units = Math.floor(run / STEP);
+  const units = Math.floor((run + 0.5) / STEP);          // +0.5 mm so 1599.99 counts as 1600
   const u = [...new Set(widths.map((w) => Math.round(w / STEP)).filter((x) => x > 0))];
   const best: (number | null)[] = Array(units + 1).fill(null); const pick: number[] = Array(units + 1).fill(0);
   best[0] = 0;
@@ -95,8 +96,16 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const layouts: FaceLayout[] = [];
   const endMax = o.endMax ?? 250, tol = o.tolerance ?? 25;
   let ends = 0;
+  const r5 = (v: number) => Math.round(v / 5) * 5;
   for (const f of faces) {
     if (f.length < 60) continue;
+    if (f.part) {                        // piece over a door/window (lintel) or below a window sill
+      const w = r5(f.length), h = r5(f.height);
+      if (w <= 0 || h < 50) continue;
+      const code = `${f.part === "above" ? "OH" : "OS"}-${w}-${h}`;
+      add(code, { code, description: f.part === "above" ? "Panel over opening (lintel / head)" : "Panel below window sill", group: "filler", w, h, custom: true }, 1);
+      continue;
+    }
     if (f.length <= endMax) {           // wall end / return: closed with a stop-end, not wall panels
       ends++;
       const w = Math.round(f.length / 5) * 5;
@@ -118,6 +127,16 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     }
     if (f.height < o.stdHeight - 1) warnings.push(`Face ${f.code} is only ${Math.round(f.height)} mm tall — standard panels need cutting.`);
   }
+
+  // ---- door / window reveals (sides, head soffit, window sill bottom)
+  for (const op of o.openings ?? []) {
+    const t = r5(op.t), h = r5(op.h), w = r5(op.w);
+    if (t <= 0 || w <= 0) continue;
+    add(`RV-${t}-${h}`, { code: `RV-${t}-${h}`, description: `Opening side (reveal) ${t} × ${h}`, group: "end", w: t, h, custom: true }, 2);
+    add(`OT-${w}-${t}`, { code: `OT-${w}-${t}`, description: `Opening head soffit ${w} × ${t}`, group: "end", w, h: t, custom: true }, 1);
+    if (op.kind === "window") add(`OB-${w}-${t}`, { code: `OB-${w}-${t}`, description: `Window sill bottom ${w} × ${t}`, group: "end", w, h: t, custom: true }, 1);
+  }
+  if (o.openings?.length) warnings.push(`${o.openings.length} doors / windows cut out of the wall panels (lintel, sill and reveal pieces added).`);
 
   // ---- corners
   const ic = cat("internal_corner")[0], ec = cat("external_corner")[0];

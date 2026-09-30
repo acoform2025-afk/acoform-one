@@ -2,10 +2,10 @@
  * Turns a measured floor plan (take-off + DXF layers) into the inputs of the floor panel layout:
  * wall faces, slab polygons (with ducts as holes), beam runs and the number of wall corners.
  */
-import { computeTotals, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
+import { computeTotals, OPENING_DEFAULTS, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
 import { dxfAuto, dxfFrame, type DxfModel } from "./dxf";
 import { buildShell } from "./shell";
-import type { BeamRun, DeckPoly, Face } from "@/lib/design-engine/floor-panels";
+import type { BeamRun, DeckPoly, Face, OpeningCut } from "@/lib/design-engine/floor-panels";
 
 const angleAt = (a: Pt, b: Pt, c: Pt) => {
   const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]];
@@ -50,6 +50,56 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
     if (l.closed && pts.length > 2 && Math.abs(angleAt(pts[pts.length - 1], pts[0], pts[1]) - 90) < 30) corners++;
   }
 
+  // doors / windows: cut them out of the faces they sit on
+  const openings: OpeningCut[] = [];
+  const ops = g.shapes.filter((s) => (s.kind === "door" || s.kind === "window") && s.pts.length >= 2).map((s) => {
+    const isDoor = s.kind === "door";
+    const h = s.h ?? (isDoor ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH);
+    const sill = isDoor ? 0 : s.sill ?? OPENING_DEFAULTS.windowSill;
+    return { s, isDoor, h, sill, p: s.pts[0], q: s.pts[s.pts.length - 1], t: s.t ?? t.params.wallThkMm ?? 150, used: false };
+  });
+  const cutFaces = (list: Face[]): Face[] => {
+    if (!ops.length || !(mpp > 0)) return list;
+    const out: Face[] = [];
+    for (const f of list) {
+      if (!f.geo) { out.push(f); continue; }
+      const { a: A, b: B } = f.geo;
+      const dx = B[0] - A[0], dy = B[1] - A[1], Lpx = Math.hypot(dx, dy);
+      if (!Lpx) { out.push(f); continue; }
+      const ux = dx / Lpx, uy = dy / Lpx;
+      const cuts: { from: number; to: number; head: number; sill: number }[] = [];
+      for (const o of ops) {
+        const along = (p: Pt) => ((p[0] - A[0]) * ux + (p[1] - A[1]) * uy) * mpp * 1000;
+        const across = (p: Pt) => Math.abs((p[0] - A[0]) * -uy + (p[1] - A[1]) * ux) * mpp * 1000;
+        const reach = Math.max(o.t, t.params.wallThkMm ?? 150) + 60;
+        if (across(o.p) > reach || across(o.q) > reach) continue;
+        const [t0, t1] = [along(o.p), along(o.q)].sort((x, y) => x - y);
+        const from = Math.max(0, t0), to = Math.min(f.length, t1);
+        if (to - from < 100) continue;
+        cuts.push({ from, to, head: o.sill + o.h, sill: o.sill }); o.used = true;
+      }
+      if (!cuts.length) { out.push(f); continue; }
+      cuts.sort((x, y) => x.from - y.from);
+      const pt = (mmv: number): Pt => { const k = mmv / f.length; return [A[0] + dx * k, A[1] + dy * k]; };
+      let pos = 0, k = 0;
+      const run = (x0: number, x1: number) => { if (x1 - x0 >= 60) out.push({ code: `${f.code}.${++k}`, length: x1 - x0, height: f.height, geo: { a: pt(x0), b: pt(x1), off: f.geo!.off } }); };
+      for (const [i, c] of cuts.entries()) {
+        run(pos, c.from);
+        const w = c.to - Math.max(pos, c.from);
+        if (w > 0) {
+          if (f.height - c.head >= 50) out.push({ code: `${f.code}-O${i + 1}H`, length: w, height: f.height - c.head, part: "above" });
+          if (c.sill >= 50) out.push({ code: `${f.code}-O${i + 1}S`, length: w, height: c.sill, part: "below" });
+        }
+        pos = Math.max(pos, c.to);
+      }
+      run(pos, f.length);
+    }
+    return out;
+  };
+  const cut = cutFaces(faces);
+  faces.length = 0; faces.push(...cut);
+  for (const o of ops) if (o.used) openings.push({ kind: o.isDoor ? "door" : "window", w: Math.hypot(o.q[0] - o.p[0], o.q[1] - o.p[1]) * mpp * 1000, h: o.h, t: o.t });
+
   // slabs (metres) with ducts as holes
   const toM = (p: Pt): Pt => [p[0] * mpp, p[1] * mpp];
   const holes: Pt[][] = [
@@ -81,5 +131,5 @@ export function panelInputs(t: Takeoff, model: DxfModel | null) {
     auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep);
   }
   const totals: Totals = computeTotals(t, auto);
-  return { faces, decks, beams, corners, totals, shell: g };
+  return { faces, decks, beams, corners, openings, totals, shell: g };
 }

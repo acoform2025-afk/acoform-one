@@ -71,3 +71,9 @@ returns and repairs.
 ## Floor plan → production & panel layout drawing
 - Panels page (`/floor-plans/[id]/panels`) → "Send to production": choose a design → `createBomFromFloorPlan` (floor-plans/actions.ts) reruns the layout and calls RPC `create_bom_from_floor_plan` (migration 00040, applied in Supabase). It makes a **draft BOM** (panels only; props/accessories excluded) plus a layout option (option_number > 100, "Floor plan auto layout"). Then the normal BOM page: Approve → Release to production → work orders.
 - Layout drawing: `/floor-plans/[id]/panels/drawing` (A3 PDF) or `?format=dxf` (PANEL-FACE / PANEL-JOINT / PANEL-FILLER / PANEL-TEXT layers on top of the shell plan). Face geometry comes from `Face.geo` (panel-input.ts) and `lib/floor-plans/panel-marks.ts`.
+
+## DWG upload (browser) & memory
+- The Render free instance has 512 MB. LibreDWG `dwg2dxf` needs ~530 MB for a 3 MB DWG (the GHB Gorwa plot) → the server was killed ("Ran out of memory"). DWG is now read **in the user's browser** with `@mlightcad/libredwg-web` (LibreDWG → WebAssembly, GPL-3; wasm served from `public/wasm/libredwg-web.wasm`, pinned 0.7.14 — copy the wasm again if the package is upgraded). `lib/floor-plans/dwg-web.ts` writes a slim DXF (model space lines/polylines/arcs/circles, blocks exploded) that is uploaded as `source.dxf`; the .dwg is kept as `original_path`. Server `dwg2dxf` is only a fallback for DWGs under 1.5 MB.
+- `readDxf` uses a lean built-in reader (`leanParseDxf`) — about half the memory of dxf-parser (kept as fallback).
+- `next.config.ts` webpack fallbacks (module/fs/path/url/crypto = false) are needed for the wasm glue in the browser bundle.
+- Panel layout: doors/windows drawn on walls are cut out of wall faces (faces split .1/.2; OH lintel / OS sill pieces; RV reveals, OT head, OB sill bottom).

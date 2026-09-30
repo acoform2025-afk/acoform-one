@@ -75,9 +75,96 @@ export function cleanDxfText(text: string): string {
   return out.join("\n");
 }
 
+/**
+ * Lean DXF reader: only what the take-off uses (LINE, LWPOLYLINE, POLYLINE/VERTEX, CIRCLE, ARC, INSERT, BLOCKS,
+ * $INSUNITS). It walks the text without splitting it into an array, so a 20 MB drawing needs a fraction of the
+ * memory of a general DXF parser. Values broken over two lines (LibreDWG MTEXT) are skipped like cleanDxfText.
+ * Output has the same shape as dxf-parser's for the fields readDxf reads.
+ */
+export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]; blocks: Record<string, AnyEnt> } {
+  let pos = 0;
+  const n = text.length;
+  const line = (): string | null => {
+    if (pos >= n) return null;
+    let e = text.indexOf("\n", pos); if (e < 0) e = n;
+    let l = text.slice(pos, e); pos = e + 1;
+    if (l.endsWith("\r")) l = l.slice(0, -1);
+    return l;
+  };
+  const isCode = (l: string) => /^\s*-?\d{1,4}\s*$/.test(l);
+  // next (code, value) pair; a non-numeric line where a code is expected is a broken value → skip it
+  let code = 0, val = "";
+  const next = (): boolean => {
+    for (;;) {
+      const c = line(); if (c === null) return false;
+      if (!isCode(c)) continue;
+      const v = line(); if (v === null) return false;
+      code = parseInt(c, 10); val = v.trim(); return true;
+    }
+  };
+  const header: AnyEnt = {}, entities: AnyEnt[] = [], blocks: Record<string, AnyEnt> = {};
+  const deg = Math.PI / 180;
+  let section = "", cur: AnyEnt | null = null, target: AnyEnt[] = entities, block: AnyEnt | null = null, poly: AnyEnt | null = null, vtx: AnyEnt | null = null, hdrVar = "";
+  const flush = () => {
+    if (!cur) return;
+    const e = cur; cur = null;
+    if (e.type === "VERTEX") { if (poly && !(e._flag & 16)) poly.vertices.push({ x: e._x, y: e._y, bulge: e._b ?? 0 }); return; }
+    if (e.type === "SEQEND") { poly = null; return; }
+    if (e.type === "BLOCK") { block = { name: e.name, position: { x: e._x ?? 0, y: e._y ?? 0 }, entities: [] }; if (e.name) blocks[e.name] = block; target = block.entities; return; }
+    if (e.type === "ENDBLK") { block = null; target = entities; return; }
+    if (e.inPaperSpace) return;
+    switch (e.type) {
+      case "LINE": target.push({ type: "LINE", layer: e.layer, vertices: [{ x: e._x, y: e._y }, { x: e._x1, y: e._y1 }] }); break;
+      case "LWPOLYLINE": target.push({ type: "LWPOLYLINE", layer: e.layer, shape: (e._flag & 1) === 1, vertices: e._vs ?? [] }); break;
+      case "POLYLINE": if (!(e._flag & (16 | 64))) { const pl = { type: "POLYLINE", layer: e.layer, shape: (e._flag & 1) === 1, vertices: [] as AnyEnt[] }; target.push(pl); poly = pl; } else poly = { vertices: [] }; break;
+      case "CIRCLE": target.push({ type: "CIRCLE", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r }); break;
+      case "ARC": target.push({ type: "ARC", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r, startAngle: (e._a0 ?? 0) * deg, endAngle: (e._a1 ?? 360) * deg }); break;
+      case "INSERT": target.push({ type: "INSERT", layer: e.layer, name: e.name, position: { x: e._x ?? 0, y: e._y ?? 0 }, xScale: e._sx ?? 1, yScale: e._sy ?? 1, rotation: e._rot ?? 0 }); break;
+      default: break;
+    }
+  };
+  while (next()) {
+    if (code === 0) {
+      flush();
+      if (val === "SECTION") { if (!next()) break; section = (code as number) === 2 ? val : ""; continue; }
+      if (val === "ENDSEC") { section = ""; continue; }
+      if (val === "EOF") break;
+      if (section === "ENTITIES" || section === "BLOCKS") cur = { type: val, layer: "0" };
+      continue;
+    }
+    if (section === "HEADER") {
+      if (code === 9) hdrVar = val; else if (hdrVar === "$INSUNITS" && code === 70) header.$INSUNITS = Number(val);
+      continue;
+    }
+    if (!cur) continue;
+    const num = Number(val);
+    switch (code) {
+      case 8: cur.layer = val; break;
+      case 2: cur.name = val; break;
+      case 67: cur.inPaperSpace = num === 1; break;
+      case 70: cur._flag = num; break;
+      case 40: cur._r = num; break;
+      case 41: cur._sx = num; break;
+      case 42: if (cur.type === "LWPOLYLINE") { const vs = cur._vs; if (vs?.length) vs[vs.length - 1].bulge = num; } else if (cur.type === "VERTEX") cur._b = num; else cur._sy = num; break;
+      case 50: if (cur.type === "INSERT") cur._rot = num; else cur._a0 = num; break;
+      case 51: cur._a1 = num; break;
+      case 10: if (cur.type === "LWPOLYLINE") (cur._vs ??= []).push({ x: num, y: 0, bulge: 0 }); else cur._x = num; break;
+      case 20: if (cur.type === "LWPOLYLINE") { const vs = cur._vs; if (vs?.length) vs[vs.length - 1].y = num; } else cur._y = num; break;
+      case 11: cur._x1 = num; break;
+      case 21: cur._y1 = num; break;
+      default: break;
+    }
+  }
+  flush();
+  return { header, entities, blocks };
+}
+
 export function readDxf(raw: string): DxfModel {
-  const text = cleanDxfText(raw);
-  const dxf = new DxfParser().parseSync(text) as unknown as { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt> } | null;
+  let dxf: { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt> } | null = null;
+  try { dxf = leanParseDxf(raw); } catch { dxf = null; }
+  if (!dxf || dxf.entities.length === 0) {
+    dxf = new DxfParser().parseSync(cleanDxfText(raw)) as unknown as { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt> } | null;
+  }
   if (!dxf) throw new Error("This DXF file could not be read.");
   const blocks = dxf.blocks ?? {};
   const paths: DxfPath[] = [];

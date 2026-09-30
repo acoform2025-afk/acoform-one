@@ -51,6 +51,16 @@ export function PanelLayoutDocument({ g, marks, r, info }: { g: ShellGeometry; m
   const s = r.summary;
   const faces = r.faces;
   const panels = faces.reduce((a, f) => a + f.panels.length, 0), fillers = faces.filter((f) => f.filler).length;
+  // face labels: skip any that would overlap one already placed (the face is still in the schedule)
+  const placed: [number, number, number, number][] = [];
+  const labels = new Map<string, Pt>();
+  for (const m of [...marks].sort((a, b) => Math.hypot(b.b[0] - b.a[0], b.b[1] - b.a[1]) - Math.hypot(a.b[0] - a.a[0], a.b[1] - a.a[1]))) {
+    const at: Pt = [m.mid[0] + m.n[0] * tick * 2.2, m.mid[1] + m.n[1] * tick * 2.2];
+    const hw = (m.code.length * fs * 0.55) / 2 + fs * 0.2, hh = fs * 0.6;
+    const box: [number, number, number, number] = [at[0] - hw, at[1] - hh, at[0] + hw, at[1] + hh];
+    if (placed.some((q) => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1])) continue;
+    placed.push(box); labels.set(m.code, at);
+  }
 
   return (
     <Document title={`Panel layout ${info.drawingNo}`} author={info.company}>
@@ -75,7 +85,7 @@ export function PanelLayoutDocument({ g, marks, r, info }: { g: ShellGeometry; m
                   <Line x1={m.a[0]} y1={m.a[1]} x2={(m.fillerFrom ?? m.b)[0]} y2={(m.fillerFrom ?? m.b)[1]} stroke={PANEL} strokeWidth={px(0.8)} />
                   {m.fillerFrom ? <Line x1={m.fillerFrom[0]} y1={m.fillerFrom[1]} x2={m.b[0]} y2={m.b[1]} stroke={FILL} strokeWidth={px(1.6)} /> : null}
                   {[m.a, ...m.joints, m.b].map((p, i) => <Line key={i} x1={p[0]} y1={p[1]} x2={p[0] + m.n[0] * tick} y2={p[1] + m.n[1] * tick} stroke={PANEL} strokeWidth={px(0.4)} />)}
-                  <Text x={m.mid[0] + m.n[0] * tick * 2.2} y={m.mid[1] + m.n[1] * tick * 2.2 + fs * 0.35} textAnchor="middle" fill={DARK} style={{ fontSize: fs, fontFamily: "Carlito", fontWeight: "bold" }}>{m.code}</Text>
+                  {labels.has(m.code) ? <Text x={labels.get(m.code)![0]} y={labels.get(m.code)![1] + fs * 0.35} textAnchor="middle" fill={DARK} style={{ fontSize: fs, fontFamily: "Carlito", fontWeight: "bold" }}>{m.code}</Text> : null}
                 </G>
               ))}
             </Svg>
@@ -123,7 +133,7 @@ export function PanelLayoutDocument({ g, marks, r, info }: { g: ShellGeometry; m
         <Page size="A4" style={{ fontFamily: "Carlito", fontSize: 8, color: "#222", paddingTop: 30, paddingBottom: 36, paddingHorizontal: 30 }}>
           <Text style={{ fontSize: 11, fontWeight: "bold", color: DARK, marginBottom: 6 }} fixed>WALL FACE SCHEDULE (continued) — {info.drawingNo} {info.rev}</Text>
           <FaceRows faces={faces.slice(FIRST_ROWS)} size={7.5} />
-          <Text style={{ marginTop: 6, fontSize: 7, color: GRAY }}>Panel widths in mm, laid from the start of each face. F = filler (custom width). Top = wall top panel height where the clear height exceeds the standard panel.</Text>
+          <Text style={{ marginTop: 6, fontSize: 7, color: GRAY }}>Panel widths in mm, laid from the start of each face. F = filler (custom width). Top = wall top panel height where the clear height exceeds the standard panel. Faces split by a door or window are numbered .1, .2 … Where labels would overlap on the drawing only one is printed.</Text>
           <Text style={{ position: "absolute", bottom: 16, right: 30, fontSize: 7, color: GRAY }} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} fixed />
         </Page>
       ) : null}

@@ -29,7 +29,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
     .select("id, panel_code, panel_category, width_mm, height_mm, weight_kg, area_sqm").eq("is_active", true);
   const opt = readOptions(q);
   const inp = panelInputs(t, model);
-  const o: PanelOptions = { ...opt, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm };
+  const o: PanelOptions = { ...opt, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings };
   const result = layoutFloor(inp.faces, inp.decks, inp.beams, inp.corners, (catalog ?? []).map((c) => ({ ...c, width_mm: Number(c.width_mm), height_mm: Number(c.height_mm), weight_kg: Number(c.weight_kg), area_sqm: Number(c.area_sqm) })) as CatPanel[], o);
   const lead = Array.isArray(plan.leads) ? plan.leads[0] : plan.leads;
   return { plan, lead, t, opt, totals: inp.totals, result, shell: inp.shell, error: null };

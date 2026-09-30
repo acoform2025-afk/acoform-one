@@ -52,8 +52,25 @@ export function UploadFloorPlanForm({ tenantId, leads, leadId, quotationId }: { 
         const path = `${tenantId}/${id}/original.dwg`;
         const up = await bucket.upload(path, file, { contentType: k.mime });
         if (up.error) throw new Error("Upload failed: " + up.error.message);
-        setBusy("Reading AutoCAD drawing…");
-        res = await createFloorPlanFromDwg({ ...base, originalPath: path });
+        // read the DWG here in the browser (big drawings need more memory than the server has)
+        setBusy("Reading AutoCAD drawing on this computer…");
+        let dxf: string | null = null, readErr = "";
+        try {
+          const { convertDwgInBrowser } = await import("@/lib/floor-plans/dwg-web");
+          dxf = (await convertDwgInBrowser(new Uint8Array(await file.arrayBuffer()))).dxf;
+        } catch (err) { readErr = err instanceof Error ? err.message : String(err); }
+        if (dxf) {
+          setBusy("Saving drawing…");
+          const dxfPath = `${tenantId}/${id}/source.dxf`;
+          const up2 = await bucket.upload(dxfPath, new Blob([dxf], { type: "application/dxf" }), { contentType: "application/dxf" });
+          if (up2.error) throw new Error(up2.error.message.includes("exceeded") ? "The drawing is too large once converted. Delete unused sheets / PURGE in AutoCAD and try again." : "Upload failed: " + up2.error.message);
+          res = await createFloorPlan({ ...base, sourceKind: "dxf", filePath: dxfPath, originalPath: path });
+        } else if (file.size < 1.5 * 1024 * 1024) {
+          res = await createFloorPlanFromDwg({ ...base, originalPath: path });   // small file: the server can read it
+        } else {
+          await bucket.remove([path]);
+          throw new Error(`This DWG could not be read (${readErr.slice(0, 120) || "unknown error"}). In AutoCAD use Save As → DXF and upload the DXF instead.`);
+        }
       } else {
         const path = `${tenantId}/${id}/source.${k.ext}`;
         const up = await bucket.upload(path, file, { contentType: k.mime });
@@ -78,7 +95,7 @@ export function UploadFloorPlanForm({ tenantId, leads, leadId, quotationId }: { 
         <FileUp className="size-8 text-graphite-500" />
         <span className="text-sm font-medium text-graphite-200">{file ? file.name : "Click to choose the floor plan, or drop it here"}</span>
         <span className="text-xs text-graphite-500">
-          {file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : "AutoCAD DWG or DXF (areas read automatically) · PDF · JPG · PNG — up to 25 MB"}
+          {file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : "AutoCAD DWG or DXF (areas read automatically; DWG is read on this computer) · PDF · JPG · PNG — up to 25 MB"}
         </span>
       </button>
       <input ref={fileRef} type="file" accept=".dwg,.dxf,.pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
