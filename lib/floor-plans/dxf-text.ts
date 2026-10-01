@@ -13,5 +13,5 @@ export async function dxfTextFromBlob(b: Blob): Promise<string> {
 
 export async function gzipText(text: string): Promise<Blob> {
   const s = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
-  return await new Response(s).blob();
+  return new Blob([await new Response(s).arrayBuffer()], { type: "application/dxf" });   // typed, so storage accepts it
 }
