@@ -146,3 +146,10 @@ returns and repairs.
 - `panelInputs` returns `zoneWalls` / `zoneGaps` (metres); `runPanels` returns `inp` + `catalog`; `buildZones(inp, catalog)`.
 - Route `/floor-plans/[id]/panels/installation` → A3 PDF (key plan, zone sheets with numbers + per-zone list, numbering list); `?format=csv` → numbering list. Buttons on the Panels page.
 - Deck BOM still comes from the strip method in `layoutFloor` (not yet from zones).
+
+## Special-panel production drawings + pin-hole check
+- `lib/design-engine/fabrication.ts`: ACOFORM STD FAB pattern (from ACOFORM STD FAB (5).dwg): holes Ø16+0.1 at 40 from concrete face on 65 rails; wall height edges 100 then @200, top/bottom edges 50 then @50; deck long edges 50 then @100; beams/corners @50; stiffeners @300 (RULES table); `fabSpec` (holes per edge, ribs, cutting list, kg, warnings), `specialsFromBom` (custom BOM rows with a size), `pinHoleCheck`.
+- `lib/pdf/fabrication-document.tsx`: schedule / production order + pin-hole check sheet, then 4 shop drawings per A3 (front view with holes & ribs, hole chains, edge section, cutting list).
+- Route `/floor-plans/[id]/panels/fabrication` (PDF, max 120 types) and `?format=csv` (production order + cutting list). Buttons on the Panels page.
+- Weights: `PROFILE` sections measured on the ACOFORM STD FAB drawing, Al 6061-T6 (2.70 g/cm³): skin 4 mm 10.8 kg/m², edge rail 65×8 1.153 kg/m, U-stiff 1.203, Y-stiff 1.347, I-stiff 0.602 kg/m. Wall stiffeners U/U/Y at 200, 450, 750 … (2400 W panel 600 wide = 28.2 kg); WT/deck/beam I-stiff @300. `layoutFloor` uses these for every made-to-size piece and any catalogue item without a weight.
+- ACOFORM RK panels: clear height = 2400 + 25…175 (25 steps) → one W(RK) panel WRA…WRG (2425…2575) per width instead of a panel + WT.

@@ -11,6 +11,7 @@
  *  • Beams: two side panels of (depth − slab) and a bottom panel of the beam width, in 1200 mm lengths.
  */
 import type { Pt } from "@/lib/floor-plans/calc";
+import { fabSpec } from "./fabrication";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
 export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
@@ -130,8 +131,12 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const left = fit.left < tol ? 0 : Math.round(fit.left / 5) * 5;   // small gaps are taken up in the joints
     const top = Math.max(0, Math.round(f.height - o.stdHeight));
     layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo });
+    // ACOFORM RK panels: a wall a little taller than the standard panel (25 … 175 mm, 25 steps) gets one W(RK) panel
+    // (WRA 25, WRB 50 … WRG 175) instead of a standard panel + a wall-top piece
+    const rk = top > 0 && top <= 175 && top % 25 === 0 ? `WR${"ABCDEFG"[top / 25 - 1]}` : null;
     for (const w of panels) {
       const p = wallCat.find((x) => x.width_mm === w)!;
+      if (rk) { add(`${rk}-${w}`, { code: `${rk}-${w}`, description: `Wall panel ${o.stdHeight + top} (${o.stdHeight} W + RK ${top}, ${rk})`, group: "wall", w, h: o.stdHeight + top, custom: false }, 1, Number(wallCat.find((x) => x.panel_code === `${rk}-${w}`)?.weight_kg) || fabSpec(`${rk}-${w}`, "", w, o.stdHeight + top, 1).kgEach); continue; }
       add(p.panel_code, { code: p.panel_code, description: "Wall panel", group: "wall", w, h: o.stdHeight, custom: false }, 1, Number(p.weight_kg));
       if (top > 0) add(`WT-${w}-${top}`, { code: `WT-${w}-${top}`, description: "Wall top panel (custom height)", group: "wall-top", w, h: top, custom: true }, 1);
     }
@@ -420,6 +425,11 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   if (ends) warnings.push(`${ends} short faces (≤ ${endMax} mm) treated as wall ends (stop-ends).`);
   const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "stair", "accessory"];
   const SUBS = ["Deck support", "Joints", "Ties", "Wall alignment", "Kicker & edges", "Columns & beams", "Staircase", "Safety", "Tools & consumables"];
+  // weights of made-to-size pieces (and items without a catalogue weight) from the ACOFORM standard sections in Al 6061
+  for (const r of byCode.values()) {
+    if (r.group === "accessory" || !(r.w > 0 && r.h > 0) || !(r.custom || !(r.weight > 0))) continue;
+    r.weight = fabSpec(r.code, r.description, r.w, r.h, 1).kgEach * r.qty;
+  }
   const bom = [...byCode.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || SUBS.indexOf(a.sub ?? "") - SUBS.indexOf(b.sub ?? "") || b.w - a.w || a.code.localeCompare(b.code))
     .map((r) => ({ ...r, area: Math.round(r.area * 100) / 100, weight: Math.round(r.weight * 10) / 10 }));
   const panelArea = bom.reduce((s, r) => s + r.area, 0);
