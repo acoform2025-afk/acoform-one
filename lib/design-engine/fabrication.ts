@@ -24,6 +24,8 @@ export const PROFILE = {
   y: { name: "Y-stiffener 584", area: 499.0 },
   i: { name: "I-stiffener 40 × 20", area: 222.9 },
 } as const;
+/** Fitted to ACOFORM's measured production weights of standard 2400 wall panels (100 … 600 wide, 13 sizes). */
+export const ACTUAL = { wallA: 4.93, wallB: 0.03542, ratio: 0.915 };
 const kgPerM = (area: number) => (area * FAB.density) / 1e6;
 
 export type FabKind = "wall" | "beam" | "deck" | "stair" | "small";
@@ -88,8 +90,14 @@ export function fabSpec(code: string, description: string, w: number, h: number,
     { part: `${PROFILE.rail.name} (long sides)`, size: `${long}`, nos: 2, kg: (2 * long * kgPerM(PROFILE.rail.area)) / 1000 },
     { part: `${PROFILE.rail.name} (end plates)`, size: `${inner}`, nos: 2, kg: (2 * inner * kgPerM(PROFILE.rail.area)) / 1000 },
     ...(inner > 0 ? [...ribGroups.entries()].map(([name, g]) => ({ part: name, size: `${inner}`, nos: g.n, kg: (g.n * inner * kgPerM(g.area)) / 1000 })) : []),
-  ].map((c) => ({ ...c, kg: Math.round(c.kg * 100) / 100 }));
-  const kgEach = Math.round(cut.reduce((a, c) => a + c.kg, 0) * 100) / 100;
+  ];
+  // calibrated to ACOFORM's actual production weights (STD 2400 per-piece weight sheet):
+  // wall pieces kg = H/2400 × (4.93 + 0.03542 × W); other pieces = section weight × 0.915 (same shop ratio)
+  const theory = cut.reduce((a, c) => a + c.kg, 0);
+  const target = kind === "wall" && H >= W ? (H / 2400) * (ACTUAL.wallA + ACTUAL.wallB * W) : theory * ACTUAL.ratio;
+  const f = theory > 0 ? target / theory : 1;
+  for (const c of cut) c.kg = Math.round(c.kg * f * 100) / 100;
+  const kgEach = Math.round(target * 100) / 100;
   const warnings: string[] = [];
   if (short < 100) warnings.push(`Only ${short} mm wide — too narrow for a framed panel: make it a solid aluminium / plywood filler bolted to the next panel.`);
   else if (short < 150) warnings.push(`${short} mm wide — a single hole row; check the pin can be driven.`);

@@ -153,3 +153,4 @@ returns and repairs.
 - Route `/floor-plans/[id]/panels/fabrication` (PDF, max 120 types) and `?format=csv` (production order + cutting list). Buttons on the Panels page.
 - Weights: `PROFILE` sections measured on the ACOFORM STD FAB drawing, Al 6061-T6 (2.70 g/cm³): skin 4 mm 10.8 kg/m², edge rail 65×8 1.153 kg/m, U-stiff 1.203, Y-stiff 1.347, I-stiff 0.602 kg/m. Wall stiffeners U/U/Y at 200, 450, 750 … (2400 W panel 600 wide = 28.2 kg); WT/deck/beam I-stiff @300. `layoutFloor` uses these for every made-to-size piece and any catalogue item without a weight.
 - ACOFORM RK panels: clear height = 2400 + 25…175 (25 steps) → one W(RK) panel WRA…WRG (2425…2575) per width instead of a panel + WT.
+- Weights calibrated to ACOFORM STD 2400 production weight sheet: catalogue = actual sheet (W 100…600 incl. new 125/225/230, IC 100+100 11.4, EC 65+65 3.7); specials: wall kg = H/2400 × (4.93 + 0.03542 W), others = section weight × 0.915 (ACTUAL in fabrication.ts).
