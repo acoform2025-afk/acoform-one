@@ -192,8 +192,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
       }
     })();
     return () => { cancelled = true; };
+    // load once per plan — after Save the page refreshes with a new signed link, which must not reload / re-read the drawing
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan.file_url]);
+  }, [plan.id]);
 
   // DXF lines drawn straight onto a screen-sized canvas so they stay sharp at any zoom
   useEffect(() => {
@@ -266,24 +267,35 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   const autoDone = useRef(false);
   const current = useMemo(() => {
     const r = t.dxf?.region; if (!r) return null;
-    return candidates.find((c) => Math.abs(c.px[0] - r[0]) < 2 && Math.abs(c.px[1] - r[1]) < 2 && Math.abs(c.px[2] - r[2]) < 2 && Math.abs(c.px[3] - r[3]) < 2) ?? null;
+    // the drawing the region covers best (a hand-drawn region around a drawing still shows its title)
+    const area = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    let best: (typeof candidates)[number] | null = null, bestIou = 0;
+    for (const c of candidates) {
+      const inter = area([Math.max(c.px[0], r[0]), Math.max(c.px[1], r[1]), Math.min(c.px[2], r[2]), Math.min(c.px[3], r[3])]);
+      const iou = inter / (area(c.px) + area(r) - inter || 1);
+      if (inter / (area(c.px) || 1) > 0.9 && iou > bestIou) { best = c; bestIou = iou; }
+    }
+    return best;
   }, [t.dxf?.region, candidates]);
   // automatic: pick the typical floor plan (most walls + "typical … plan" title), read floors & floor height from the drawing, save
   useEffect(() => {
     if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size) return;
-    const pick = !t.dxf.region && candidates.length >= 2 ? candidates[0] : null;
+    // only the first time a plan is opened: once the user has a region / saved values, nothing is changed automatically
+    if (t.auto?.done || t.dxf.region) { autoDone.current = true; return; }
+    const pick = candidates.length >= 2 ? candidates[0] : null;
     const info = floorInfoFromTexts(modelRef.current.texts ?? []);
     // floor height / floors only replace the untouched defaults (3000 mm, 1 floor)
     const fh = info.heightMm && Math.round((t.params.floorHeight || 0) * 1000) === 3000 && info.heightMm !== 3000 ? info.heightMm : undefined;
     const floors = (pick?.floors ?? info.floors) && (t.params.floors ?? 1) <= 1 ? (pick?.floors ?? info.floors) : undefined;
     autoDone.current = true;
-    if (!pick && !fh && !floors) return;
+    if (!pick && !fh && !floors) { update((pp) => ({ ...pp, auto: { done: true } })); return; }
     const notes: string[] = [];
     if (pick) notes.push(`picked ${pick.title ? `"${pick.title}"` : `drawing ${pick.n}`} (${pick.w.toFixed(1)} × ${pick.h.toFixed(1)} m) as the typical floor`);
     if (floors) notes.push(`${floors} floors (${pick?.floors ? "from the drawing title" : info.source ?? "from the drawing"})`);
     if (fh) notes.push(`floor height ${fh} mm (${info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing"})`);
     update((pp) => ({
       ...pp,
+      auto: { done: true, note: notes.join(" · ") + "." },
       params: { ...pp.params, ...(floors ? { floors } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}) },
       dxf: pp.dxf && pick ? { ...pp.dxf, region: pick.px } : pp.dxf,
     }));
@@ -844,7 +856,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
                 <b>Counting:</b> {current ? `${current.title ?? `Drawing ${current.n}`} (${current.w.toFixed(1)} × ${current.h.toFixed(1)} m)` : t.dxf.region ? "your marked region" : "whole drawing"}
                 {canEdit ? <button type="button" onClick={() => setChoosing((v) => !v)} className="ml-2 underline hover:text-signal-amber">{choosing ? "Cancel" : "Choose another drawing"}</button> : null}
               </p>
-              {autoNote ? <p className="mt-1 text-graphite-400">Automatic: {autoNote} Check floors and floor height below.</p> : null}
+              {autoNote ?? t.auto?.note ? <p className="mt-1 text-graphite-400">Read from the drawing when first opened: {autoNote ?? t.auto?.note} Your own changes are never overwritten.</p> : null}
               {choosing ? (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {candidates.map((c) => (

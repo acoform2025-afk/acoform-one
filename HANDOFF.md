@@ -103,3 +103,8 @@ returns and repairs.
 - panel-input: auto wall-opening gaps become beam runs "LB" (b = wall thickness, d = beam depth, 2 sides + bottom) when no beams are typed in — same rule as the area take-off. Staircase lines of the take-off (group "extra") go to the BOM as one custom "set" each (PanelOptions.stairSets).
 - summary.specials {types, pcs, area} shown on the panels page ("Special panels (this project)").
 - Gorwa check: 2,317 m² of panels, 17.8 kg/m², 75.5 % standard; specials mostly 525 mm wall tops (2925 clear − 2400).
+
+## Take-off: automatic reading only once; no reload after Save
+- Takeoff.auto {done, note}: the drawing-based auto pick / floor height / floors runs only on a plan's first opening (no region yet, auto not done). Never overwrites the user's values later.
+- The plan file loads once per plan id (not per signed URL), so Save → router.refresh no longer re-reads the drawing.
+- "Counting:" names the drawing the region covers (≥90 % of a detected drawing), also for hand-drawn regions.

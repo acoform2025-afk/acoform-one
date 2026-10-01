@@ -63,7 +63,8 @@ export type Takeoff = {
   columns: ColumnRow[];                // columns typed in by size
   beams: BeamRow[];
   extras?: ExtraRow[];
-  nonTypical?: ExtraRow[];             // additional formwork for non-typical floors (added once to the set, not per floor)
+  nonTypical?: ExtraRow[];
+  auto?: { done: boolean; note?: string };   // automatic first reading of the drawing — runs once per plan, never again             // additional formwork for non-typical floors (added once to the set, not per floor)
   stairs?: StairRow[];
   shell?: ShellMeta;
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null };
