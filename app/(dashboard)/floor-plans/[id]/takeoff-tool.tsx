@@ -4,20 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { useRouter } from "next/navigation";
 import {
-  AppWindow, Check, Crop, DoorOpen, FileDown, Hand, Layers, Loader2, MoveVertical, Maximize, Minus, MousePointer2, PenLine, Plus, Ruler, Save, Square, SquareDashed, Trash2, Undo2, X, Columns3,
+  AppWindow, Check, Crop, Eye, EyeOff, Minimize, RefreshCw, Type, Tag, ZoomIn, DoorOpen, FileDown, Hand, Layers, Loader2, MoveVertical, Maximize, Minus, MousePointer2, PenLine, Plus, Ruler, Save, Square, SquareDashed, Trash2, Undo2, X, Columns3,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
-import { dxfAuto, dxfFrame, drawDxf, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, snapPoints, type DxfModel } from "@/lib/floor-plans/dxf";
+import { drawingParts, dxfAuto, dxfFrame, drawDxf, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { saveTakeoff } from "../actions";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
 
-type Tool = "pan" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft";
+type Tool = "pan" | "zoom" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft";
 type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
 
 const MAX_SIDE = 2400;
@@ -41,7 +41,8 @@ function shapeCodes(shapes: Shape[]): Record<string, string> {
   return out;
 }
 const TOOL_HINT: Record<Tool, string> = {
-  pan: "Drag to move the plan. Scroll (or use + / −) to zoom.",
+  pan: "Drag to move the plan. Scroll (or use + / −) to zoom. Use “Go to drawing” or the Drawings list to jump to one drawing.",
+  zoom: "Click two opposite corners of the area you want to see close up.",
   select: "Click a drawn item to select it, then press Delete to remove it.",
   calibrate: "Click the two ends of a dimension you know (e.g. a 6000 mm grid line), then type its length.",
   measure: "Click two points to measure a distance — e.g. floor-to-floor height or slab thickness on a section drawing.",
@@ -95,6 +96,14 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok?: string; error?: string } | null>(null);
   const [layerVersion, setLayerVersion] = useState(0);
+  // viewer
+  const [hidden, setHidden] = useState<Record<string, boolean>>({});   // layers switched off on screen (still counted)
+  const [showText, setShowText] = useState(true);
+  const [showNames, setShowNames] = useState(true);
+  const [full, setFull] = useState(false);
+  const [mouse, setMouse] = useState<Pt | null>(null);
+  const [partFilter, setPartFilter] = useState<PartKind | "all">("all");
+  const textPxRef = useRef<{ x: number; y: number; h: number; text: string }[]>([]);
 
   const isDxf = plan.source_kind === "dxf";
   const update = useCallback((fn: (p: Takeoff) => Takeoff) => { setT((p) => fn(p)); setDirty(true); setMsg(null); }, []);
@@ -105,6 +114,15 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const r = st.getBoundingClientRect();
     const k = Math.min(r.width / w, r.height / h) * 0.95;
     setView({ k, x: (r.width - w * k) / 2, y: (r.height - h * k) / 2 });
+  }, []);
+
+  /** Zoom so that a box (plan pixels) fills the screen. */
+  const fitBox = useCallback((b: [number, number, number, number]) => {
+    const st = stageRef.current; if (!st) return;
+    const r = st.getBoundingClientRect();
+    const w = Math.max(1, b[2] - b[0]), h = Math.max(1, b[3] - b[1]);
+    const k = Math.min(r.width / w, r.height / h) * 0.9;
+    setView({ k, x: r.width / 2 - ((b[0] + b[2]) / 2) * k, y: r.height / 2 - ((b[1] + b[3]) / 2) * k });
   }, []);
 
   const rescaleTo = useCallback((w: number, h: number) => {
@@ -132,6 +150,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         p.pts.forEach((q, i) => { const [x, y] = f.toPx(q); xy[2 * i] = x; xy[2 * i + 1] = y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; });
         return { layer: p.layer, xy, closed: p.closed, b: [x0, y0, x1, y1] as [number, number, number, number] };
       });
+      textPxRef.current = (m.texts ?? []).filter((q) => q.h > 0).map((q) => { const [x, y] = f.toPx([q.x, q.y]); return { x, y, h: q.h / f.unitsPerPx, text: q.text }; });
     }
   }, []);
 
@@ -171,7 +190,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           const c = canvasRef.current!; c.width = frame.width; c.height = frame.height;
           drawDxfNow(roles);
           setLayers(model.layers); setUnitsGuessed(model.unitsGuessed && !saved.dxf?.units);
-          setT((p) => ({ ...p, dxf: { units, layerRoles: roles, wallsDrawn: p.dxf?.wallsDrawn ?? "faces" }, metersPerPx: frame.unitsPerPx * UNIT_TO_M[units] }));
+          // keep everything already saved for the drawing (plan region…) — only units / layer roles are filled in
+          setT((p) => ({ ...p, dxf: { ...(p.dxf ?? {}), units, layerRoles: roles, wallsDrawn: p.dxf?.wallsDrawn ?? "faces" }, metersPerPx: frame.unitsPerPx * UNIT_TO_M[units] }));
           dims = { w: frame.width, h: frame.height };
         } else if (plan.source_kind === "pdf") {
           pdfBuf.current = await res.arrayBuffer();
@@ -215,7 +235,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         ctx.beginPath();
         let any = false;
         for (const p of pxPathsRef.current) {
-          if ((roles[p.layer] ?? "ignore") !== role) continue;
+          if ((roles[p.layer] ?? "ignore") !== role || hidden[p.layer]) continue;
           if (p.b[2] < ix0 || p.b[0] > ix1 || p.b[3] < iy0 || p.b[1] > iy1) continue;
           const xy = p.xy; any = true;
           ctx.moveTo(vx + xy[0] * kk, vy + xy[1] * kk);
@@ -226,9 +246,21 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         if (role === "columns" || role === "opening") { ctx.fillStyle = role === "columns" ? "rgba(220,38,38,0.35)" : "rgba(147,51,234,0.12)"; ctx.fill(); }
         ctx.strokeStyle = ROLE_COLOR[role]; ctx.lineWidth = role === "ignore" ? 0.6 : role === "walls" ? 1.4 : 1.2; ctx.stroke();
       }
+      // texts of the drawing (titles, room names, level names) once they are big enough to read
+      if (showText) {
+        ctx.fillStyle = "#374151"; ctx.textBaseline = "alphabetic";
+        let n = 0;
+        for (const q of textPxRef.current) {
+          const fs = q.h * kk; if (fs < 5) continue;
+          if (q.x < ix0 - 50 / kk || q.x > ix1 || q.y < iy0 || q.y > iy1 + fs / kk) continue;
+          ctx.font = `${Math.min(fs, 200).toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.fillText(q.text, vx + q.x * kk, vy + q.y * kk);
+          if (++n > 4000) break;
+        }
+      }
     });
     return () => cancelAnimationFrame(id);
-  }, [isDxf, size, view, t.dxf, layerVersion]);
+  }, [isDxf, size, view, t.dxf, layerVersion, hidden, showText, full]);
 
   // re-draw DXF when layer roles change
   useEffect(() => { if (isDxf && t.dxf) drawDxfNow(t.dxf.layerRoles); }, [isDxf, layerVersion, drawDxfNow]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -263,6 +295,16 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDxf, t.dxf?.layerRoles, t.dxf?.units, size]);
+  // every separate drawing in the file (plans, sections, elevations, site plan…) with its title — listed and outlined
+  const parts = useMemo(() => {
+    const f = frameRef.current;
+    if (!isDxf || !modelRef.current || !t.dxf || !f) return [];
+    return drawingParts(modelRef.current, UNIT_TO_M[t.dxf.units], t.dxf.layerRoles).map((c) => {
+      const a = f.toPx([c.box[0], c.box[1]]), b = f.toPx([c.box[2], c.box[3]]);
+      return { ...c, px: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] as [number, number, number, number] };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDxf, t.dxf?.layerRoles, t.dxf?.units, size]);
   const needPick = !!(isDxf && t.dxf && !t.dxf.region && candidates.length > 1 && !canEdit);
   const [choosing, setChoosing] = useState(false);          // user asked to pick another drawing
   const [autoNote, setAutoNote] = useState<string | null>(null);
@@ -280,31 +322,43 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     }
     return best;
   }, [t.dxf?.region, candidates]);
-  // automatic: pick the typical floor plan (most walls + "typical … plan" title), read floors & floor height from the drawing, save
-  useEffect(() => {
-    if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size) return;
-    // only the first time a plan is opened: once the user has a region / saved values, nothing is changed automatically
-    if (t.auto?.done || t.dxf.region) { autoDone.current = true; return; }
+  const currentPart = useMemo(() => {
+    const r = t.dxf?.region; if (!r) return null;
+    const area = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    return parts.find((q) => { const i = area([Math.max(q.px[0], r[0]), Math.max(q.px[1], r[1]), Math.min(q.px[2], r[2]), Math.min(q.px[3], r[3])]); return i > 0.85 * area(q.px) && i > 0.6 * area(r); }) ?? null;
+  }, [t.dxf?.region, parts]);
+  // automatic: pick the typical floor plan (most walls + "typical … plan" title), read floors & floor height from the drawing
+  const detect = useCallback((force: boolean) => {
+    if (!modelRef.current || !t.dxf) return;
     const pick = candidates.length >= 2 ? candidates[0] : null;
-    const info = floorInfoFromTexts(modelRef.current.texts ?? []);
-    // floor height / floors only replace the untouched defaults (3000 mm, 1 floor)
-    const fh = info.heightMm && Math.round((t.params.floorHeight || 0) * 1000) === 3000 && info.heightMm !== 3000 ? info.heightMm : undefined;
-    const floors = (pick?.floors ?? info.floors) && (t.params.floors ?? 1) <= 1 ? (pick?.floors ?? info.floors) : undefined;
-    autoDone.current = true;
-    if (!pick && !fh && !floors) { update((pp) => ({ ...pp, auto: { done: true } })); return; }
+    const info = floorInfoFromTexts(modelRef.current.texts ?? [], UNIT_TO_M[t.dxf.units], [plan.name, plan.lead?.label ?? ""]);
+    // first time: floor height / floors only replace the untouched defaults (3000 mm, 1 floor); "read again" replaces them
+    const fh = info.heightMm && (force || (Math.round((t.params.floorHeight || 0) * 1000) === 3000 && info.heightMm !== 3000)) ? info.heightMm : undefined;
+    const fl = pick?.floors ?? info.floors;
+    const floors = fl && (force || (t.params.floors ?? 1) <= 1) ? fl : undefined;
     const notes: string[] = [];
     if (pick) notes.push(`picked ${pick.title ? `"${pick.title}"` : `drawing ${pick.n}`} (${pick.w.toFixed(1)} × ${pick.h.toFixed(1)} m) as the typical floor`);
     if (floors) notes.push(`${floors} floors (${pick?.floors ? "from the drawing title" : info.source ?? "from the drawing"})`);
     if (fh) notes.push(`floor height ${fh} mm (${info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing"})`);
+    if (force && !pick && !fh && !floors) notes.push("nothing new could be read — set the region, floors and floor height by hand");
+    const note = notes.length ? notes.join(" · ") + "." : undefined;
     update((pp) => ({
       ...pp,
-      auto: { done: true, note: notes.join(" · ") + "." },
+      auto: { done: true, note },
       params: { ...pp.params, ...(floors ? { floors } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}) },
       dxf: pp.dxf && pick ? { ...pp.dxf, region: pick.px } : pp.dxf,
     }));
-    setAutoNote(notes.join(" · ") + ".");
-    setAutoSave(true);
-  }, [canEdit, isDxf, t.dxf, t.params.floorHeight, t.params.floors, candidates, update, size]);
+    setAutoNote(note ?? null);
+    if (note) setAutoSave(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidates, t.dxf, t.params.floorHeight, t.params.floors, plan.name, plan.lead?.label, update]);
+  useEffect(() => {
+    if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size) return;
+    // only the first time a plan is opened: once the user has a region / saved values, nothing is changed automatically
+    autoDone.current = true;
+    if (t.auto?.done || t.dxf.region) return;
+    detect(false);
+  }, [canEdit, isDxf, t.dxf, t.auto?.done, size, detect]);
   const pickPlan = (c: { px: [number, number, number, number]; floors?: number }) => { setChoosing(false); setAutoNote(null); update((pp) => ({ ...pp, params: c.floors ? { ...pp.params, floors: c.floors } : pp.params, dxf: pp.dxf ? { ...pp.dxf, region: c.px } : pp.dxf })); };
   const mpp = t.metersPerPx;
   const codes = useMemo(() => shapeCodes(t.shapes), [t.shapes]);
@@ -339,12 +393,18 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   }, [update]);
 
   function click(p: Pt) {
-    if (!canEdit) return;
+    if (!canEdit && tool !== "zoom") return;
     if (choosing && tool !== "region") {
       const c = candidates.find((q) => p[0] >= q.px[0] && p[0] <= q.px[2] && p[1] >= q.px[1] && p[1] <= q.px[3]);
       if (c) { pickPlan(c); return; }
     }
     if (tool === "pan") return;
+    if (tool === "zoom") {
+      if (draft.length === 0) { setDraft([p]); return; }
+      const a = draft[0];
+      if (Math.abs(p[0] - a[0]) > 2 && Math.abs(p[1] - a[1]) > 2) fitBox([Math.min(a[0], p[0]), Math.min(a[1], p[1]), Math.max(a[0], p[0]), Math.max(a[1], p[1])]);
+      setDraft([]); return;
+    }
     if (tool === "select") {
       const hit = [...t.shapes].reverse().find((s) => hitTest(s, p, 8 / view.k));
       setSelected(hit?.id ?? null); return;
@@ -396,6 +456,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
       if (d.moved && (d.pan || e.pointerType === "touch")) { d.pan = true; setView((v) => ({ ...v, x: d.vx + dx, y: d.vy + dy })); return; }
     }
     if (tool !== "pan") setHover(snap(toImg(e.clientX, e.clientY), e.shiftKey));
+    if (isDxf) setMouse(toImg(e.clientX, e.clientY));
   }
   function onPointerUp(e: React.PointerEvent) {
     const d = drag.current; drag.current = null;
@@ -423,7 +484,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const down = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest("input,textarea,select")) return;
       if (e.code === "Space") { spaceDown.current = true; e.preventDefault(); }
-      if (e.key === "Escape") { setDraft([]); setSelected(null); }
+      if (e.key === "Escape") { if (full && !draft.length) setFull(false); setDraft([]); setSelected(null); }
       if (e.key === "Enter") finishDraft();
       if (e.key === "Backspace" && draft.length) { e.preventDefault(); setDraft((d) => d.slice(0, -1)); }
       if ((e.key === "Delete" || e.key === "Backspace") && selected && !draft.length) { update((p) => ({ ...p, shapes: p.shapes.filter((s) => s.id !== selected) })); setSelected(null); }
@@ -480,6 +541,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   const tools: { id: Tool; label: string; icon: React.ReactNode; show: boolean }[] = [
     { id: "pan", label: "Move", icon: <Hand className="size-4" />, show: true },
     { id: "calibrate", label: "Set scale", icon: <Ruler className="size-4" />, show: canEdit && !isDxf },
+    { id: "zoom", label: "Zoom box", icon: <ZoomIn className="size-4" />, show: true },
     { id: "measure", label: "Measure", icon: <MoveVertical className="size-4" />, show: true },
     { id: "region", label: "Plan region", icon: <Crop className="size-4" />, show: canEdit && isDxf },
     { id: "slab", label: "Slab area", icon: <Square className="size-4" />, show: canEdit },
@@ -493,11 +555,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     { id: "select", label: "Select", icon: <MousePointer2 className="size-4" />, show: canEdit },
   ];
   const draftPreview: Pt[] = hover && draft.length && tool !== "select" && tool !== "pan"
-    ? tool === "column" || tool === "region" ? [draft[0], [hover.pt[0], draft[0][1]], hover.pt, [draft[0][0], hover.pt[1]]] : (tool === "measure" || tool === "calibrate") && draft.length >= 2 ? draft : [...draft, hover.pt]
+    ? tool === "column" || tool === "region" || tool === "zoom" ? [draft[0], [hover.pt[0], draft[0][1]], hover.pt, [draft[0][0], hover.pt[1]]] : (tool === "measure" || tool === "calibrate") && draft.length >= 2 ? draft : [...draft, hover.pt]
     : draft;
   const liveLabel = (() => {
     if (!hover || !draft.length || !mpp) return null;
-    if (tool === "region") return null;
+    if (tool === "region" || tool === "zoom") return null;
     if (tool === "wall" || tool === "beam" || tool === "door" || tool === "window" || tool === "calibrate" || tool === "measure") return fmtLen(shapeMeasure({ id: "", kind: "wall", pts: draftPreview }, mpp).length);
     if (tool === "column") { const [a, , c] = draftPreview; return `${Math.round(Math.abs(c[0] - a[0]) * mpp * 1000)} × ${Math.round(Math.abs(c[1] - a[1]) * mpp * 1000)} mm`; }
     if (draftPreview.length >= 3) return fmtArea(polyArea(draftPreview) * mpp * mpp);
@@ -507,7 +569,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   return (
     <div className="flex flex-col gap-4 xl:flex-row">
       {/* drawing area */}
-      <div className="min-w-0 flex-1">
+      <div className={full ? "fixed inset-0 z-50 flex flex-col bg-graphite-950 p-2" : "min-w-0 flex-1"}>
         <div className="flex flex-wrap items-center gap-1 rounded-t-lg border border-b-0 border-graphite-800 bg-graphite-900 p-1.5">
           {tools.filter((x) => x.show).map((x) => (
             <button key={x.id} type="button" onClick={() => { setTool(x.id); setDraft([]); setSelected(null); }}
@@ -519,7 +581,24 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           <IconBtn label="Zoom out" onClick={() => zoomAt(1 / 1.3)}><Minus className="size-4" /></IconBtn>
           <IconBtn label="Zoom in" onClick={() => zoomAt(1.3)}><Plus className="size-4" /></IconBtn>
           <IconBtn label="Fit to screen" onClick={() => size && fit(size.w, size.h)}><Maximize className="size-4" /></IconBtn>
-          {draft.length > 0 && tool !== "calibrate" && tool !== "measure" && tool !== "region" && !isTwoPoint(tool) ? (
+          <IconBtn label={full ? "Exit full screen" : "Full screen"} onClick={() => { setFull((v) => !v); requestAnimationFrame(() => requestAnimationFrame(() => size && fit(size.w, size.h))); }}>{full ? <Minimize className="size-4" /> : <Maximize className="size-4 rotate-45" />}</IconBtn>
+          {isDxf ? (
+            <>
+              <span className="mx-1 h-5 w-px bg-graphite-700" />
+              <button type="button" onClick={() => setShowText((v) => !v)} title="Show the drawing's texts"
+                className={cls("inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs", showText ? "bg-graphite-700 text-graphite-50" : "text-graphite-400 hover:bg-graphite-800")}><Type className="size-4" />Text</button>
+              <button type="button" onClick={() => setShowNames((v) => !v)} title="Outline and name every drawing in the file"
+                className={cls("inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs", showNames ? "bg-graphite-700 text-graphite-50" : "text-graphite-400 hover:bg-graphite-800")}><Tag className="size-4" />Names</button>
+              {parts.length > 1 ? (
+                <select value="" onChange={(e) => { const pt = parts.find((q) => q.n === Number(e.target.value)); if (pt) fitBox(pt.px); }}
+                  className="max-w-[220px] rounded-md border border-graphite-700 bg-graphite-950 px-2 py-1 text-xs text-graphite-100" aria-label="Go to drawing">
+                  <option value="">Go to drawing… ({parts.length})</option>
+                  {parts.map((q) => <option key={q.n} value={q.n}>{q.n}. {q.title}{q.sub ? ` — ${q.sub}` : ""}</option>)}
+                </select>
+              ) : null}
+            </>
+          ) : null}
+          {draft.length > 0 && tool !== "calibrate" && tool !== "measure" && tool !== "region" && tool !== "zoom" && !isTwoPoint(tool) ? (
             <>
               <span className="mx-1 h-5 w-px bg-graphite-700" />
               {tool !== "column" ? <button type="button" onClick={finishDraft} className="inline-flex items-center gap-1 rounded-md bg-signal-green/15 px-2.5 py-1.5 text-xs font-medium text-signal-green"><Check className="size-4" />Finish</button> : null}
@@ -539,7 +618,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
 
         <div
           ref={stageRef}
-          className={cls("relative h-[62vh] min-h-[380px] touch-none select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
+          className={cls("relative touch-none", full ? "min-h-0 flex-1" : "h-[62vh] min-h-[380px]", " select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
             tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-pointer" : "cursor-crosshair")}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
           onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "beam" || tool === "slab" || tool === "opening" || tool === "loft") finishDraft(); }}
@@ -568,6 +647,18 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
                     </g>
                   );
                 })}
+                {isDxf && showNames && !choosing && parts.length > 1 ? (
+                  <g>
+                    {parts.map((q) => (
+                      <g key={`p${q.n}`}>
+                        <rect x={q.px[0]} y={q.px[1]} width={q.px[2] - q.px[0]} height={q.px[3] - q.px[1]} fill="none" stroke="#0e7490" strokeOpacity={0.55} strokeWidth={1.2 * sw} strokeDasharray={`${3 * sw} ${3 * sw}`} />
+                        <text x={q.px[0] + 4 / k} y={q.px[1] - 5 / k} fontSize={12 / k} fill="#0e7490" stroke="#fff" strokeWidth={3 / k} paintOrder="stroke" fontWeight={700}>
+                          {q.n}. {q.title}{q.sub ? ` · ${q.sub}` : ""}
+                        </text>
+                      </g>
+                    ))}
+                  </g>
+                ) : null}
                 {choosing ? (
                   <g>
                     {candidates.map((c) => (
@@ -598,9 +689,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
                 ) : null}
                 {draftPreview.length ? (
                   <g>
-                    <path d={draftPreview.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ") + (tool === "column" || tool === "region" ? " Z" : "")}
+                    <path d={draftPreview.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ") + (tool === "column" || tool === "region" || tool === "zoom" ? " Z" : "")}
                       fill={tool === "slab" || tool === "opening" || tool === "column" ? SHAPE_STYLE[tool as ShapeKind].fill : "none"}
-                      stroke={tool === "calibrate" || tool === "measure" || tool === "region" ? "#059669" : SHAPE_STYLE[(tool === "select" || tool === "pan" ? "slab" : tool) as ShapeKind]?.stroke ?? "#059669"}
+                      stroke={tool === "calibrate" || tool === "measure" || tool === "region" || tool === "zoom" ? "#059669" : SHAPE_STYLE[(tool === "select" || tool === "pan" ? "slab" : tool) as ShapeKind]?.stroke ?? "#059669"}
                       strokeWidth={2 * sw} strokeDasharray={`${5 * sw} ${3 * sw}`} />
                     {draft.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={4 / k} fill="#fff" stroke="#111" strokeWidth={1.5 / k} />)}
                   </g>
@@ -615,6 +706,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
             ) : null}
           </div>
 
+          {isDxf && size && mpp ? <Readout mouse={mouse} frame={frameRef.current} mpp={mpp} k={k} unitToM={t.dxf ? UNIT_TO_M[t.dxf.units] : 0.001} /> : null}
           {tool === "calibrate" && draft.length === 2 ? (
             <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-graphite-700 bg-graphite-950 p-2 shadow-lg" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
               <span className="text-xs text-graphite-300">Real length of this line</span>
@@ -662,6 +754,42 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
               {msg?.error ?? (dirty ? "Unsaved changes" : msg?.ok ?? "All saved")}
             </span>
           </div>
+        ) : null}
+
+        {isDxf && parts.length > 1 ? (
+          <Panel title={`Drawings in this file (${parts.length})`} hint="The file is split into its separate drawings. Click one to see it close up; “Count this” measures only that drawing (e.g. one block / wing).">
+            <div className="mb-2 flex flex-wrap gap-1">
+              {(["all", "plan", "section", "elevation", "site", "detail", "other"] as const).map((kk) => {
+                const n = kk === "all" ? parts.length : parts.filter((q) => q.kind === kk).length;
+                if (!n) return null;
+                return (
+                  <button key={kk} type="button" onClick={() => setPartFilter(kk)}
+                    className={cls("rounded-full border px-2 py-0.5 text-[11px] capitalize", partFilter === kk ? "border-brand-orange bg-brand-orange/15 text-graphite-50" : "border-graphite-700 text-graphite-400 hover:text-graphite-200")}>
+                    {kk === "all" ? "All" : `${kk}s`} {n}
+                  </button>
+                );
+              })}
+            </div>
+            <ul className="max-h-72 space-y-1 overflow-y-auto pr-1 text-xs">
+              {parts.filter((q) => partFilter === "all" || q.kind === partFilter).map((q) => {
+                const r = t.dxf?.region;
+                const counted = !!r && Math.abs(r[0] - q.px[0]) + Math.abs(r[1] - q.px[1]) + Math.abs(r[2] - q.px[2]) + Math.abs(r[3] - q.px[3]) < 0.02 * (q.px[2] - q.px[0] + q.px[3] - q.px[1]);
+                return (
+                  <li key={q.n} className={cls("flex items-center gap-2 rounded px-1.5 py-1 hover:bg-graphite-800", counted && "bg-signal-green/10 ring-1 ring-signal-green/40")}>
+                    <span className="w-6 shrink-0 text-right font-mono text-graphite-500">{q.n}</span>
+                    <button type="button" onClick={() => fitBox(q.px)} className="min-w-0 flex-1 text-left" title="Show this drawing">
+                      <span className="block truncate text-graphite-100">{q.title}</span>
+                      <span className="block truncate text-[11px] text-graphite-500">{q.kind} · {q.w.toFixed(1)} × {q.h.toFixed(1)} m{q.sub ? ` · ${q.sub}` : ""}</span>
+                    </button>
+                    {counted ? <span className="text-[11px] text-signal-green">counted</span> : canEdit && (q.kind === "plan" || q.kind === "other") ? (
+                      <button type="button" onClick={() => { setChoosing(false); update((pp) => ({ ...pp, dxf: pp.dxf ? { ...pp.dxf, region: q.px } : pp.dxf })); }}
+                        className="shrink-0 rounded border border-graphite-700 px-1.5 py-0.5 text-[11px] text-graphite-200 hover:border-brand-orange">Count this</button>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </Panel>
         ) : null}
 
         <Panel title="Scale & heights">
@@ -729,12 +857,19 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         </Panel>
 
         {isDxf && t.dxf && layers.length ? (
-          <Panel title={`DXF layers (${layers.length})`} hint="Tell the app what each layer is. Areas and lengths are then read automatically.">
+          <Panel title={`DXF layers (${layers.length})`} hint="Tell the app what each layer is. Areas and lengths are then read automatically. The eye only hides a layer on screen.">
+            <div className="mb-1.5 flex gap-3 text-[11px]">
+              <button type="button" className="text-brand-orange hover:underline" onClick={() => setHidden({})}>Show all</button>
+              <button type="button" className="text-brand-orange hover:underline" onClick={() => setHidden(Object.fromEntries(layers.filter((l) => (t.dxf!.layerRoles[l.name] ?? "ignore") === "ignore").map((l) => [l.name, true])))}>Only counted layers</button>
+            </div>
             <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
               {layers.map((l) => {
                 const role = t.dxf!.layerRoles[l.name] ?? "ignore";
                 return (
-                  <div key={l.name} className="flex items-center gap-2">
+                  <div key={l.name} className={cls("flex items-center gap-2", hidden[l.name] && "opacity-50")}>
+                    <button type="button" onClick={() => setHidden((h) => ({ ...h, [l.name]: !h[l.name] }))} className="text-graphite-400 hover:text-graphite-100" title={hidden[l.name] ? "Show this layer" : "Hide this layer (it is still counted)"}>
+                      {hidden[l.name] ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    </button>
                     <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: ROLE_COLOR[role] }} />
                     <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({l.count})</span></span>
                     <select value={role} disabled={!canEdit} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-0.5 text-xs text-graphite-100"
@@ -857,8 +992,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           ) : isDxf && t.dxf && candidates.length > 1 ? (
             <div className="mb-2 rounded-md border border-signal-green/30 bg-signal-green/10 px-2.5 py-2 text-xs text-graphite-200">
               <p>
-                <b>Counting:</b> {current ? `${current.title ?? `Drawing ${current.n}`} (${current.w.toFixed(1)} × ${current.h.toFixed(1)} m)` : t.dxf.region ? "your marked region" : "whole drawing"}
+                <b>Counting:</b> {current ? `${current.title ?? `Drawing ${current.n}`} (${current.w.toFixed(1)} × ${current.h.toFixed(1)} m)` : currentPart ? `${currentPart.title} (${currentPart.w.toFixed(1)} × ${currentPart.h.toFixed(1)} m)` : t.dxf.region ? "your marked region" : "whole drawing"}
                 {canEdit ? <button type="button" onClick={() => setChoosing((v) => !v)} className="ml-2 underline hover:text-signal-amber">{choosing ? "Cancel" : "Choose another drawing"}</button> : null}
+                {canEdit ? <button type="button" onClick={() => { if (window.confirm("Read the drawing again? The typical floor, number of floors and floor height are picked again from the drawing (your other figures stay).")) detect(true); }} className="ml-2 inline-flex items-center gap-1 underline hover:text-signal-amber"><RefreshCw className="size-3" />Read drawing again</button> : null}
               </p>
               {autoNote ?? t.auto?.note ? <p className="mt-1 text-graphite-400">Read from the drawing when first opened: {autoNote ?? t.auto?.note} Your own changes are never overwritten.</p> : null}
               {choosing ? (
@@ -1152,5 +1288,24 @@ function OverrideBox({ t, totals, canEdit, update }: { t: Takeoff; totals: Total
         })}
       </div>
     </details>
+  );
+}
+
+
+/** Bottom-left of the drawing: cursor position (drawing coordinates in metres) and a scale bar. */
+function Readout({ mouse, frame, mpp, k, unitToM }: { mouse: Pt | null; frame: { fromPx: (p: Pt) => Pt } | null; mpp: number; k: number; unitToM: number }) {
+  const mPerScreenPx = mpp / k;
+  const nice = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
+  const len = nice.find((m) => m / mPerScreenPx >= 70) ?? 500;
+  const px = len / mPerScreenPx;
+  const pos = mouse && frame ? frame.fromPx(mouse) : null;
+  return (
+    <div className="pointer-events-none absolute bottom-2 left-2 z-10 flex items-end gap-3 rounded-md bg-white/85 px-2 py-1 text-[11px] text-graphite-700 shadow-sm">
+      <div>
+        <div className="h-1.5 border-x border-b border-graphite-700" style={{ width: px }} />
+        <div className="text-center">{len >= 1 ? `${len} m` : `${len * 1000} mm`}</div>
+      </div>
+      {pos ? <div className="font-mono">X {(pos[0] * unitToM).toFixed(2)} m · Y {(pos[1] * unitToM).toFixed(2)} m</div> : null}
+    </div>
   );
 }

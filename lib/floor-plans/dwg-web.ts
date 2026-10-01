@@ -46,6 +46,9 @@ export const SKIP_LAYER = /furn|furniture|(^|[_\-\s$])fur($|[_\-\s])|p_fur|sanit
 /** Revit / AutoCAD views that are not plans (sections, elevations, 3D, schedules) — whole blocks are left out. */
 export const SKIP_BLOCK = /section|elevation|(^|[^a-z])elev([^a-z]|$)|(^|[^a-z0-9])3d([^a-z0-9]|$)|isometric|schedule|legend|detail/i;
 
+/** Marker layer: one TEXT per named drawing ("VIEW|x0|y0|x1|y1|name"), read back by readDxf as model.views. */
+export const VIEW_LAYER = "ACOFORM-VIEWS";
+
 /** DwgDatabase (from libredwg-web `convert`) → DXF text. */
 export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string; count: number } {
   const blocks = new Map<string, any>();
@@ -54,11 +57,17 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
   const top: any[] = ms?.entities ?? (db?.entities ?? []).filter((e: any) => !e.ownerBlockRecordSoftId || e.ownerBlockRecordSoftId === ms?.handle);
   const out: string[] = [];
   let count = 0;
+  // named top-level blocks (Revit views such as "TOWER B … FIRST FLOOR PLAN", AutoCAD wblocks): their extents and names
+  // are written as marker texts so the app can list and pick the separate drawings in the file
+  let track: [number, number, number, number] | null = null;
+  const views: { name: string; box: [number, number, number, number] }[] = [];
+  const grow = (x: number, y: number) => { if (track) { if (x < track[0]) track[0] = x; if (y < track[1]) track[1] = y; if (x > track[2]) track[2] = x; if (y > track[3]) track[3] = y; } };
   const f = (v: number) => (Math.round(v * 100) / 100).toString();
   const poly = (layer: string, pts: [number, number][], closed: boolean) => {
     const P = pts.filter((p) => ok(p[0]) && ok(p[1]));
     if (P.length < 2 || count >= maxEntities) return;
     count++;
+    if (track) for (const [x, y] of P) grow(x, y);
     if (P.length === 2 && !closed) { out.push("0", "LINE", "8", layer, "10", f(P[0][0]), "20", f(P[0][1]), "30", "0", "11", f(P[1][0]), "21", f(P[1][1]), "31", "0"); return; }
     out.push("0", "LWPOLYLINE", "8", layer, "90", String(P.length), "70", closed ? "1" : "0");
     for (const [x, y] of P) out.push("10", f(x), "20", f(y));
@@ -96,7 +105,12 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
           const rot = ok(e.rotation) ? e.rotation : 0, sx = ok(e.xScale) && e.xScale ? e.xScale : 1, sy = ok(e.yScale) && e.yScale ? e.yScale : 1;
           const ip = e.insertionPoint ?? { x: 0, y: 0 }, bp = b.basePoint ?? { x: 0, y: 0 };
           const t: Xf = [Math.cos(rot) * sx, Math.sin(rot) * sx, -Math.sin(rot) * sy, Math.cos(rot) * sy, ip.x ?? 0, ip.y ?? 0];
+          const named = depth === 0 && !/^\*|^A\$C[0-9a-f]+$/i.test(String(e.name));
+          const before = count;
+          if (named) track = [Infinity, Infinity, -Infinity, -Infinity];
           walk(b.entities, mul(m, mul(t, [1, 0, 0, 1, -(bp.x ?? 0), -(bp.y ?? 0)])), layer, depth + 1);
+          if (named && track && count - before >= 150 && track[2] > track[0]) views.push({ name: String(e.name).replace(/[\r\n|]/g, " ").slice(0, 120), box: track });
+          if (named) track = null;
           break;
         }
         default: break;
@@ -104,6 +118,7 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
     }
   };
   walk(top, ID, null, 0);
+  for (const v of views) out.push("0", "TEXT", "8", VIEW_LAYER, "10", f(v.box[0]), "20", f(v.box[3]), "30", "0", "40", "0", "1", ["VIEW", ...v.box.map(f), v.name].join("|"));
   const units = Number(db?.header?.INSUNITS);
   const head = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9", "$INSUNITS", "70", String(Number.isFinite(units) ? units : 0), "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"];
   return { dxf: [...head, ...out, "0", "ENDSEC", "0", "EOF"].join("\r\n"), count };

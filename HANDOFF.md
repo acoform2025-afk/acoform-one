@@ -125,3 +125,11 @@ returns and repairs.
 - Revit exports carry huge generic/detail/glazing/door/sanitary layers (A-GENM, A-DETL*, A-GLAZ*, A-DOOR*, P-SANR-FIXT, Q-SPCQ…) that hit the 400k entity cap before the unit plans were written. `SKIP_LAYER` now drops them; `SKIP_BLOCK` skips section / elevation / 3D / schedule / legend / detail blocks.
 - TO-01: 400k (capped, 50 MB) → 49k entities, 4.6 MB; Block A–D plans present.
 - Revit names: A-FLOR / A-FLOR-MCUT → slab, S-STRS* → stairs. Drawing titles may be "BLOCK-A" / "TOWER" / "WING".
+
+## Drawing viewer v2 (parts, names, floors)
+- Bug fixed: on load the take-off replaced `t.dxf` and dropped the saved plan region → "whole drawing" was counted. Now merged.
+- DWG conversion writes one marker TEXT per named top-level block / Revit view on layer `ACOFORM-VIEWS` ("VIEW|x0|y0|x1|y1|name"); `readDxf` returns them as `model.views` (also big named INSERTs in plain DXF).
+- `drawingParts(model, unitToM, roles)` (dxf.ts): splits the file into drawings — 3 m clusters, named views, split by wall plans / by several big titles (1.5 m pieces to nearest title), dedupe, merge broken halves (only where titles sit above drawings), reading order. Each part: title, sub (view name), kind (plan/section/elevation/site/detail/other).
+- `viewLabel()` turns Revit names into "TOWER B · 01 FIRST FLOOR PLAN AJ". Plan candidates show view names too.
+- Floors: `floorInfoFromTexts(texts, unitToM, extra)` — G+N also from lead / plan name; Revit level-name stacks ("01 FIRST FLOOR LVL … 13 TERRACE FLOOR LVL") give floors (12) and floor height (spacing). "Read drawing again" button re-runs detection (overwrites floors / height / region).
+- Viewer: Drawings panel (filter by type, zoom, Count this), Names outlines, Text display, Go to drawing, Zoom box tool, Full screen (Esc), layer eye (screen only) + "Only counted layers", cursor X/Y in m + scale bar.

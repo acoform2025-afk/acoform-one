@@ -9,7 +9,9 @@ import { nearRings, outlineFromWalls, wallGaps, wallUnion, xMarkedBoxes } from "
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
 export type DxfText = { text: string; x: number; y: number; h: number };
-export type DxfModel = { texts?: DxfText[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+/** A named drawing inside the file (Revit view / AutoCAD block), box in drawing units. */
+export type DxfView = { name: string; box: [number, number, number, number] };
+export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -57,6 +59,8 @@ function suggestRole(name: string): LayerRole {
   if (/slab|outline|boundary|plate|periphery|edge|built.?up/.test(n)) return "slab";
   return "ignore";
 }
+
+const VIEW_LAYER = "ACOFORM-VIEWS";
 
 const INSUNITS: Record<number, DxfUnits> = { 1: "in", 2: "ft", 4: "mm", 5: "cm", 6: "m" };
 
@@ -175,6 +179,7 @@ export function readDxf(raw: string): DxfModel {
   const blocks = dxf.blocks ?? {};
   const paths: DxfPath[] = [];
   const texts: DxfText[] = [];
+  const views: DxfView[] = [];
 
   const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number) => {
     for (const e of ents) {
@@ -203,12 +208,25 @@ export function readDxf(raw: string): DxfModel {
             e: e.position?.x ?? 0, f: e.position?.y ?? 0,
           };
           const local = mul(t, { ...ID, e: -base.x, f: -base.y });
+          const before = paths.length;
           walk(b.entities ?? [], mul(m, local), layer, depth + 1);
+          // a big named block placed in model space is a drawing of its own (e.g. "TOWER B FIRST FLOOR PLAN")
+          if (depth === 0 && paths.length - before >= 150 && !/^\*|^A\$C[0-9a-f]+$/i.test(String(e.name))) {
+            let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+            for (let i = before; i < paths.length; i++) for (const [x, y] of paths[i].pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+            if (x1 > x0) views.push({ name: String(e.name).slice(0, 120), box: [x0, y0, x1, y1] });
+          }
           break;
         }
         case "TEXT": case "MTEXT": {
           if (texts.length >= 20000 || depth > 2) break;
           const raw = String(e.text ?? "");
+          if (layer === VIEW_LAYER && raw.startsWith("VIEW|")) {
+            const [, a, b2, c, d2, ...name] = raw.split("|");
+            const box = [a, b2, c, d2].map(Number) as [number, number, number, number];
+            if (box.every(Number.isFinite) && box[2] > box[0]) views.push({ name: name.join("|").trim(), box });
+            break;
+          }
           const clean = raw.replace(/\\P/g, " ").replace(/\\[LlOoKk]/g, "").replace(/\\[A-Za-z][^;\\]*;/g, "").replace(/[{}]/g, "").replace(/%%[cdpCDP]/g, "").replace(/\s+/g, " ").trim();
           const pos = e.position ?? e.startPoint ?? { x: 0, y: 0 };
           if (clean && Number.isFinite(pos.x) && Number.isFinite(pos.y)) { const [x, y] = ap(m, pos.x, pos.y); texts.push({ text: clean.slice(0, 160), x, y, h: Math.abs(Number(e.height ?? e.textHeight ?? 0)) || 0 }); }
@@ -243,7 +261,7 @@ export function readDxf(raw: string): DxfModel {
   const unitsGuessed = !units;
   if (!units) { const span = Math.max(x1 - x0, y1 - y0); units = span > 2000 ? "mm" : span > 300 ? "cm" : "m"; }
 
-  return { texts, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  return { texts, views, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */
@@ -255,6 +273,7 @@ export function dxfFrame(model: DxfModel, maxSide = 2400) {
   return {
     width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)), unitsPerPx: 1 / s,
     toPx: ([x, y]: Pt): Pt => [(x - x0 + pad) * s, (y1 + pad - y) * s],
+    fromPx: ([px, py]: Pt): Pt => [px / s + x0 - pad, y1 + pad - py / s],
   };
 }
 
@@ -436,19 +455,30 @@ function floorsFromTitle(t: string): number | undefined {
   return undefined;
 }
 /** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
-function titleFor(texts: DxfText[], box: [number, number, number, number]): string | undefined {
+function titleFor(texts: DxfText[], box: [number, number, number, number], others: number[][] = []): string | undefined {
   const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
-  const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.2)
+  const inOther = (t: DxfText) => others.some((o) => t.x > o[0] && t.x < o[2] && t.y > o[1] && t.y < o[3] && !(t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1));
+  const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.25 && !inOther(t))
     .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
-    .filter((t) => /plan|section|elevation|layout|floor|block|tower|wing/i.test(t.text) && t.text.length >= 4);
-  near.sort((a, b) => b.h - a.h || (/typical/i.test(b.text) ? 1 : 0) - (/typical/i.test(a.text) ? 1 : 0));
+    .filter((t) => /plan|section|elevation|layout|floor|block|tower|wing/i.test(t.text) && !/\b(lvl|level|slab|beam)\b/i.test(t.text) && t.text.length >= 4);
+  const pri = (x: string) => (/plan|section|elevation|layout/i.test(x) ? 1 : 0);
+  // a big title written inside the drawing's own outline wins; otherwise "… PLAN / SECTION / ELEVATION" titles, biggest first
+  const maxH = Math.max(0, ...near.map((t) => t.h));
+  const own = (t: DxfText) => (t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1 && t.h >= 0.6 * maxH ? 1 : 0);
+  near.sort((a, b) => own(b) - own(a) || pri(b.text) - pri(a.text) || b.h - a.h || (/typical/i.test(b.text) ? 1 : 0) - (/typical/i.test(a.text) ? 1 : 0));
   return near[0]?.text;
 }
 /** Floor height (mm) and number of slabs (first floor to terrace) read from the drawing's notes and level marks. */
-export function floorInfoFromTexts(texts: DxfText[]): { heightMm?: number; floors?: number; source?: string } {
-  const heightMm = floorHeightFromTexts(texts);
+/** Floor height (mm) and number of floors read from the drawing's notes, level marks and level names.
+ *  `extra` = other names to read too (project / lead name, file name) — e.g. "Basement+G+12 Floors". */
+export function floorInfoFromTexts(texts: DxfText[], unitToM = 0.001, extra: string[] = []): { heightMm?: number; floors?: number; source?: string } {
+  let heightMm = floorHeightFromTexts(texts);
+  let hSource: string | undefined;
   let floors: number | undefined, source: string | undefined;
-  for (const t of texts) { const m = t.text.match(/\bG\s*\+\s*(\d{1,3})\b/i); if (m && +m[1] > 0 && +m[1] < 150) { floors = +m[1]; source = `"${t.text.slice(0, 40)}"`; break; } }
+  for (const t of [...texts.map((x) => x.text), ...extra]) { const m = t.match(/\bG\s*\+\s*(\d{1,3})\b/i); if (m && +m[1] > 0 && +m[1] < 150) { floors = +m[1]; source = `"${t.slice(0, 40)}"`; break; } }
+  const stack = levelNameStack(texts, unitToM);
+  if (!floors && stack?.floors) { floors = stack.floors; source = stack.source; }
+  if (!heightMm && stack?.heightMm) { heightMm = stack.heightMm; hSource = stack.source; }
   if (!floors && heightMm) {
     const lv = levelMarks(texts).filter((v) => v >= 2000);
     if (lv.length >= 2) {
@@ -456,7 +486,41 @@ export function floorInfoFromTexts(texts: DxfText[]): { heightMm?: number; floor
       if (Math.abs(n - Math.round(n)) < 0.02 && n >= 1) { floors = Math.round(n) + 1; source = `level marks +${lv[0]} to +${lv[lv.length - 1]} mm`; }
     }
   }
-  return { heightMm, floors, source };
+  return { heightMm, floors, source: source ?? hSource };
+}
+
+const ORD: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, eight: 8, ninth: 9, nineth: 9, tenth: 10, eleventh: 11, twelfth: 12, twelth: 12, twelve: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17, eighteenth: 18, nineteenth: 19, twentieth: 20 };
+/** Revit / section level names stacked one above the other ("01 FIRST FLOOR LVL" … "13 TERRACE FLOOR LVL"):
+ *  floors = numbered floor levels below the terrace, floor height = their vertical spacing on the section. */
+function levelNameStack(texts: DxfText[], unitToM: number): { floors?: number; heightMm?: number; source: string } | null {
+  type L = { n: number; x: number; y: number; terrace: boolean };
+  const ls: L[] = [];
+  for (const t of texts) {
+    const s = t.text.trim();
+    if (!/\b(floor|flr)\b.*\b(lvl|level|lev)\b|\b(lvl|level)\b.*\bfloor\b|terrace/i.test(s) || s.length > 50) continue;
+    const terrace = /terrace|roof/i.test(s);
+    const num = s.match(/^(\d{1,3})\b/) ?? s.match(/\b(\d{1,3})(?:st|nd|rd|th)\b/i);
+    const word = s.toLowerCase().match(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|eight|ninth|nineth|tenth|eleventh|twelfth|twelth|twelve|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)\b/);
+    const n = num ? +num[1] : word ? ORD[word[1]] : NaN;
+    if (Number.isFinite(n) && n >= 0 && n < 150) ls.push({ n, x: t.x, y: t.y, terrace });
+  }
+  if (ls.length < 3) return null;
+  // the longest column of level names (same x within 1 m)
+  const col = new Map<number, L[]>();
+  for (const l of ls) { const k = Math.round((l.x * unitToM) / 1); col.set(k, [...(col.get(k) ?? []), l]); }
+  const best = [...col.values()].sort((a, b) => b.length - a.length)[0];
+  const byN = new Map<number, L>(); for (const l of best) if (!byN.has(l.n)) byN.set(l.n, l);
+  const arr = [...byN.values()].sort((a, b) => a.n - b.n);
+  if (arr.length < 3) return null;
+  const top = arr.find((l) => l.terrace) ?? arr[arr.length - 1];
+  const floors = arr.filter((l) => !l.terrace && l.n >= 1 && l.n < top.n).length || undefined;
+  const steps: number[] = [];
+  for (let i = 1; i < arr.length; i++) if (arr[i].n === arr[i - 1].n + 1) steps.push(Math.round(((arr[i].y - arr[i - 1].y) * unitToM * 1000) / 5) * 5);
+  steps.sort((a, b) => a - b);
+  const med = steps.length >= 2 ? steps[Math.floor(steps.length / 2)] : undefined;
+  const agree = med ? steps.filter((v) => Math.abs(v - med) <= 10).length >= Math.max(2, steps.length * 0.6) : false;
+  const heightMm = med && agree && med >= 2400 && med <= 4500 ? med : undefined;
+  return { floors, heightMm, source: `level names ${arr[0].n}–${top.n}${top.terrace ? " (terrace)" : ""}` };
 }
 function levelMarks(texts: DxfText[]): number[] {
   const lv = new Set<number>();
@@ -521,9 +585,16 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
   const max = Math.max(...out.map((o) => o.count));
   const texts = model.texts ?? [];
   const kept = out.filter((o) => o.count >= max * 0.08 && o.w >= 3 && o.h >= 3);
+  const areaOf = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
   for (const o of kept) {
-    const title = texts.length ? titleFor(texts, o.box) : undefined;
+    // the named drawing (Revit view / block) this candidate sits in
+    const v = (model.views ?? []).map((v) => ({ v, i: areaOf([Math.max(v.box[0], o.box[0]), Math.max(v.box[1], o.box[1]), Math.min(v.box[2], o.box[2]), Math.min(v.box[3], o.box[3])]) }))
+      .filter((x) => x.i >= 0.6 * areaOf(o.box)).sort((a, b) => areaOf(a.v.box) - areaOf(b.v.box))[0]?.v;
+    const vl = v ? viewLabel(v.name) : undefined;
+    const tt = texts.length ? titleFor(texts, o.box) : undefined;
+    const title = tt && vl && !tt.toUpperCase().includes(vl.toUpperCase()) ? `${tt} · ${vl}` : tt ?? vl;
     o.title = title;
+    if (tt) o.count *= 1.001;                                   // same drawing twice: prefer the copy with its own title
     // the typical floor plan: most walls, a "typical … plan" title, not a section / elevation / site / parking / roof drawing
     let f = 1;
     if (title) {
@@ -537,4 +608,179 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
     o.score = o.count * f;
   }
   return kept.sort((a, b) => b.score - a.score).slice(0, 12);
+}
+
+
+/* ---------- separate drawings in one file ---------- */
+export type PartKind = "plan" | "section" | "elevation" | "site" | "detail" | "other";
+export type DrawingPart = { n: number; box: [number, number, number, number]; w: number; h: number; title: string; sub?: string; kind: PartKind; count: number };
+
+/** Readable name of a Revit view / block: "TO-01-TOWER _B_-ARCH-PD_rvt-1-01 FIRST FLOOR PLAN AJ" → "TOWER B · 01 FIRST FLOOR PLAN AJ". */
+export function viewLabel(name: string): string {
+  const n = name.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  const bld = n.match(/\b(TOWER|BLOCK|WING|BLDG|BUILDING)\s*-?\s*([A-Z0-9]{1,3})\b/i);
+  const bits = n.split(/rvt-\d+-/i);
+  const view = (bits.length > 1 ? bits[bits.length - 1] : n).replace(/\b(ARCH|STR|MEP)-PD\b/gi, "").replace(/\s+/g, " ").trim();
+  if (!bld) return view || n;
+  const b = `${bld[1].toUpperCase()} ${bld[2].toUpperCase()}`;
+  return view.toUpperCase().includes(b) ? view : `${b} · ${view}`;
+}
+export function partKind(t: string): PartKind {
+  if (/section|sectional|\bsec\b/i.test(t)) return "section";
+  if (/elevation|\belev\b/i.test(t)) return "elevation";
+  if (/site|master|location|key\s*plan|layout\s*plan|parking/i.test(t)) return "site";
+  if (/schedule|legend|notes?\b|title/i.test(t)) return "detail";
+  if (/plan|floor|block|tower|wing/i.test(t)) return "plan";
+  if (/detail/i.test(t)) return "detail";
+  return "other";
+}
+
+/**
+ * Splits the whole file into its separate drawings: everything closer than 3 m belongs together; named blocks /
+ * Revit views are drawings of their own. Each gets a title (drawing title text or view name) and a type.
+ * Numbered in reading order (top row first, left to right).
+ */
+type Box = [number, number, number, number];
+const boxArea = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+const boxInter = (a: number[], b: number[]) => boxArea([Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])]);
+
+/** Everything closer than `gap` (drawing units) belongs together. `outside` = line points not inside a named view. */
+function clusterBoxes(model: DxfModel, gap: number, vBoxes: Box[]): { box: Box; hits: number; outside: number }[] {
+  const C = gap;
+  const [bx0, by0, bx1, by1] = model.bbox;
+  const span = Math.max(bx1 - bx0, by1 - by0);
+  const cells = new Map<string, number>();
+  const key = (x: number, y: number) => `${Math.floor((x - bx0) / C)},${Math.floor((y - by0) / C)}`;
+  const inBox = (x: number, y: number) => x >= bx0 - span * 0.05 && x <= bx1 + span * 0.05 && y >= by0 - span * 0.05 && y <= by1 + span * 0.05;
+  for (const p of model.paths) {
+    for (let i = 0; i < p.pts.length; i++) {
+      const [x, y] = p.pts[i]; if (!inBox(x, y)) continue;
+      const k0 = key(x, y); cells.set(k0, (cells.get(k0) ?? 0) + 1);
+      if (i > 0) {                                   // long lines fill the cells they cross
+        const [px, py] = p.pts[i - 1]; const L = Math.hypot(x - px, y - py);
+        const steps = Math.min(300, Math.floor(L / C));
+        for (let s = 1; s < steps; s++) { const kx = key(px + ((x - px) * s) / steps, py + ((y - py) * s) / steps); if (!cells.has(kx)) cells.set(kx, 0); }
+      }
+    }
+  }
+  const inView = (i: number, j: number) => { const x = bx0 + (i + 0.5) * C, y = by0 + (j + 0.5) * C; return vBoxes.some((b) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]); };
+  const owner = new Set<string>();
+  const out: { box: Box; hits: number; outside: number }[] = [];
+  for (const start of cells.keys()) {
+    if (owner.has(start)) continue;
+    const stack = [start]; owner.add(start);
+    let i0 = Infinity, j0 = Infinity, i1 = -Infinity, j1 = -Infinity, hits = 0, outside = 0;
+    while (stack.length) {
+      const k = stack.pop()!; const [i, j] = k.split(",").map(Number);
+      const hk = cells.get(k) ?? 0; hits += hk; if (hk && vBoxes.length && !inView(i, j)) outside += hk;
+      i0 = Math.min(i0, i); j0 = Math.min(j0, j); i1 = Math.max(i1, i); j1 = Math.max(j1, j);
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) { const q = `${i + di},${j + dj}`; if (!owner.has(q) && cells.has(q)) { owner.add(q); stack.push(q); } }
+    }
+    out.push({ box: [bx0 + i0 * C, by0 + j0 * C, bx0 + (i1 + 1) * C, by0 + (j1 + 1) * C], hits, outside: vBoxes.length ? outside : hits });
+  }
+  return out;
+}
+
+/**
+ * Splits the whole file into its separate drawings: everything closer than 3 m belongs together (closer drawings are
+ * split again where each piece has its own title, or by their walls); named blocks / Revit views are drawings of their
+ * own. Each gets a title (drawing title text or view name) and a type. Numbered in reading order (top row first).
+ */
+export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<string, LayerRole>): DrawingPart[] {
+  const views = (model.views ?? []).filter((v) => (v.box[2] - v.box[0]) * unitToM >= 2 && (v.box[3] - v.box[1]) * unitToM >= 2);
+  const vBoxes = views.map((v) => v.box);
+  const texts = model.texts ?? [];
+  const minHits = 12;
+  const bigEnough = (b: Box) => (b[2] - b[0]) * unitToM >= 2 && (b[3] - b[1]) * unitToM >= 2;
+  const raw: { box: Box; view?: string; hits: number; title?: string }[] = [];
+  // the same view placed twice on top of itself → once
+  for (const v of views) if (!raw.some((r) => boxInter(r.box, v.box) > 0.95 * Math.max(boxArea(r.box), boxArea(v.box)))) raw.push({ box: v.box, view: v.name, hits: 1000 });
+  const big = clusterBoxes(model, 3 / unitToM, vBoxes);
+  const small = clusterBoxes(model, 1.5 / unitToM, vBoxes).filter((c) => c.hits >= minHits && bigEnough(c.box));
+  const TITLE = /plan|section|elevation|layout|floor|block|tower|wing/i;
+  const cands = roles ? planCandidates(model, roles, unitToM) : [];
+  const plansIn = (b: Box) => cands.filter((c) => partKind(c.title ?? "plan") === "plan" && boxInter(c.box, b) >= 0.8 * boxArea(c.box) && !views.some((v) => boxInter(c.box, v.box) >= 0.8 * boxArea(c.box)));
+  for (const c of big) {
+    if (c.hits < minHits || !bigEnough(c.box)) continue;
+    if (views.some((v) => boxInter(c.box, v.box) >= 0.85 * boxArea(c.box))) continue;  // already listed as a named drawing
+    const inside = views.filter((v) => boxInter(c.box, v.box) >= 0.9 * boxArea(v.box));
+    const covered = inside.reduce((s2, v) => s2 + boxArea(v.box), 0);
+    if (c.outside < Math.max(minHits, c.hits * 0.12) && (inside.length >= 2 || covered >= 0.5 * boxArea(c.box))) continue; // only named drawings + a sheet frame
+    // drawings placed close together: if the group carries several drawing titles (the biggest texts in it),
+    // each piece goes to its nearest title
+    const subs = small.filter((s2) => boxInter(s2.box, c.box) >= 0.9 * boxArea(s2.box));
+    const tIn = texts.filter((t) => t.x >= c.box[0] && t.x <= c.box[2] && t.y >= c.box[1] && t.y <= c.box[3] && TITLE.test(t.text) && !/\b(lvl|level|slab|beam)\b/i.test(t.text) && t.text.length >= 4);
+    const maxH = Math.max(0, ...tIn.map((t) => t.h));
+    const heads = maxH > 0 ? tIn.filter((t) => t.h >= 0.7 * maxH).filter((t, i, a) => a.findIndex((u) => u.text === t.text && Math.hypot(u.x - t.x, u.y - t.y) < maxH * 3) === i) : [];
+    const pl = plansIn(c.box);
+    if (pl.length >= 2) {
+      // several floor plans: split by their walls; the rest of the group (elevations, details) by titles below
+      for (const c2 of pl) raw.push({ box: c2.box, hits: c2.count });
+      const restSubs = subs.filter((s2) => !pl.some((c2) => boxInter(c2.box, s2.box) >= 0.5 * boxArea(s2.box)));
+      for (const s2 of restSubs) if (s2.hits >= 40) raw.push({ box: s2.box, hits: s2.hits });
+    } else if (subs.length >= 2 && heads.length >= 2 && heads.length <= 12) {
+      const groups = heads.map((t) => ({ t, box: [t.x, t.y, t.x, t.y] as Box, hits: 0 }));
+      const dist = (b: Box, x: number, y: number) => Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - y, 0, y - b[3]));
+      for (const s2 of subs) {
+        const g = groups.reduce((best, g2) => (dist(s2.box, g2.t.x, g2.t.y) < dist(s2.box, best.t.x, best.t.y) ? g2 : best), groups[0]);
+        g.box = [Math.min(g.box[0], s2.box[0]), Math.min(g.box[1], s2.box[1]), Math.max(g.box[2], s2.box[2]), Math.max(g.box[3], s2.box[3])]; g.hits += s2.hits;
+      }
+      for (const g of groups) if (g.hits >= minHits && bigEnough(g.box)) raw.push({ box: g.box, hits: g.hits, title: g.t.text.split(/\bscale\b/i)[0].trim().slice(0, 80) });
+    } else raw.push({ box: c.box, hits: c.hits });
+  }
+  // plans joined by grid / dimension lines are split again by their walls
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const r = raw[i]; if (r.view) continue;
+    const own = r.title ?? (texts.length ? titleFor(texts, r.box) : undefined);
+    if (own && /section|elevation|elev\b/i.test(own)) continue;
+    const inside = cands.filter((c) => partKind(c.title ?? "plan") === "plan" && boxInter(c.box, r.box) >= 0.8 * boxArea(c.box) && !views.some((v) => boxInter(c.box, v.box) >= 0.8 * boxArea(c.box)));
+    if (inside.length >= 2) raw.splice(i, 1, ...inside.map((c) => ({ box: c.box, hits: c.count })));
+  }
+  // the same box twice (overlapping groups) → once
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const r = raw[i];
+    if (raw.some((o, j) => j < i && boxInter(o.box, r.box) >= 0.9 * Math.max(boxArea(o.box), boxArea(r.box)))) raw.splice(i, 1);
+  }
+  // a drawing broken in two by a wide gap: the piece without its own title joins the titled piece right above / below it
+  const C3 = 3.1 / unitToM;
+  const ownTitle = (b: Box) => { const tt = texts.filter((t) => t.x >= b[0] && t.x <= b[2] && t.y >= b[1] && t.y <= b[3] && TITLE.test(t.text)); const all = texts.filter((t) => TITLE.test(t.text)); const mh = Math.max(0, ...all.filter((t) => t.x >= b[0] - (b[2] - b[0]) * 0.05 && t.x <= b[2] + (b[2] - b[0]) * 0.05 && t.y >= b[1] - (b[3] - b[1]) * 0.25 && t.y <= b[3] + (b[3] - b[1]) * 0.25).map((t) => t.h)); return tt.some((t) => t.h >= 0.6 * mh && mh > 0); };
+  // only where titles are written ABOVE their drawings (decided by the wall plans and their titles)
+  let above = 0, below = 0;
+  for (const c of cands) {
+    const tt = c.title ? texts.find((t) => c.title!.startsWith(t.text.slice(0, 20)) && t.x >= c.box[0] - (c.box[2] - c.box[0]) * 0.05 && t.x <= c.box[2] + (c.box[2] - c.box[0]) * 0.05) : undefined;
+    if (tt) { if (tt.y > (c.box[1] + c.box[3]) / 2) above++; else below++; }
+  }
+  for (let i = raw.length - 1; i >= 0 && above > below; i--) {
+    const r = raw[i]; if (r.view || r.title || ownTitle(r.box)) continue;
+    const xo = (o: Box) => Math.max(0, Math.min(o[2], r.box[2]) - Math.max(o[0], r.box[0])) / Math.min(o[2] - o[0], r.box[2] - r.box[0]);
+    const o = raw.find((o2) => o2 !== r && !o2.view && xo(o2.box) >= 0.8 && Math.abs(o2.box[1] - r.box[3]) <= C3 && (o2.title || ownTitle(o2.box)));
+    if (o) { o.box = [Math.min(o.box[0], r.box[0]), Math.min(o.box[1], r.box[1]), Math.max(o.box[2], r.box[2]), Math.max(o.box[3], r.box[3])]; o.hits += r.hits; raw.splice(i, 1); }
+  }
+  // a loose piece lying inside another drawing (e.g. a lift core inside the basement plan) is part of that drawing
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const r = raw[i]; if (r.view) continue;
+    if (raw.some((o, j) => j !== i && !o.view && boxArea(o.box) > boxArea(r.box) && boxInter(o.box, r.box) >= 0.9 * boxArea(r.box))) raw.splice(i, 1);
+  }
+  const out = raw.map((r) => {
+    // a title written inside a neighbouring drawing belongs to that drawing
+    const others = raw.filter((o) => o !== r && boxInter(o.box, r.box) < 0.5 * boxArea(r.box)).map((o) => o.box);
+    const tt = r.title ?? (texts.length ? titleFor(texts, r.box, others) : undefined);
+    const vl = r.view ? viewLabel(r.view) : undefined;
+    const title = tt ?? vl ?? "";
+    return { box: r.box, w: (r.box[2] - r.box[0]) * unitToM, h: (r.box[3] - r.box[1]) * unitToM, title, sub: tt && vl && vl !== tt ? vl : undefined, kind: partKind(`${title} ${vl ?? ""}`), count: r.hits, n: 0 };
+  });
+  // reading order: rows from the top, left to right inside a row
+  out.sort((a, b) => b.box[3] - a.box[3]);
+  const rows: (typeof out)[] = [];
+  for (const p of out) {
+    const row = rows.find((r) => p.box[3] <= r[0].box[3] && p.box[3] >= r[0].box[1]);
+    if (row) row.push(p); else rows.push([p]);
+  }
+  const ordered = rows.flatMap((r) => r.sort((a, b) => a.box[0] - b.box[0])).filter(keepPart).slice(0, 80);
+  ordered.forEach((p, i) => { p.n = i + 1; if (!p.title) p.title = `Drawing ${i + 1}`; });
+  return ordered;
+}
+function keepPart(p: { title: string; w: number; h: number; count: number }) {
+  // untitled strips (notes, title blocks, text rows) are not drawings
+  return !!p.title || (Math.min(p.w, p.h) >= 4 && p.count >= 40);
 }
