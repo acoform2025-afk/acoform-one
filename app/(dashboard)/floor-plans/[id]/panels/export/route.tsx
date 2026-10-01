@@ -19,8 +19,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const name = safe(`Panel BOM - ${r.plan.name}`);
   if (url.searchParams.get("format") === "csv") {
     const cell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-    const lines = [["Code", "Description", "Group", "Width mm", "Height mm", "Qty", "Area m2", "Weight kg", "Custom"].map(cell).join(",")];
-    for (const b of r.result.bom) lines.push([b.code, b.description, b.group, b.w, b.h, b.qty, b.area, b.weight, b.custom ? "yes" : "no"].map(cell).join(","));
+    const lines = [["Code", "Description", "Group", "Width mm", "Height mm", "Qty", "Area m2", "Weight kg", "Custom", "Unit", "Sub-group", "How counted"].map(cell).join(",")];
+    for (const b of r.result.bom) lines.push([b.code, b.description, b.group, b.w, b.h, b.qty, b.area, b.weight, b.custom ? "yes" : "no", b.unit ?? "nos", b.sub ?? "", b.basis ?? ""].map(cell).join(","));
     lines.push("", [cell("Total"), "", "", "", "", "", cell(r.result.summary.panelArea), cell(r.result.summary.weight), ""].join(","));
     return new Response("﻿" + lines.join("\r\n"), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${name}.csv"`, "Cache-Control": "no-store" } });
   }

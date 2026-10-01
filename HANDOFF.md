@@ -133,3 +133,10 @@ returns and repairs.
 - `viewLabel()` turns Revit names into "TOWER B · 01 FIRST FLOOR PLAN AJ". Plan candidates show view names too.
 - Floors: `floorInfoFromTexts(texts, unitToM, extra)` — G+N also from lead / plan name; Revit level-name stacks ("01 FIRST FLOOR LVL … 13 TERRACE FLOOR LVL") give floors (12) and floor height (spacing). "Read drawing again" button re-runs detection (overwrites floors / height / region).
 - Viewer: Drawings panel (filter by type, zoom, Count this), Names outlines, Text display, Go to drawing, Zoom box tool, Full screen (Esc), layer eye (screen only) + "Only counted layers", cursor X/Y in m + scale bar.
+
+## Column / beam / staircase modulation + elaborated accessories
+- `layoutFloor` now also returns `columns` (ColumnLayout: panels per face A/B, top, clamps), `beams` (BeamLayout per run: side pieces, sides, bottom, props) and `stairs` (StairLayout: soffit across × along, cheeks, landing, props).
+- Stairs: take-off Staircase rows → real panels (group "stair": SS soffit, RS riser shutters, CK cheeks, LS landing; 1200 pieces of catalogue width merge into deck panels). Area-only stairs (allowance / lump sum) stay a priced set and get a TYPICAL assumed dog-leg drawing (2 flights, risers ≤170, tread 270, width 1200).
+- Beam / stair fillers are now made to the exact length (5 mm), not rounded up to 50.
+- Accessories: each row has `sub` (Deck support, Joints, Ties, Wall alignment, Kicker & edges, Columns & beams, Staircase, Safety, Tools & consumables) and `basis` (how counted). New: long pins, PVC sleeves, cones, wing nuts, walers, waler clips, push-pull props + anchors, kicker brackets, column clamps, beam clamps, stair props, riser brackets, platform brackets / planks / guard rails, tool kits, release agent. Catalogue codes are used when present (regex per item), else defaults.
+- Modulation PDF: wall sheets + COLUMN (plan + face elevations, clamps), BEAM (types B01… side elevation + section), STAIRCASE (flight elevation, soffit plan, landing) sheets + ACCESSORY SCHEDULE. Panels page and BOM PDF/CSV show sub-groups and "how counted".

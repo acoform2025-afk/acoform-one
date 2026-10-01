@@ -10,7 +10,7 @@ import { CreateBom } from "./create-bom";
 export const metadata = { title: "Panel layout & BOM" };
 export const dynamic = "force-dynamic";
 
-const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", column: "Column panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", accessory: "Props & accessories" };
+const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", column: "Column panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", stair: "Staircase panels", accessory: "Props & accessories (elaborated)" };
 const n0 = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -48,7 +48,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
         </div>
         <div className="flex flex-wrap gap-2">
           <a href={`/floor-plans/${id}/panels/drawing?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Layout drawing PDF</a>
-          <a href={`/floor-plans/${id}/panels/modulation?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />Modulation drawings PDF</a>
+          <a href={`/floor-plans/${id}/panels/modulation?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />Modulation drawings PDF (walls, columns, beams, stairs)</a>
           <a href={`/floor-plans/${id}/panels/drawing?${qs}&format=dxf`} className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Layout DXF</a>
           <a href={`/floor-plans/${id}/panels/export?${qs}&format=csv`} className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Excel (CSV)</a>
           <a href={`/floor-plans/${id}/panels/export?${qs}&format=pdf`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />BOM PDF</a>
@@ -97,16 +97,17 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
                   <td className="px-4 py-1.5 text-right font-mono text-xs text-graphite-400">{n0(rows.reduce((a, b) => a + b.qty, 0))}</td>
                   <td className="px-4 py-1.5 text-right font-mono text-xs text-graphite-400">{n2(rows.reduce((a, b) => a + b.area, 0))}</td>
                   <td className="px-4 py-1.5 text-right font-mono text-xs text-graphite-400">{n0(rows.reduce((a, b) => a + b.weight, 0))}</td></tr>
-                {rows.map((b) => (
+                {rows.flatMap((b, i) => [
+                  ...(g === "accessory" && b.sub && b.sub !== rows[i - 1]?.sub ? [<tr key={`h-${b.sub}`} className="bg-graphite-900/30"><td colSpan={6} className="px-4 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-brand-orange">{b.sub}</td></tr>] : []),
                   <tr key={b.code} className="bg-graphite-950">
                     <td className="px-4 py-2 font-mono text-xs text-graphite-200">{b.code}{b.custom ? <span className="ml-1.5 rounded bg-signal-amber/15 px-1 text-[10px] text-signal-amber">custom</span> : null}</td>
-                    <td className="px-4 py-2 text-xs text-graphite-400">{b.description}</td>
-                    <td className="px-4 py-2 text-right font-mono text-xs text-graphite-400">{b.w ? `${b.w} × ${b.h}` : "—"}</td>
+                    <td className="px-4 py-2 text-xs text-graphite-400">{b.description}{b.basis ? <span className="block text-[11px] text-graphite-500">{b.basis}</span> : null}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs text-graphite-400">{b.w ? `${b.w} × ${b.h}` : b.unit && b.unit !== "nos" ? b.unit : "—"}</td>
                     <td className="px-4 py-2 text-right font-mono text-xs text-graphite-100">{n0(b.qty)}</td>
                     <td className="px-4 py-2 text-right font-mono text-xs text-graphite-300">{b.area ? n2(b.area) : "—"}</td>
                     <td className="px-4 py-2 text-right font-mono text-xs text-graphite-300">{b.weight ? n0(b.weight) : "—"}</td>
-                  </tr>
-                ))}
+                  </tr>,
+                ])}
               </tbody>
             );
           })}

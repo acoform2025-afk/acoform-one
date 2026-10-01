@@ -20,12 +20,18 @@ export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };              
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean }; // mm
 export type ColumnRun = { code: string; w: number; d: number; h: number; qty: number; round: boolean; perimeter: number };   // mm
 export type ElementRow = { kind: "column" | "beam" | "deck"; code: string; size: string; qty: number; area: number; detail: string };
-export type PanelOptions = { stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
+/** Staircase geometry (mm). `assumed` = typical dog-leg used when only an area allowance is known; `sets` = identical staircases. */
+export type StairGeo = { code: string; label: string; width: number; risers: number; riser: number; tread: number; waist: number; openSides: number; landingM2: number; flights: number; sets: number; assumed: boolean };
+export type Fit = { panels: number[]; filler: number };
+export type ColumnLayout = { code: string; w: number; d: number; h: number; qty: number; round: boolean; faceW: Fit; faceD: Fit; top: number; clamps: number };
+export type BeamLayout = { code: string; length: number; b: number; d: number; side: number; sides: number; bottom: boolean; pieces: number[]; props: number };
+export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number };
+export type PanelOptions = { stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
-export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string };
+export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "stair" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
 export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo };
 export type PanelResult = {
-  bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[];
+  bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[]; columns: ColumnLayout[]; beams: BeamLayout[]; stairs: StairLayout[];
   summary: { specials: { types: number; pcs: number; area: number }; panelArea: number; weight: number; accessoryWeight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
 };
 
@@ -147,6 +153,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
 
   // ---- columns: panels on each of the 4 faces + 4 external corners; round columns as a custom form set
   const elements: ElementRow[] = [];
+  const colLayouts: ColumnLayout[] = [];
   const ecCat = cat("external_corner")[0];
   for (const c of o.columns ?? []) {
     const q = Math.max(0, Math.round(c.qty)); if (!q) continue;
@@ -156,13 +163,16 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       const dia = r5(Math.max(c.w, c.d));
       add(`col:RCF-${dia}-${H}`, { code: `RCF-${dia}-${H}`, description: `Round column form Ø${dia} × ${H} (set)`, group: "column", w: Math.round(c.perimeter), h: H, custom: true }, q);
       elements.push({ kind: "column", code: c.code, size: `Ø${dia}`, qty: q, area, detail: `round form set Ø${dia} × ${H}` });
+      colLayouts.push({ code: c.code, w: dia, d: dia, h: H, qty: q, round: true, faceW: { panels: [], filler: 0 }, faceD: { panels: [], filler: 0 }, top: 0, clamps: Math.ceil(H / 600) });
       continue;
     }
     const top = Math.max(0, H - o.stdHeight);
     const parts: string[] = [];
+    const fits: Fit[] = [];
     for (const [X, n] of [[Math.round(c.w), 2], [Math.round(c.d), 2]] as [number, number][]) {
       const fit = wallW.length ? fillRun(X, wallW) : { panels: [], left: X };
       const left = fit.left < tol ? 0 : r5(fit.left);
+      fits.push({ panels: fit.panels, filler: left });
       for (const w of fit.panels) {
         const p = wallCat.find((x) => x.width_mm === w)!;
         add(`col:${p.panel_code}`, { code: p.panel_code, description: "Column panel", group: "column", w, h: o.stdHeight, custom: false }, n * q, Number(p.weight_kg));
@@ -173,6 +183,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     }
     add("col:EC", { code: ecCat?.panel_code ?? "EC", description: "Column external corner", group: "column", w: ecCat?.width_mm ?? 65, h: H, custom: !ecCat }, 4 * q, ecCat ? Number(ecCat.weight_kg) : undefined);
     elements.push({ kind: "column", code: c.code, size: `${Math.round(c.w)}×${Math.round(c.d)}`, qty: q, area, detail: `${parts.join(" · ")} · 4 corners${top ? ` · top ${top}` : ""}` });
+    colLayouts.push({ code: c.code, w: Math.round(c.w), d: Math.round(c.d), h: H, qty: q, round: false, faceW: fits[0], faceD: fits[1], top, clamps: Math.ceil(H / 600) });
   }
 
   // ---- corners
@@ -250,11 +261,12 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   // ---- beams: length made up of 1200/900/600/300 panels (+ filler); 2 sides and a bottom for drawn beams; beam props
   const BEAM_LEN = [1200, 900, 600, 300];
   let beamProps = 0;
+  const beamLayouts: BeamLayout[] = [];
   const beamAgg = new Map<string, { code: string; size: string; n: number; len: number; area: number; pieces: Map<number, number>; sides: number; bottom: boolean; props: number }>();
   for (const b of beams) {
     const side = Math.max(0, Math.round(b.d - o.slabMm)), bw = Math.round(b.b);
     const fit = fillRun(b.length, BEAM_LEN);
-    const left = fit.left < tol ? 0 : Math.ceil(fit.left / 50) * 50;      // beam fillers in 50 mm steps
+    const left = fit.left < tol ? 0 : Math.ceil(fit.left / 5) * 5;        // beam filler made to the exact length (5 mm)
     const pieces = [...fit.panels, ...(left ? [left] : [])];
     for (const Lp of pieces) {
       const cust = !BEAM_LEN.includes(Lp);
@@ -263,6 +275,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     }
     const props = b.bottom && bw > 0 ? Math.ceil(b.length / 1200) + 1 : 0;
     beamProps += props;
+    beamLayouts.push({ code: b.code, length: Math.round(b.length), b: bw, d: Math.round(b.d), side, sides: b.sides, bottom: b.bottom && bw > 0, pieces, props });
     const size = bw > 0 ? `${bw}×${Math.round(b.d)}` : `D ${Math.round(b.d)}`;
     const key = `${b.code}|${size}|${b.sides}|${b.bottom}`;
     const g = beamAgg.get(key) ?? { code: b.code, size, n: 0, len: 0, area: 0, pieces: new Map<number, number>(), sides: b.sides, bottom: b.bottom && bw > 0, props: 0 };
@@ -284,41 +297,137 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     else byCode.set("PROP", { code: "PROP", description: "Adjustable steel prop (beams)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: 0, custom: false, unit: "nos" });
   }
 
-  // staircases: made as a project-specific set (area as measured / company allowance)
+  // ---- staircases: waist-slab soffit (deck-type panels across the width, 1200/900/600/300 along the slope),
+  //      riser shutters, open-side cheeks (stringers) and the landing soffit; props under soffit and landing
+  const stairLayouts: StairLayout[] = [];
+  const ALONG = [1200, 900, 600, 300];
+  const along = (L: number) => { const f = fillRun(L, ALONG); const left = f.left < tol ? 0 : Math.ceil(f.left / 5) * 5; return [...f.panels, ...(left ? [left] : [])]; };
+  const acrossFit = (W: number): Fit => { const f = deckW.length ? fillRun(W, deckW) : { panels: [], left: W }; return { panels: f.panels, filler: f.left < tol ? 0 : r5(f.left) }; };
+  let stairProps = 0, riserBrackets = 0;
+  for (const g of o.stairs ?? []) {
+    if (!(g.width > 0 && g.risers > 0 && g.riser > 0 && g.tread > 0)) continue;
+    const hyp = Math.hypot(g.riser, g.tread), slope = Math.round(g.risers * hyp), cos = g.tread / hyp;
+    const cheekH = r5(g.waist / cos + g.riser);
+    const acr = acrossFit(g.width), alg = along(slope);
+    let landing: StairLayout["landing"] = null;
+    if (g.landingM2 > 0) {
+      const lw = g.width, ll = Math.round((g.landingM2 * 1e6) / lw);
+      landing = { l: ll, w: lw, across: acrossFit(ll), along: along(lw) };
+    }
+    const props = (Math.ceil(slope / 1200) + 1) * (Math.ceil(g.width / 1200) + 1) + (landing ? Math.ceil(g.landingM2 / 1.44) + 1 : 0);
+    stairLayouts.push({ ...g, slope, angle: Math.round((Math.atan2(g.riser, g.tread) * 180) / Math.PI), across: acr, along: alg, cheekH, landing, props });
+    if (g.assumed) continue;                                  // area allowance only: priced as a set below, drawing shows a typical stair
+    const n = g.flights * g.sets;
+    for (const L of alg) {
+      for (const w of acr.panels) {
+        const dp = L === deckLen ? deckCat.find((x) => x.width_mm === w) : undefined;
+        if (dp) add(dp.panel_code, { code: dp.panel_code, description: "Deck panel", group: "deck", w, h: L, custom: false }, n, Number(dp.weight_kg));
+        else add(`SS-${w}-${L}`, { code: `SS-${w}-${L}`, description: `Stair soffit panel ${w} × ${L}`, group: "stair", w, h: L, custom: true }, n);
+      }
+      if (acr.filler) add(`SS-${acr.filler}-${L}`, { code: `SS-${acr.filler}-${L}`, description: `Stair soffit filler ${acr.filler} × ${L}`, group: "stair", w: acr.filler, h: L, custom: true }, n);
+      if (g.openSides > 0) add(`CK-${cheekH}-${L}`, { code: `CK-${cheekH}-${L}`, description: `Stair side cheek (stringer) ${cheekH} × ${L}`, group: "stair", w: cheekH, h: L, custom: true }, n * g.openSides);
+    }
+    const rw = r5(g.width), rh = r5(g.riser);
+    add(`RS-${rw}-${rh}`, { code: `RS-${rw}-${rh}`, description: `Riser shutter ${rw} × ${rh}`, group: "stair", w: rw, h: rh, custom: true }, n * g.risers);
+    riserBrackets += 2 * n * g.risers;
+    if (landing) for (const L of landing.along) {
+      for (const w of landing.across.panels) {
+        const dp = L === deckLen ? deckCat.find((x) => x.width_mm === w) : undefined;
+        if (dp) add(dp.panel_code, { code: dp.panel_code, description: "Deck panel", group: "deck", w, h: L, custom: false }, n, Number(dp.weight_kg));
+        else add(`LS-${w}-${L}`, { code: `LS-${w}-${L}`, description: `Landing soffit panel ${w} × ${L}`, group: "stair", w, h: L, custom: true }, n);
+      }
+      if (landing.across.filler) add(`LS-${landing.across.filler}-${L}`, { code: `LS-${landing.across.filler}-${L}`, description: `Landing soffit filler ${landing.across.filler} × ${L}`, group: "stair", w: landing.across.filler, h: L, custom: true }, n);
+    }
+    stairProps += props * n;
+  }
+  // staircases known only as an area (company allowance / lump sum): a project-specific set
   for (const st of o.stairSets ?? []) {
-    byCode.set(`ST:${st.code}`, { code: st.code, description: `${st.label} — staircase formwork set (custom)`, group: "filler", w: 0, h: 0, qty: 1, area: st.area, weight: st.area * o.kgPerM2, custom: true, unit: "set" });
+    byCode.set(`ST:${st.code}`, { code: st.code, description: `${st.label} — staircase formwork set (custom, see typical stair modulation)`, group: "stair", w: 0, h: 0, qty: 1, area: st.area, weight: st.area * o.kgPerM2, custom: true, unit: "set" });
   }
 
-  // pins & wedges on every panel edge (≤ 300 mm c/c, each joint shared by two panels) + 5% spares
+  // ======== accessories (elaborated) — every line says how it was counted ========
+  const accW = (re: RegExp, d: number) => { const p = item("accessory", re); return { code: p?.panel_code, kg: p ? Number(p.weight_kg) : d }; };
+  const acc = (key: string, sub: string, code: string, description: string, qty: number, kg: number, basis: string, unit = "nos") => {
+    if (!(qty > 0)) return;
+    byCode.set(key, { code, description, group: "accessory", w: 0, h: 0, qty, area: 0, weight: Math.round(qty * kg * 10) / 10, custom: false, unit, sub, basis });
+  };
+  // deck support rows made above get their sub-group + basis
+  const tag = (key: string, sub: string, basis: string) => { const r = byCode.get(key); if (r) { r.sub = sub; r.basis = basis; } };
+  tag("PH", "Deck support", `net soffit ${deckArea.toFixed(1)} m² ÷ prop grid ${lineSp.toFixed(2)} × ${alongSp.toFixed(2)} m`);
+  tag("MB", "Deck support", "one mid beam per prop head");
+  tag("BPH", "Deck support", "beam bottoms: length ÷ 1.2 m + 1 per beam");
+
+  // 1 · joints: pins & wedges on every panel edge (≤ 300 mm c/c, each joint shared by two panels) + 5% spares
   let edge = 0;
   for (const r of byCode.values()) if (r.group !== "accessory" && r.w > 0 && r.h > 0) edge += 2 * (r.w + r.h) * r.qty;
   const pins = Math.ceil((edge / 600) * 1.05);
-  if (pins) {
-    const pn = item("accessory", /^PIN/), wd = item("accessory", /^WEDGE/);
-    byCode.set("PIN", { code: pn?.panel_code ?? "PIN", description: "Round pins (panel joints @ 300 mm)", group: "accessory", w: 0, h: 0, qty: pins, area: 0, weight: pins * (pn ? Number(pn.weight_kg) : 0.07), custom: false, unit: "nos" });
-    byCode.set("WEDGE", { code: wd?.panel_code ?? "WEDGE", description: "Wedges", group: "accessory", w: 0, h: 0, qty: pins, area: 0, weight: pins * (wd ? Number(wd.weight_kg) : 0.05), custom: false, unit: "nos" });
-  }
-  // wall ties through both faces at the engineering spacing (Settings → Engineering), ≤ 800 mm practice
+  const pn = accW(/^PIN/, 0.07), wd = accW(/^WEDGE/, 0.05);
+  acc("PIN", "Joints", pn.code ?? "PIN", "Round pin (panel to panel)", pins, pn.kg, `panel edges ${(edge / 1000).toFixed(0)} m ÷ 0.6 m (pin @ 300, shared edge) + 5% spare`);
+  acc("WEDGE", "Joints", wd.code ?? "WEDGE", "Wedge pin", pins, wd.kg, "one per round pin");
+  const scRow = byCode.get("SC"), kpRow = byCode.get("KP");
+  const longPins = 4 * ((scRow?.qty ?? 0) + (kpRow?.qty ?? 0)) + 4 * beamLayouts.reduce((a, bl) => a + bl.pieces.length * bl.sides, 0);
+  acc("LPIN", "Joints", accW(/^LPIN|^LONG/, 0.12).code ?? "LPIN", "Long pin (soffit corner / kicker / beam side to deck)", longPins, accW(/^LPIN|^LONG/, 0.12).kg, "4 per soffit-corner, kicker and beam-side piece");
+
+  // 2 · wall ties through both faces at the engineering spacing (Settings → Engineering), ≤ 800 mm practice
   const tH = o.tieH && o.tieH > 0 ? o.tieH : 800, tV = o.tieV && o.tieV > 0 ? o.tieV : 800;
   let ties = 0;
   for (const f of layouts) ties += (Math.ceil(f.length / tH) + 1) * Math.max(1, Math.ceil(f.height / tV));
   ties = Math.ceil(ties / 2);                                    // one tie serves the two faces of a wall
-  if (ties) {
-    const ft = item("accessory", /^FTIE|^TR/);
-    byCode.set("TIE", { code: ft?.panel_code ?? "TIE", description: `Wall ties (@ ${tH} h × ${tV} v mm)`, group: "accessory", w: 0, h: 0, qty: ties, area: 0, weight: ties * (ft ? Number(ft.weight_kg) : 0.15), custom: false, unit: "nos" });
-  }
+  let colTies = 0;
+  for (const c of colLayouts) if (!c.round) for (const X of [c.w, c.d]) if (X > 600) colTies += (Math.ceil(X / tH) - 0) * Math.max(1, Math.ceil(c.h / tV)) * c.qty;
+  const allTies = ties + colTies;
+  const ft = accW(/^FTIE|^TR/, 0.15);
+  acc("TIE", "Ties", ft.code ?? "TIE", `Tie rod / flat tie (@ ${tH} h × ${tV} v mm)`, allTies, ft.kg, `walls: (face ÷ ${tH} + 1) × rows, two faces per tie${colTies ? ` · columns wider than 600: ${colTies}` : ""}`);
+  acc("SLEEVE", "Ties", accW(/^SLV|^PVC/, 0.02).code ?? "PVC-SL", "PVC sleeve for tie (lost each pour)", allTies, accW(/^SLV|^PVC/, 0.02).kg, "one per tie · consumable");
+  acc("CONE", "Ties", accW(/^CONE/, 0.03).code ?? "CONE", "Tie cone", 2 * allTies, accW(/^CONE/, 0.03).kg, "two per tie");
+  acc("WNUT", "Ties", accW(/^WN|^NUT/, 0.35).code ?? "WNUT", "Wing nut with plate washer", 2 * allTies, accW(/^WN|^NUT/, 0.35).kg, "two per tie rod");
   if (tH > 800) warnings.push(`Tie spacing ${tH} mm is wider than the usual 800 mm.`);
 
+  // 3 · wall alignment: walers on one face (2 rows), waler clips, push-pull props
+  const oneFace = faceLen / 2;
+  const walers = oneFace > 0 ? Math.ceil(oneFace / 2400) * 2 : 0;
+  acc("WALER", "Wall alignment", accW(/^WAL/, 9).code ?? "WALER-2400", "Alignment waler 2.4 m (rectangular hollow section)", walers, accW(/^WAL/, 9).kg, `one wall face ${(oneFace / 1000).toFixed(0)} m ÷ 2.4 m × 2 rows`);
+  acc("WCLIP", "Wall alignment", accW(/^WCL|^CLIP/, 0.6).code ?? "WCLIP", "Waler clip / waler pin", walers * 4, accW(/^WCL|^CLIP/, 0.6).kg, "4 per waler (@ 600 mm)");
+  const pp = oneFace > 0 ? Math.ceil(oneFace / 3000) : 0;
+  acc("PPP", "Wall alignment", accW(/^PPP|^PUSH/, 12).code ?? "PPP", "Push-pull prop (wall plumbing)", pp, accW(/^PPP|^PUSH/, 12).kg, "one wall face ÷ 3.0 m");
+  acc("ANCH", "Wall alignment", "ANCH", "Anchor bolt / base plate for push-pull prop", pp, 0.4, "one per push-pull prop");
+
+  // 4 · kicker, columns, beams, stairs
+  acc("KBR", "Kicker & edges", accW(/^KBR|^KB/, 1.2).code ?? "KBR", "Kicker bracket", kpRow?.qty ?? 0, accW(/^KBR|^KB/, 1.2).kg, "one per external kicker piece");
+  const clamps = colLayouts.reduce((a, c) => a + c.clamps * c.qty, 0);
+  acc("CCL", "Columns & beams", accW(/^CCL|^YOKE/, 6).code ?? "CCL", "Column clamp / yoke set", clamps, accW(/^CCL|^YOKE/, 6).kg, "every 600 mm of column height, per column");
+  const beamClamps = beamLayouts.reduce((a, bl) => a + (Math.ceil(bl.length / 1200) + 1), 0);
+  acc("BCL", "Columns & beams", accW(/^BCL/, 2.5).code ?? "BCL", "Beam side clamp / tie", beamClamps, accW(/^BCL/, 2.5).kg, "every 1.2 m along each beam + 1");
+  acc("SPROP", "Staircase", "PROP-ST", "Stair soffit prop with swivel head", stairProps, 14, "per flight: (slope ÷ 1.2 + 1) × (width ÷ 1.2 + 1) + landing");
+  acc("RBR", "Staircase", "RBR", "Riser bracket", riserBrackets, 0.8, "two per riser shutter");
+
+  // 5 · safety & site
+  if (outer > 0) {
+    const br = Math.ceil(outer / 1.5);
+    acc("PLAT", "Safety", accW(/^PLAT|^BRK/, 11).code ?? "PLAT-BRK", "External working platform bracket", br, accW(/^PLAT|^BRK/, 11).kg, `outer slab edge ${outer.toFixed(1)} m ÷ 1.5 m`);
+    acc("PLANK", "Safety", "PLANK", "Platform plank / walkway (per bay)", br, 18, "one per bracket bay");
+    acc("GRAIL", "Safety", "GRAIL", "Guard rail post", br, 4, "one per bracket");
+  }
+  const totalPanelArea = [...byCode.values()].filter((r) => r.group !== "accessory").reduce((a2, r) => a2 + r.area, 0);
+  acc("TOOLS", "Tools & consumables", "TOOLKIT", "Stripping tool kit (pin puller, stripping bar, hammer)", Math.max(1, Math.ceil(totalPanelArea / 150)), 6, "one kit per 150 m² of panels", "kits");
+  acc("RELEASE", "Tools & consumables", "RA", "Release agent (per pour)", Math.ceil(totalPanelArea / 15), 0.9, "panel area ÷ 15 m² per litre", "litres");
+
+  // deck support / props carry their sub-group; stair & beam props join the prop count
+  const prop = byCode.get("PROP");
+  if (prop) { prop.sub = "Deck support"; prop.basis = `one per prop head${beamProps ? ` + ${beamProps} under beams` : ""}`; }
+  tag("PROP", "Deck support", prop?.basis ?? "");
+
   if (ends) warnings.push(`${ends} short faces (≤ ${endMax} mm) treated as wall ends (stop-ends).`);
-  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "accessory"];
-  const bom = [...byCode.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || b.w - a.w || a.code.localeCompare(b.code))
+  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "stair", "accessory"];
+  const SUBS = ["Deck support", "Joints", "Ties", "Wall alignment", "Kicker & edges", "Columns & beams", "Staircase", "Safety", "Tools & consumables"];
+  const bom = [...byCode.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || SUBS.indexOf(a.sub ?? "") - SUBS.indexOf(b.sub ?? "") || b.w - a.w || a.code.localeCompare(b.code))
     .map((r) => ({ ...r, area: Math.round(r.area * 100) / 100, weight: Math.round(r.weight * 10) / 10 }));
   const panelArea = bom.reduce((s, r) => s + r.area, 0);
   const stdArea = bom.filter((r) => !r.custom).reduce((s, r) => s + r.area, 0);
   const weight = bom.filter((r) => r.group !== "accessory").reduce((s, r) => s + r.weight, 0);
   const accessoryWeight = bom.filter((r) => r.group === "accessory").reduce((s, r) => s + r.weight, 0);
   return {
-    bom, faces: layouts, elements,
+    bom, faces: layouts, elements, columns: colLayouts, beams: beamLayouts, stairs: stairLayouts,
     summary: {
       specials: (() => { const c = bom.filter((r) => r.custom && r.group !== "accessory"); return { types: c.length, pcs: c.reduce((s, r) => s + r.qty, 0), area: Math.round(c.reduce((s, r) => s + r.area, 0) * 100) / 100 }; })(),
       panelArea: Math.round(panelArea * 100) / 100, weight: Math.round(weight), accessoryWeight: Math.round(accessoryWeight), standardPct: panelArea ? Math.round((stdArea / panelArea) * 1000) / 10 : 0,

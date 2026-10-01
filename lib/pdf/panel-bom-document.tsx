@@ -13,7 +13,7 @@ Font.register({
 Font.registerHyphenationCallback((w) => [w]);
 const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 const ORANGE = "#ef9d2f", GRAY = "#6b6d68";
-const GROUP: Record<string, string> = { wall: "WALL PANELS", "wall-top": "WALL TOP PANELS", column: "COLUMN PANELS", filler: "FILLERS / SPECIALS", end: "WALL ENDS", corner: "CORNERS", deck: "DECK PANELS", beam: "BEAM PANELS", accessory: "PROPS & ACCESSORIES" };
+const GROUP: Record<string, string> = { wall: "WALL PANELS", "wall-top": "WALL TOP PANELS", column: "COLUMN PANELS", filler: "FILLERS / SPECIALS", end: "WALL ENDS", corner: "CORNERS", deck: "DECK PANELS", beam: "BEAM PANELS", stair: "STAIRCASE PANELS", accessory: "PROPS & ACCESSORIES" };
 const n0 = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -62,7 +62,12 @@ export function PanelBomDocument({ r, info }: { r: PanelResult; info: BomInfo })
             return (
               <View key={g}>
                 <Row c={[GROUP[g] ?? g, "", "", n0(rows.reduce((a, b) => a + b.qty, 0)), n2(rows.reduce((a, b) => a + b.area, 0)), n0(rows.reduce((a, b) => a + b.weight, 0))]} bold bg="#f3f4f6" />
-                {rows.map((b) => <Row key={b.code} c={[b.code + (b.custom ? " *" : ""), b.description, b.w ? `${b.w} × ${b.h}` : "—", n0(b.qty), b.area ? n2(b.area) : "—", b.weight ? n0(b.weight) : "—"]} />)}
+                {rows.map((b, i) => (
+                  <View key={b.code}>
+                    {g === "accessory" && b.sub && b.sub !== rows[i - 1]?.sub ? <Row c={[b.sub.toUpperCase(), "", "", "", "", ""]} bold /> : null}
+                    <Row c={[b.code + (b.custom ? " *" : ""), b.description + (b.basis ? ` — ${b.basis}` : ""), b.w ? `${b.w} × ${b.h}` : b.unit && b.unit !== "nos" ? b.unit : "—", n0(b.qty), b.area ? n2(b.area) : "—", b.weight ? n0(b.weight) : "—"]} />
+                  </View>
+                ))}
               </View>
             );
           })}

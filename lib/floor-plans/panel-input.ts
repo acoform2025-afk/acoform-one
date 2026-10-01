@@ -6,7 +6,7 @@ import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
 import { closedLoops, dxfAuto, dxfFrame, type DxfModel } from "./dxf";
 import { buildShell } from "./shell";
-import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut } from "@/lib/design-engine/floor-panels";
+import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
 
 const angleAt = (a: Pt, b: Pt, c: Pt) => {
   const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]];
@@ -155,7 +155,21 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     }
   }
   const totals: Totals = computeTotals(t, auto, rules);
-  const stairSets = (totals.items ?? []).filter((i) => i.group === "extra" && i.area > 0).map((i) => ({ code: i.code, label: i.label, area: i.area }));
+  // staircases: measured flight by flight → real panels; known only as an area (allowance / lump sum) → a set,
+  // with a typical dog-leg stair (2 flights, risers ≤ 170, tread 270, width 1200, waist 150) drawn for modulation
+  const stairs: StairGeo[] = [];
+  for (const [i, st] of (t.stairs ?? []).entries()) {
+    const f = Math.round(Number(st.flights) || 0), n = Math.round(Number(st.risers) || 0);
+    if (!f || !n || !(Number(st.width_mm) > 0)) continue;
+    stairs.push({ code: st.label?.trim() || `ST${i + 1}`, label: st.label?.trim() || `Staircase ${i + 1}`, width: Number(st.width_mm), risers: n, riser: Number(st.riser_mm), tread: Number(st.tread_mm), waist: Number(st.waist_mm) || 150, openSides: Math.max(0, Math.min(2, Math.round(Number(st.open_sides) || 0))), landingM2: Number(st.landing_m2) || 0, flights: f, sets: 1, assumed: false });
+  }
+  const measured = (lbl: string, calc: string) => /soffit/.test(calc) && /flight/.test(lbl);
+  const stairSets = (totals.items ?? []).filter((i) => i.group === "extra" && i.area > 0 && !measured(i.label, i.calc)).map((i) => ({ code: i.code, label: i.label, area: i.area }));
+  const Hf = Math.round(t.params.floorHeight * 1000);
+  for (const ss of stairSets.filter((x) => /stair/i.test(x.label))) {
+    const per = Math.ceil(Hf / 2 / 170), cnt = Number(ss.label.match(/×\s*(\d+)/)?.[1]) || 1;
+    stairs.push({ code: ss.code, label: `${ss.label} — typical (assumed)`, width: 1200, risers: per, riser: Math.round((Hf / 2 / per) * 10) / 10, tread: 270, waist: 150, openSides: 1, landingM2: 2.5 * 1.2, flights: 2, sets: cnt, assumed: true });
+  }
 
   // columns (mm): drawn, typed in by size, and from the DXF column layer — same sizes grouped
   const colMap = new Map<string, ColumnRun>();
@@ -177,5 +191,5 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   for (const c of auto?.columns ?? []) addCol(c.w * 1000, c.d * 1000, H, c.area < 0.85 * c.w * c.d, c.perimeter * 1000, 1);
   const columns = [...colMap.values()].sort((a, b) => b.qty - a.qty);
 
-  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets };
+  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs };
 }
