@@ -630,7 +630,7 @@ export function partKind(t: string): PartKind {
   if (/elevation|\belev\b/i.test(t)) return "elevation";
   if (/site|master|location|key\s*plan|layout\s*plan|parking/i.test(t)) return "site";
   if (/schedule|legend|notes?\b|title/i.test(t)) return "detail";
-  if (/plan|floor|block|tower|wing/i.test(t)) return "plan";
+  if (/plan|floor|block|tower|wing|layout/i.test(t)) return "plan";
   if (/detail/i.test(t)) return "detail";
   return "other";
 }
