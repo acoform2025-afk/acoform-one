@@ -5,6 +5,7 @@
 import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
 import { closedLoops, dxfAuto, dxfFrame, type DxfModel } from "./dxf";
+import { wallUnion } from "./geom";
 import { buildShell } from "./shell";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
 
@@ -191,5 +192,21 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   for (const c of auto?.columns ?? []) addCol(c.w * 1000, c.d * 1000, H, c.area < 0.85 * c.w * c.d, c.perimeter * 1000, 1);
   const columns = [...colMap.values()].sort((a, b) => b.qty - a.qty);
 
-  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs };
+  // inputs for the deck zones (installation drawing): walls and beams over openings in metres
+  let zoneWalls: Pt[][] = [];
+  if (auto?.wallRings?.length && frame) zoneWalls = auto.wallRings.map((r) => r.map((q) => toM(frame!.toPx(q))));
+  else if (mpp > 0) {
+    const rects: Pt[][] = [];
+    for (const s of g.shapes.filter((x) => x.kind === "wall")) {
+      const half = (s.t ?? t.params.wallThkMm ?? 150) / 2000;
+      for (let i = 1; i < s.pts.length; i++) {
+        const a = toM(s.pts[i - 1]), b = toM(s.pts[i]); const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (!L) continue;
+        const nx = (-dy / L) * half, ny = (dx / L) * half, ex = (dx / L) * half, ey = (dy / L) * half;
+        rects.push([[a[0] - ex + nx, a[1] - ey + ny], [b[0] + ex + nx, b[1] + ey + ny], [b[0] + ex - nx, b[1] + ey - ny], [a[0] - ex - nx, a[1] - ey - ny]]);
+      }
+    }
+    zoneWalls = wallUnion(rects).rings;
+  }
+  const zoneGaps = frame && auto?.gaps ? auto.gaps.map((gp) => ({ a: toM(frame!.toPx(gp.a)), b: toM(frame!.toPx(gp.b)), thk: gp.thk ?? (t.params.wallThkMm ?? 150) / 1000 })) : [];
+  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps };
 }

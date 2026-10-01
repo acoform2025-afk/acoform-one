@@ -62,7 +62,7 @@ function inside(p: Pt, poly: Pt[]) {
   return c;
 }
 /** y-intervals of polygon (minus holes) along the vertical line x. */
-function intervalsAt(x: number, poly: Pt[], holes: Pt[][]): [number, number][] {
+export function intervalsAt(x: number, poly: Pt[], holes: Pt[][]): [number, number][] {
   const ys: number[] = [];
   const cut = (pl: Pt[]) => { for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) {
     const [x1, y1] = pl[j], [x2, y2] = pl[i];
@@ -77,7 +77,7 @@ function intervalsAt(x: number, poly: Pt[], holes: Pt[][]): [number, number][] {
   }
   return out;
 }
-function overlap(a: [number, number][], b: [number, number][]) {
+export function overlap(a: [number, number][], b: [number, number][]) {
   const out: [number, number][] = [];
   for (const [a0, a1] of a) for (const [b0, b1] of b) { const lo = Math.max(a0, b0), hi = Math.min(a1, b1); if (hi > lo) out.push([lo, hi]); }
   return out;

@@ -140,3 +140,9 @@ returns and repairs.
 - Beam / stair fillers are now made to the exact length (5 mm), not rounded up to 50.
 - Accessories: each row has `sub` (Deck support, Joints, Ties, Wall alignment, Kicker & edges, Columns & beams, Staircase, Safety, Tools & consumables) and `basis` (how counted). New: long pins, PVC sleeves, cones, wing nuts, walers, waler clips, push-pull props + anchors, kicker brackets, column clamps, beam clamps, stair props, riser brackets, platform brackets / planks / guard rails, tool kits, release agent. Catalogue codes are used when present (regex per item), else defaults.
 - Modulation PDF: wall sheets + COLUMN (plan + face elevations, clamps), BEAM (types B01… side elevation + section), STAIRCASE (flight elevation, soffit plan, landing) sheets + ACCESSORY SCHEDULE. Panels page and BOM PDF/CSV show sub-groups and "how counted".
+
+## Deck installation drawings + panel numbering (reference: Chinese alu-formwork design software video)
+- `lib/floor-plans/zones.ts`: `deckZones` = slab − walls (even-odd of wall rings) − strips over wall gaps (beams over openings) − ducts → zones M1… in reading order; `layoutZone` fills each zone with deck panels in rows of 1200 across the short side, 100 mm mid-beam line between rows, numbers every panel (M12-07), leftover = made-to-size specials; `wallPanelNumbers` numbers wall panels per face (F12-01, …T top, …F filler).
+- `panelInputs` returns `zoneWalls` / `zoneGaps` (metres); `runPanels` returns `inp` + `catalog`; `buildZones(inp, catalog)`.
+- Route `/floor-plans/[id]/panels/installation` → A3 PDF (key plan, zone sheets with numbers + per-zone list, numbering list); `?format=csv` → numbering list. Buttons on the Panels page.
+- Deck BOM still comes from the strip method in `layoutFloor` (not yet from zones).
