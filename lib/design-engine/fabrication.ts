@@ -20,12 +20,16 @@ export const FAB = { skin: 4, railDepth: 65, holeFromFace: 40, railT: 8, ribPitc
  */
 export const PROFILE = {
   rail: { name: "Edge rail 65 × 8", area: 427.2 },
-  u: { name: "U-stiffener", area: 445.6 },
-  y: { name: "Y-stiffener 584", area: 499.0 },
+  u: { name: "U-stiffener (sec. 8054)", area: (0.935 * 1e6) / 2700 },          // 3.420 kg / 12 ft = 0.935 kg/m (supplier)
+  y: { name: "Y-stiffener (sec. NP-406)", area: 447.27 },                    // 1.2076 kg/m, 6061-T6 (National Industries)
   i: { name: "I-stiffener 40 × 20", area: 222.9 },
 } as const;
-/** Fitted to ACOFORM's measured production weights of standard 2400 wall panels (100 … 600 wide, 13 sizes). */
-export const ACTUAL = { wallA: 4.93, wallB: 0.03542, ratio: 0.915 };
+/** 230 / 225 wall panels are cut from the one-piece extrusion NP-193 (skin + both rails, 230 × 65): 4.3298 kg/m. */
+export const NP193_KGM = 4.3298;
+/** ACOFORM actual production weights per piece, standard 2400 wall panels (kg) — used as-is, scaled by height for other heights. */
+export const ACTUAL_2400: Record<number, number> = { 600: 26.3, 500: 21.7, 450: 21.9, 400: 19.0, 350: 17.5, 300: 15.3, 250: 12.8, 230: 13.9, 225: 13.6, 200: 11.6, 150: 9.9, 125: 9.4, 100: 8.6 };
+/** Fitted to ACTUAL_2400 for widths not in the table; other pieces = section weight × ratio (shop / theory). */
+export const ACTUAL = { wallA: 4.93, wallB: 0.03542, ratio: 1.01 };   // with the supplier sections theory is within ±5 % of the shop weights
 const kgPerM = (area: number) => (area * FAB.density) / 1e6;
 
 export type FabKind = "wall" | "beam" | "deck" | "stair" | "small";
@@ -94,7 +98,8 @@ export function fabSpec(code: string, description: string, w: number, h: number,
   // calibrated to ACOFORM's actual production weights (STD 2400 per-piece weight sheet):
   // wall pieces kg = H/2400 × (4.93 + 0.03542 × W); other pieces = section weight × 0.915 (same shop ratio)
   const theory = cut.reduce((a, c) => a + c.kg, 0);
-  const target = kind === "wall" && H >= W ? (H / 2400) * (ACTUAL.wallA + ACTUAL.wallB * W) : theory * ACTUAL.ratio;
+  const per2400 = ACTUAL_2400[W] ?? (W >= 215 && W <= 235 ? (NP193_KGM * 2400) / 1000 + 3.5 : ACTUAL.wallA + ACTUAL.wallB * W);
+  const target = kind === "wall" && H >= W ? (H / 2400) * per2400 : theory * ACTUAL.ratio;
   const f = theory > 0 ? target / theory : 1;
   for (const c of cut) c.kg = Math.round(c.kg * f * 100) / 100;
   const kgEach = Math.round(target * 100) / 100;
