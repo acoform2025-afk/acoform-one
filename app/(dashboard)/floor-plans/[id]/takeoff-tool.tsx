@@ -250,6 +250,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDxf, t.dxf, size, t.params.minOpeningM2, rules.minOpeningM2]);
   const totals: Totals = useMemo(() => computeTotals(t, auto, rules), [t, auto, rules]);
+  // the same figures read from the drawing only (without the estimator's typed-in figures) — shown next to them
+  const drawnTotals: Totals = useMemo(() => computeTotals({ ...t, params: { ...t.params, slabM2: undefined, ductM2: undefined, wallLenM: undefined, beamLenM: undefined } }, auto, rules), [t, auto, rules]);
   // separate drawings in the file (floor plans, sections…) — until one is chosen, nothing is counted
   const candidates = useMemo(() => {
     const f = frameRef.current;
@@ -705,6 +707,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
               Use wall tops from the drawing ({fmtArea(totals.wall_top_drawn)})
             </button>
           ) : null}
+          <OverrideBox t={t} totals={drawnTotals} canEdit={canEdit} update={update} />
           <div className="mt-2 grid grid-cols-3 gap-2">
             <Field label="Wall thk (mm)"><NumInput value={t.params.wallThkMm ?? 150} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallThkMm: v } }))} /></Field>
             <Field label="Beam width (mm)"><NumInput value={t.params.beamWidthMm ?? 200} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamWidthMm: v } }))} /></Field>
@@ -1113,5 +1116,40 @@ function RowsEditor<R extends Record<string, number | string | undefined>>({ row
       ) : <p className="text-xs text-graphite-500">None.</p>}
       {!disabled ? <button type="button" onClick={() => onChange([...rows, { ...blank }])} className="mt-1 inline-flex items-center gap-1 text-xs text-brand-orange hover:underline"><Plus className="size-3.5" />Add row</button> : null}
     </div>
+  );
+}
+
+/** Estimator's own figures (e.g. measured in AutoCAD) — replace what the software read from the drawing, one by one. */
+function OverrideBox({ t, totals, canEdit, update }: { t: Takeoff; totals: Totals; canEdit: boolean; update: (fn: (p: Takeoff) => Takeoff) => void }) {
+  const it = totals.items;
+  const slabDrawn = it.filter((i) => i.group === "slab").reduce((s, i) => s + i.area, 0);
+  const ductDrawn = -it.filter((i) => i.group === "deduct" && i.code !== "WT" && i.code !== "CT").reduce((s, i) => s + i.area, 0);
+  const beamLen = (() => { const D = (Number(t.params.beamDepthMm) || 600) / 1000 - t.params.slabMm / 1000; return D > 0 ? totals.beam_area / D : 0; })();
+  const rows: { k: "slabM2" | "ductM2" | "wallLenM" | "beamLenM"; label: string; unit: string; auto: number }[] = [
+    { k: "slabM2", label: "Slab area", unit: "m²", auto: slabDrawn },
+    { k: "ductM2", label: "Duct area", unit: "m²", auto: ductDrawn },
+    { k: "wallLenM", label: "Wall length (faces)", unit: "m", auto: totals.wall_length * 2 },
+    { k: "beamLenM", label: "Beam length", unit: "m", auto: beamLen },
+  ];
+  return (
+    <details className="mt-2 rounded-md border border-graphite-800 px-2.5 py-2 text-xs" open={rows.some((r) => t.params[r.k] != null)}>
+      <summary className="cursor-pointer text-graphite-300">Use your own measured figures (optional)</summary>
+      <p className="mt-1 text-[11px] text-graphite-500">Type a figure to use it instead of the one read from the drawing. Leave empty to use the drawing.</p>
+      <div className="mt-2 space-y-1.5">
+        {rows.map((r) => {
+          const v = t.params[r.k];
+          return (
+            <div key={r.k} className="grid grid-cols-[1fr_auto_6rem_auto] items-center gap-2">
+              <span className="text-graphite-300">{r.label}</span>
+              <span className="font-mono text-[11px] text-graphite-500">drawing {r.auto.toFixed(2)}</span>
+              <input type="number" step="0.01" disabled={!canEdit} value={v ?? ""} placeholder="—"
+                onChange={(e) => { const x = e.target.value; update((p) => ({ ...p, params: { ...p.params, [r.k]: x === "" ? undefined : Math.max(0, Number(x)) } })); }}
+                className="w-24 rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-right font-mono text-xs text-graphite-100 disabled:opacity-60" />
+              <span className="text-graphite-500">{r.unit}</span>
+            </div>
+          );
+        })}
+      </div>
+    </details>
   );
 }

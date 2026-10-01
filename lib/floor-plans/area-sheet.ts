@@ -46,11 +46,12 @@ export function sheetSections(t: Takeoff, totals: Totals, auto: DxfAuto | null):
   if (totals.beam_area > 0) {
     const beams = it.filter((i) => i.group === "beam");
     const D = Number(t.params.beamDepthMm) || 600;
-    const autoOnly = beams.length === 1 && /auto/.test(beams[0].label) && auto?.gapSpan;
-    const L = autoOnly ? 2 * (auto!.gapSpan ?? 0) : 0;
+    const entered = t.params.beamLenM != null && String(t.params.beamLenM) !== "" ? Number(t.params.beamLenM) : null;
+    const autoOnly = entered != null || (beams.length === 1 && /auto/.test(beams[0].label) && !!auto?.gapSpan);
+    const L = entered ?? (autoOnly ? 2 * (auto!.gapSpan ?? 0) : 0);
     out.push({
       no: ++no, key: "beam", title: "CONCRETE AREA FOR BEAM", heading: "BEAM LENGTH",
-      lines: autoOnly ? [`SLAB THICKNESS = ${tS}`, `BEAM DEPTH = ${D}`, `BEAM LENGTH = ${f2(L)}`, `(both sides of ${auto!.gapCount} openings)`] : [`SLAB THICKNESS = ${tS}`, ...beams.slice(0, 6).map((b) => `${b.code}: ${b.calc}`)],
+      lines: autoOnly ? [`SLAB THICKNESS = ${tS}`, `BEAM DEPTH = ${D}`, `BEAM LENGTH = ${f2(L)}`, ...(entered == null ? [`(both sides of ${auto!.gapCount} openings)`] : [])] : [`SLAB THICKNESS = ${tS}`, ...beams.slice(0, 6).map((b) => `${b.code}: ${b.calc}`)],
       total: autoOnly ? `TOTAL BEAM AREA = ${f2(L)}X (${m3(D)} - ${m3(tS)}) = ${f2(totals.beam_area)}Sqm` : `TOTAL BEAM AREA = ${f2(totals.beam_area)}Sqm`,
       value: totals.beam_area, figure: autoOnly ? f2(L) : f2(totals.beam_area), panes: ["beams"],
     });

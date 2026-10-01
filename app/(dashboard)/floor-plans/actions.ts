@@ -112,7 +112,7 @@ const totalsSchema = z.object({
   floors: z.number().int().min(1).max(500),
   params: z.object({
     floorHeight: z.number().min(0).max(50), slabMm: z.number().min(0).max(2000), floors: z.number().min(1).max(500),
-    wallTopM2: num.optional(), includeEdges: z.boolean().optional(), extraPct: z.number().min(0).max(100).optional(), minOpeningM2: z.number().min(0).max(5).optional(), autoLintels: z.boolean().optional(),
+    wallTopM2: num.optional(), slabM2: num.optional(), ductM2: num.optional(), wallLenM: num.optional(), beamLenM: num.optional(), includeEdges: z.boolean().optional(), extraPct: z.number().min(0).max(100).optional(), minOpeningM2: z.number().min(0).max(5).optional(), autoLintels: z.boolean().optional(),
     beamDepthMm: num.optional(), beamWidthMm: num.optional(), wallThkMm: num.optional(),
   }),
   source: z.enum(["manual", "dxf", "mixed"]),

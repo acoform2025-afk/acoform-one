@@ -108,3 +108,7 @@ returns and repairs.
 - Takeoff.auto {done, note}: the drawing-based auto pick / floor height / floors runs only on a plan's first opening (no region yet, auto not done). Never overwrites the user's values later.
 - The plan file loads once per plan id (not per signed URL), so Save → router.refresh no longer re-reads the drawing.
 - "Counting:" names the drawing the region covers (≥90 % of a detected drawing), also for hand-drawn regions.
+
+## Estimator's own figures (override)
+- params.slabM2 / ductM2 / wallLenM / beamLenM (+ existing wallTopM2) replace the drawing-read values in computeTotals; take-off panel "Use your own measured figures" shows the drawing value beside each box.
+- Gorwa: entering 461.54 / 18.2 / 565.72 / 119.09 / 36.45 gives 2215.21 m² (+10 % = 2436.73) — identical to ACOFORM's sheet. Auto: 2192.83 (ducts 9.72 vs 18.2 — 4 shafts not detected; walls 555.52 vs 565.72; beams 112.48 vs 119.09; slab 463.52 vs 461.54).

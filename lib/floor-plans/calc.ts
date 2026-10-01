@@ -38,6 +38,8 @@ export type ExtraRow = { label: string; area_m2: number };
 export type Params = {
   floorHeight: number; slabMm: number; floors: number;
   wallTopM2?: number;       // slab deduction for wall tops (m²)
+  // figures typed in from the estimator's own measurement — replace what was read from the drawing
+  slabM2?: number; ductM2?: number; wallLenM?: number; beamLenM?: number;
   includeEdges?: boolean;   // (unset = company rule)   // add slab / opening edge formwork (default on — IS 1200-5: edges of slabs are measured)
   minOpeningM2?: number;    // openings smaller than this are not deducted (IS 1200-5: 0.4 m²)
   extraPct?: number;        // add % on the typical-floor total (e.g. 10)
@@ -300,6 +302,22 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     const a = Math.max(0, Number(x.area_m2) || 0); if (!a) continue;
     extraArea += a;
     items.push({ code: code("X"), group: "extra", label: (x.label || "Other").slice(0, 60), calc: "lump sum", area: a });
+  }
+  // typed-in figures (estimator's own measurement) replace the drawing's
+  const ov = (v: unknown) => (v != null && String(v) !== "" && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : null);
+  const drop = (pred: (i: AreaItem) => boolean) => { for (let i = items.length - 1; i >= 0; i--) if (pred(items[i])) items.splice(i, 1); };
+  const oSlab = ov(t.params.slabM2), oDuct = ov(t.params.ductM2), oWall = ov(t.params.wallLenM), oBeam = ov(t.params.beamLenM);
+  if (oSlab != null) { drop((i) => i.group === "slab"); slabArea = oSlab; items.push({ code: "S1", group: "slab", label: "Slab area (entered)", calc: `${n2(oSlab)} m²`, area: oSlab }); }
+  if (oDuct != null) { drop((i) => i.group === "deduct"); openArea = oDuct; items.push({ code: "D1", group: "deduct", label: "Ducts / openings (entered)", calc: `− ${n2(oDuct)} m²`, area: -oDuct }); }
+  if (oWall != null) {
+    const adj = items.filter((i) => i.group === "opening").reduce((s, i) => s + i.area, 0);
+    drop((i) => i.group === "wall"); wallCentre = oWall / 2; wallFaces = oWall; wallArea = oWall * H + adj;
+    items.push({ code: "W1", group: "wall", label: "Wall length (entered)", calc: `${n2(oWall)} m × ${n3(H)} m`, area: oWall * H });
+  }
+  if (oBeam != null) {
+    const dMm = Number(t.params.beamDepthMm) || 600, a = oBeam * Math.max(0, dMm / 1000 - slab);
+    drop((i) => i.group === "beam"); beamArea = a;
+    if (a > 0) items.push({ code: "B1", group: "beam", label: "Beam length (entered)", calc: `${n2(oBeam)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
   }
   // wall tops: typed in, else from the walls (drawn walls + merged DXF wall outlines)
   const wallTop = t.params.wallTopM2 != null && String(t.params.wallTopM2) !== "" ? Math.max(0, Number(t.params.wallTopM2) || 0) : rules.deductWallTops ? wallTopDrawn + (auto?.wallTopArea ?? 0) : 0;
