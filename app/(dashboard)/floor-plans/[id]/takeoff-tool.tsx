@@ -121,8 +121,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const st = stageRef.current; if (!st) return;
     const r = st.getBoundingClientRect();
     const w = Math.max(1, b[2] - b[0]), h = Math.max(1, b[3] - b[1]);
-    const k = Math.min(r.width / w, r.height / h) * 0.9;
-    setView({ k, x: r.width / 2 - ((b[0] + b[2]) / 2) * k, y: r.height / 2 - ((b[1] + b[3]) / 2) * k });
+    // as large as the screen allows: a small edge, a little more on top for the drawing's name
+    const k = Math.min((r.width - 16) / w, (r.height - 34) / h);
+    setView({ k, x: r.width / 2 - ((b[0] + b[2]) / 2) * k, y: (r.height + 18) / 2 - ((b[1] + b[3]) / 2) * k });
   }, []);
 
   const rescaleTo = useCallback((w: number, h: number) => {
@@ -305,6 +306,21 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDxf, t.dxf?.layerRoles, t.dxf?.units, size]);
+  // the selected (counted) drawing fills the screen: when the plan opens, when another drawing is chosen, after full screen
+  const regionKey = t.dxf?.region ? t.dxf.region.map((v) => Math.round(v)).join(",") : "";
+  const zoomedTo = useRef<string | null>(null);
+  const zoomToSelected = useCallback(() => {
+    const r = t.dxf?.region;
+    if (r) fitBox(r); else if (size) fit(size.w, size.h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionKey, size, fit, fitBox]);
+  useEffect(() => {
+    if (!isDxf || !size || zoomedTo.current === regionKey) return;
+    zoomedTo.current = regionKey;
+    if (!regionKey) return;
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => zoomToSelected()));
+    return () => cancelAnimationFrame(id);
+  }, [isDxf, size, regionKey, zoomToSelected]);
   const needPick = !!(isDxf && t.dxf && !t.dxf.region && candidates.length > 1 && !canEdit);
   const [choosing, setChoosing] = useState(false);          // user asked to pick another drawing
   const [autoNote, setAutoNote] = useState<string | null>(null);
@@ -580,8 +596,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           <span className="mx-1 h-5 w-px bg-graphite-700" />
           <IconBtn label="Zoom out" onClick={() => zoomAt(1 / 1.3)}><Minus className="size-4" /></IconBtn>
           <IconBtn label="Zoom in" onClick={() => zoomAt(1.3)}><Plus className="size-4" /></IconBtn>
-          <IconBtn label="Fit to screen" onClick={() => size && fit(size.w, size.h)}><Maximize className="size-4" /></IconBtn>
-          <IconBtn label={full ? "Exit full screen" : "Full screen"} onClick={() => { setFull((v) => !v); requestAnimationFrame(() => requestAnimationFrame(() => size && fit(size.w, size.h))); }}>{full ? <Minimize className="size-4" /> : <Maximize className="size-4 rotate-45" />}</IconBtn>
+          <IconBtn label={t.dxf?.region ? "Zoom to the selected drawing" : "Fit to screen"} onClick={zoomToSelected}><Maximize className="size-4" /></IconBtn>
+          <IconBtn label={full ? "Exit full screen" : "Full screen"} onClick={() => { setFull((v) => !v); requestAnimationFrame(() => requestAnimationFrame(() => zoomToSelected())); }}>{full ? <Minimize className="size-4" /> : <Maximize className="size-4 rotate-45" />}</IconBtn>
           {isDxf ? (
             <>
               <span className="mx-1 h-5 w-px bg-graphite-700" />
@@ -590,9 +606,10 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
               <button type="button" onClick={() => setShowNames((v) => !v)} title="Outline and name every drawing in the file"
                 className={cls("inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs", showNames ? "bg-graphite-700 text-graphite-50" : "text-graphite-400 hover:bg-graphite-800")}><Tag className="size-4" />Names</button>
               {parts.length > 1 ? (
-                <select value="" onChange={(e) => { const pt = parts.find((q) => q.n === Number(e.target.value)); if (pt) fitBox(pt.px); }}
+                <select value="" onChange={(e) => { if (e.target.value === "all") { if (size) fit(size.w, size.h); return; } const pt = parts.find((q) => q.n === Number(e.target.value)); if (pt) fitBox(pt.px); }}
                   className="max-w-[220px] rounded-md border border-graphite-700 bg-graphite-950 px-2 py-1 text-xs text-graphite-100" aria-label="Go to drawing">
                   <option value="">Go to drawing… ({parts.length})</option>
+                  <option value="all">Whole file</option>
                   {parts.map((q) => <option key={q.n} value={q.n}>{q.n}. {q.title}{q.sub ? ` — ${q.sub}` : ""}</option>)}
                 </select>
               ) : null}
@@ -993,7 +1010,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
             <div className="mb-2 rounded-md border border-signal-green/30 bg-signal-green/10 px-2.5 py-2 text-xs text-graphite-200">
               <p>
                 <b>Counting:</b> {current ? `${current.title ?? `Drawing ${current.n}`} (${current.w.toFixed(1)} × ${current.h.toFixed(1)} m)` : currentPart ? `${currentPart.title} (${currentPart.w.toFixed(1)} × ${currentPart.h.toFixed(1)} m)` : t.dxf.region ? "your marked region" : "whole drawing"}
-                {canEdit ? <button type="button" onClick={() => setChoosing((v) => !v)} className="ml-2 underline hover:text-signal-amber">{choosing ? "Cancel" : "Choose another drawing"}</button> : null}
+                {canEdit ? <button type="button" onClick={() => { if (!choosing && size) fit(size.w, size.h); else if (choosing) zoomToSelected(); setChoosing((v) => !v); }} className="ml-2 underline hover:text-signal-amber">{choosing ? "Cancel" : "Choose another drawing"}</button> : null}
                 {canEdit ? <button type="button" onClick={() => { if (window.confirm("Read the drawing again? The typical floor, number of floors and floor height are picked again from the drawing (your other figures stay).")) detect(true); }} className="ml-2 inline-flex items-center gap-1 underline hover:text-signal-amber"><RefreshCw className="size-3" />Read drawing again</button> : null}
               </p>
               {autoNote ?? t.auto?.note ? <p className="mt-1 text-graphite-400">Read from the drawing when first opened: {autoNote ?? t.auto?.note} Your own changes are never overwritten.</p> : null}
