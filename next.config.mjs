@@ -1,6 +1,6 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** Plain JS config, so the server does not have to install TypeScript at start-up (slow start → failed health checks). */
+/** @type {import("next").NextConfig} */
+const nextConfig = {
   // @react-pdf/renderer must run as a normal Node package on the server
   serverExternalPackages: ["@react-pdf/renderer"],
   poweredByHeader: false,
