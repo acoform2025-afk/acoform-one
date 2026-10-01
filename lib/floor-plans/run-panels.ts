@@ -32,7 +32,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   const opt = readOptions(q);
   const rules = await loadRules(supabase);
   const inp = panelInputs(t, model, rules);
-  const o: PanelOptions = { ...opt, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns };
+  const o: PanelOptions = { ...opt, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns, stairSets: inp.stairSets };
   const result = layoutFloor(inp.faces, inp.decks, inp.beams, inp.corners, (catalog ?? []).map((c) => ({ ...c, width_mm: Number(c.width_mm), height_mm: Number(c.height_mm), weight_kg: Number(c.weight_kg), area_sqm: Number(c.area_sqm) })) as CatPanel[], o);
   const lead = Array.isArray(plan.leads) ? plan.leads[0] : plan.leads;
   return { plan, lead, t, opt, totals: inp.totals, result, shell: inp.shell, error: null };

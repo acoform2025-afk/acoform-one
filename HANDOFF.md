@@ -98,3 +98,8 @@ returns and repairs.
 - Takeoff.nonTypical rows (label, area_m2) = extra formwork for first floor / terrace / refuge etc., added once.
 - Totals: typical_quote = contact × (1 + extra%); nontypical_area; quote_area = typical_quote + nontypical_area (the "Formwork set" used by quotations).
 - Area sheet shows ADD x%, then "ADDITIONAL FOR NON-TYPICAL FLOORS" and "FORMWORK SET". Download buttons: plan page header, take-off sidebar, quotation floor-plan card.
+
+## Panel BOM: lintel beams + staircase sets + specials summary
+- panel-input: auto wall-opening gaps become beam runs "LB" (b = wall thickness, d = beam depth, 2 sides + bottom) when no beams are typed in — same rule as the area take-off. Staircase lines of the take-off (group "extra") go to the BOM as one custom "set" each (PanelOptions.stairSets).
+- summary.specials {types, pcs, area} shown on the panels page ("Special panels (this project)").
+- Gorwa check: 2,317 m² of panels, 17.8 kg/m², 75.5 % standard; specials mostly 525 mm wall tops (2925 clear − 2400).

@@ -89,7 +89,7 @@ export type DxfAuto = {
   stairBoxes?: [number, number, number, number][];  // drawing units
   gapSpan?: number;                                 // openings in wall lines (door / window / passage widths), m
   gapCount?: number;
-  gaps?: { a: Pt; b: Pt; span: number }[];          // drawing units
+  gaps?: { a: Pt; b: Pt; span: number; thk?: number }[];  // a, b in drawing units; span, thk in m
 };
 
 export type Totals = {

@@ -20,13 +20,13 @@ export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };              
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean }; // mm
 export type ColumnRun = { code: string; w: number; d: number; h: number; qty: number; round: boolean; perimeter: number };   // mm
 export type ElementRow = { kind: "column" | "beam" | "deck"; code: string; size: string; qty: number; area: number; detail: string };
-export type PanelOptions = { tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
+export type PanelOptions = { stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string };
 export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo };
 export type PanelResult = {
   bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[];
-  summary: { panelArea: number; weight: number; accessoryWeight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
+  summary: { specials: { types: number; pcs: number; area: number }; panelArea: number; weight: number; accessoryWeight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
 };
 
 const STEP = 50;
@@ -284,6 +284,11 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     else byCode.set("PROP", { code: "PROP", description: "Adjustable steel prop (beams)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: 0, custom: false, unit: "nos" });
   }
 
+  // staircases: made as a project-specific set (area as measured / company allowance)
+  for (const st of o.stairSets ?? []) {
+    byCode.set(`ST:${st.code}`, { code: st.code, description: `${st.label} — staircase formwork set (custom)`, group: "filler", w: 0, h: 0, qty: 1, area: st.area, weight: st.area * o.kgPerM2, custom: true, unit: "set" });
+  }
+
   // pins & wedges on every panel edge (≤ 300 mm c/c, each joint shared by two panels) + 5% spares
   let edge = 0;
   for (const r of byCode.values()) if (r.group !== "accessory" && r.w > 0 && r.h > 0) edge += 2 * (r.w + r.h) * r.qty;
@@ -315,6 +320,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   return {
     bom, faces: layouts, elements,
     summary: {
+      specials: (() => { const c = bom.filter((r) => r.custom && r.group !== "accessory"); return { types: c.length, pcs: c.reduce((s, r) => s + r.qty, 0), area: Math.round(c.reduce((s, r) => s + r.area, 0) * 100) / 100 }; })(),
       panelArea: Math.round(panelArea * 100) / 100, weight: Math.round(weight), accessoryWeight: Math.round(accessoryWeight), standardPct: panelArea ? Math.round((stdArea / panelArea) * 1000) / 10 : 0,
       faceCount: layouts.length, faceLength: Math.round(faceLen) / 1000, deckFillArea: Math.round(fillArea * 100) / 100, props,
       kgPerM2: panelArea ? Math.round((weight / panelArea) * 10) / 10 : 0, warnings,

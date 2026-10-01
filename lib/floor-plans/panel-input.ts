@@ -147,7 +147,15 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     if (L > 100) beams.push({ code: "BL", length: L, b: 0, d: t.params.beamDepthMm ?? 600, sides: 1, bottom: false });
   }
 
+  // beams / lintels over openings found in the wall lines (same rule as the area take-off)
+  if (auto?.gaps?.length && t.params.autoLintels !== false && !(t.beams ?? []).some((b) => b.qty > 0 && b.length_m > 0)) {
+    const D = Number(t.params.beamDepthMm) || 600;
+    for (const gp of auto.gaps) {
+      beams.push({ code: "LB", length: gp.span * 1000, b: Math.round((gp.thk ?? 0.15) * 1000), d: D, sides: 2, bottom: true });
+    }
+  }
   const totals: Totals = computeTotals(t, auto, rules);
+  const stairSets = (totals.items ?? []).filter((i) => i.group === "extra" && i.area > 0).map((i) => ({ code: i.code, label: i.label, area: i.area }));
 
   // columns (mm): drawn, typed in by size, and from the DXF column layer — same sizes grouped
   const colMap = new Map<string, ColumnRun>();
@@ -169,5 +177,5 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   for (const c of auto?.columns ?? []) addCol(c.w * 1000, c.d * 1000, H, c.area < 0.85 * c.w * c.d, c.perimeter * 1000, 1);
   const columns = [...colMap.values()].sort((a, b) => b.qty - a.qty);
 
-  return { faces, decks, beams, corners, openings, columns, totals, shell: g };
+  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets };
 }

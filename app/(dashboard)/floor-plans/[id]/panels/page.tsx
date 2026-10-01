@@ -61,12 +61,13 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
         <button className="rounded-md border border-graphite-700 px-3 py-1.5 font-medium text-graphite-100 hover:bg-graphite-800">Re-run layout</button>
       </form>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-6">
         {[
           ["Panel area", `${n2(s.panelArea)} m²`],
           ["Panel weight", `${n0(s.weight)} kg${s.accessoryWeight ? ` + ${n0(s.accessoryWeight)} kg accessories` : ""}`],
           ["Average", `${s.kgPerM2} kg/m²`],
           ["Standard panels", `${s.standardPct}% of area`],
+          ["Special panels (this project)", `${s.specials.types} types · ${s.specials.pcs} pcs · ${n2(s.specials.area)} m²`],
           ["Formwork contact area", fmtArea(totals.contact_area)],
         ].map(([k, v]) => (
           <div key={k} className="rounded-lg border border-graphite-800 bg-graphite-900 p-3">

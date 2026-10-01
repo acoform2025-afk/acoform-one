@@ -415,7 +415,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,
     ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
-    ...(() => { const g = wallGaps(U.rings, u); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span })) }; })(),
+    ...(() => { const g = wallGaps(U.rings, u); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })) }; })(),
   };
 }
 
