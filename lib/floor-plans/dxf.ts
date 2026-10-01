@@ -53,6 +53,7 @@ function suggestRole(name: string): LayerRole {
   if (/beam|(^|[^a-z])bm([^a-z]|$)/.test(n)) return "beams";
   if (/wall|shear|brick|masonry|(^|[^a-z])rcc([^a-z]|$)|_rcc$|(^|[^a-z])wl([^a-z]|$)/.test(n)) return "walls";
   if (/shaft|cut ?out|opening|duct|lift|stair.?open/.test(n)) return "opening";
+  if (/^[a-z]-flor$|^a-flor-mcut$/.test(n)) return "slab";          // Revit floor edges
   if (/slab|outline|boundary|plate|periphery|edge|built.?up/.test(n)) return "slab";
   return "ignore";
 }
@@ -414,7 +415,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     columns: cols,
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,
-    ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
+    ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
     ...(() => { const g = wallGaps(U.rings, u); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })) }; })(),
   };
 }
@@ -437,9 +438,9 @@ function floorsFromTitle(t: string): number | undefined {
 /** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
 function titleFor(texts: DxfText[], box: [number, number, number, number]): string | undefined {
   const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
-  const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.1)
+  const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.2)
     .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
-    .filter((t) => /plan|section|elevation|layout|floor/i.test(t.text) && t.text.length >= 4);
+    .filter((t) => /plan|section|elevation|layout|floor|block|tower|wing/i.test(t.text) && t.text.length >= 4);
   near.sort((a, b) => b.h - a.h || (/typical/i.test(b.text) ? 1 : 0) - (/typical/i.test(a.text) ? 1 : 0));
   return near[0]?.text;
 }
@@ -528,7 +529,7 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
     if (title) {
       if (/typical/i.test(title)) f = 4;
       else if (BAD_TITLE.test(title)) f = 0.25;
-      else if (/floor\s*plan|plan/i.test(title)) f = 1.5;
+      else if (/floor\s*plan|plan|block|tower|wing/i.test(title)) f = 1.5;
       o.floors = floorsFromTitle(title);
     }
     const aspect = Math.max(o.w, o.h) / Math.max(0.1, Math.min(o.w, o.h));

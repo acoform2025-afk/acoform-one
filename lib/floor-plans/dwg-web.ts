@@ -42,7 +42,9 @@ function bulged(vs: { x: number; y: number; bulge?: number }[], closed: boolean)
 
 /** Layers that never carry formwork geometry (furniture, sanitary fittings, hatching, dimensions, trees, cars…) —
  *  left out so big drawings stay small. Walls, slabs, columns, beams, openings, stairs, levels and titles are kept. */
-export const SKIP_LAYER = /furn|furniture|(^|[_\-\s$])fur($|[_\-\s])|p_fur|sanit|fixture|fitting|plumb|hatch|^dim|[_\-\s$]dim|dimension|tree|plant|landscap|vehicle|(^|[_\-\s])car($|[_\-\s])|people|human|tile|flooring|pattern/i;
+export const SKIP_LAYER = /furn|furniture|(^|[_\-\s$])fur($|[_\-\s])|p_fur|sanit|fixture|fitting|plumb|hatch|^dim|[_\-\s$]dim|dimension|tree|plant|landscap|vehicle|(^|[_\-\s])car($|[_\-\s])|people|human|tile|flooring|pattern|fixt|sanr|^a-genm|^a-detl|^a-glaz|^a-door|^a-flor-hral|^q-spcq|^q-case|^e-comm|^i-|-patt($|[_\-\s])/i;
+/** Revit / AutoCAD views that are not plans (sections, elevations, 3D, schedules) — whole blocks are left out. */
+export const SKIP_BLOCK = /section|elevation|(^|[^a-z])elev([^a-z]|$)|(^|[^a-z0-9])3d([^a-z0-9]|$)|isometric|schedule|legend|detail/i;
 
 /** DwgDatabase (from libredwg-web `convert`) → DXF text. */
 export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string; count: number } {
@@ -90,7 +92,7 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
           break;
         }
         case "INSERT": {
-          const b = blocks.get(e.name); if (!b || depth > 6 || !b.entities?.length) break;
+          const b = blocks.get(e.name); if (!b || depth > 6 || !b.entities?.length || SKIP_BLOCK.test(String(e.name))) break;
           const rot = ok(e.rotation) ? e.rotation : 0, sx = ok(e.xScale) && e.xScale ? e.xScale : 1, sy = ok(e.yScale) && e.yScale ? e.yScale : 1;
           const ip = e.insertionPoint ?? { x: 0, y: 0 }, bp = b.basePoint ?? { x: 0, y: 0 };
           const t: Xf = [Math.cos(rot) * sx, Math.sin(rot) * sx, -Math.sin(rot) * sy, Math.cos(rot) * sy, ip.x ?? 0, ip.y ?? 0];

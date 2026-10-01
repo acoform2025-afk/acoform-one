@@ -120,3 +120,8 @@ returns and repairs.
 ## Big DWG uploads
 - Browser DWG→DXF skips layers that never carry formwork geometry (SKIP_LAYER in dwg-web.ts: furniture, sanitary, fixtures, hatch, dimensions, trees, cars, tiles…; their TEXT is kept) and writes coordinates to 0.01 mm. plot2.dwg: 95,885 → 3,778 entities.
 - source.dxf is stored gzip-compressed (~8×); lib/floor-plans/dxf-text.ts dxfTextFromBlob() reads plain or gzip on both browser and server (take-off, run-panels, shell-plan, area-sheet). Old plain uploads still read.
+
+## Revit DWG uploads (TO-01 fix)
+- Revit exports carry huge generic/detail/glazing/door/sanitary layers (A-GENM, A-DETL*, A-GLAZ*, A-DOOR*, P-SANR-FIXT, Q-SPCQ…) that hit the 400k entity cap before the unit plans were written. `SKIP_LAYER` now drops them; `SKIP_BLOCK` skips section / elevation / 3D / schedule / legend / detail blocks.
+- TO-01: 400k (capped, 50 MB) → 49k entities, 4.6 MB; Block A–D plans present.
+- Revit names: A-FLOR / A-FLOR-MCUT → slab, S-STRS* → stairs. Drawing titles may be "BLOCK-A" / "TOWER" / "WING".
