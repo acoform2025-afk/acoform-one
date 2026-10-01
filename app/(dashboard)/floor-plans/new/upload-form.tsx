@@ -62,7 +62,10 @@ export function UploadFloorPlanForm({ tenantId, leads, leadId, quotationId }: { 
         if (dxf) {
           setBusy("Saving drawing…");
           const dxfPath = `${tenantId}/${id}/source.dxf`;
-          const up2 = await bucket.upload(dxfPath, new Blob([dxf], { type: "application/dxf" }), { contentType: "application/dxf" });
+          // saved gzip-compressed (~10× smaller) so big drawings fit the storage limit
+          const { gzipText } = await import("@/lib/floor-plans/dxf-text");
+          const packed = await gzipText(dxf); dxf = null;
+          const up2 = await bucket.upload(dxfPath, packed, { contentType: "application/dxf" });
           if (up2.error) throw new Error(up2.error.message.includes("exceeded") ? "The drawing is too large once converted. Delete unused sheets / PURGE in AutoCAD and try again." : "Upload failed: " + up2.error.message);
           res = await createFloorPlan({ ...base, sourceKind: "dxf", filePath: dxfPath, originalPath: path });
         } else if (file.size < 1.5 * 1024 * 1024) {

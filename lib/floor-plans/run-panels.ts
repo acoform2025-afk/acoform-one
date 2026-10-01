@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { readDxf, type DxfModel } from "./dxf";
 import { panelInputs } from "./panel-input";
 import { loadRules } from "./rules";
@@ -24,7 +25,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   let model: DxfModel | null = null;
   if (plan.source_kind === "dxf") {
     const { data: blob } = await supabase.storage.from("floor-plans").download(plan.file_path);
-    if (blob) { try { model = readDxf(await blob.text()); } catch { model = null; } }
+    if (blob) { try { model = readDxf(await dxfTextFromBlob(blob)); } catch { model = null; } }
   }
   const { data: catalog } = await supabase.from("panel_master")
     .select("id, panel_code, panel_category, width_mm, height_mm, weight_kg, area_sqm").eq("is_active", true);

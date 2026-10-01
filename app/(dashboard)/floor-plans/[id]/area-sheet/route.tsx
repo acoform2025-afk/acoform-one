@@ -1,4 +1,5 @@
 import { renderToBuffer } from "@react-pdf/renderer";
+import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { createClient } from "@/lib/supabase/server";
 import { computeTotals, UNIT_TO_M, type DxfAuto, type Takeoff } from "@/lib/floor-plans/calc";
 import { loadRules } from "@/lib/floor-plans/rules";
@@ -27,7 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   let model: DxfModel | null = null;
   if (plan.source_kind === "dxf") {
     const { data: blob } = await supabase.storage.from("floor-plans").download(plan.file_path);
-    if (blob) { try { model = readDxf(await blob.text()); } catch { model = null; } }
+    if (blob) { try { model = readDxf(await dxfTextFromBlob(blob)); } catch { model = null; } }
   }
   let auto: DxfAuto | null = null;
   if (model && t.dxf) {

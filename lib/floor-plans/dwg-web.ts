@@ -40,6 +40,10 @@ function bulged(vs: { x: number; y: number; bulge?: number }[], closed: boolean)
   return out;
 }
 
+/** Layers that never carry formwork geometry (furniture, sanitary fittings, hatching, dimensions, trees, cars…) —
+ *  left out so big drawings stay small. Walls, slabs, columns, beams, openings, stairs, levels and titles are kept. */
+export const SKIP_LAYER = /furn|furniture|(^|[_\-\s$])fur($|[_\-\s])|p_fur|sanit|fixture|fitting|plumb|hatch|^dim|[_\-\s$]dim|dimension|tree|plant|landscap|vehicle|(^|[_\-\s])car($|[_\-\s])|people|human|tile|flooring|pattern/i;
+
 /** DwgDatabase (from libredwg-web `convert`) → DXF text. */
 export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string; count: number } {
   const blocks = new Map<string, any>();
@@ -48,7 +52,7 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
   const top: any[] = ms?.entities ?? (db?.entities ?? []).filter((e: any) => !e.ownerBlockRecordSoftId || e.ownerBlockRecordSoftId === ms?.handle);
   const out: string[] = [];
   let count = 0;
-  const f = (v: number) => (Math.round(v * 1e4) / 1e4).toString();
+  const f = (v: number) => (Math.round(v * 100) / 100).toString();
   const poly = (layer: string, pts: [number, number][], closed: boolean) => {
     const P = pts.filter((p) => ok(p[0]) && ok(p[1]));
     if (P.length < 2 || count >= maxEntities) return;
@@ -61,6 +65,7 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
     for (const e of ents ?? []) {
       if (count >= maxEntities) return;
       const layer = String((e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0")).replace(/[\r\n]/g, " ");
+      if (SKIP_LAYER.test(layer) && e.type !== "TEXT" && e.type !== "MTEXT") continue;
       const T = (pts: [number, number][]) => pts.map(([x, y]) => ap(m, x, y));
       switch (e.type) {
         case "LINE": if (e.startPoint && e.endPoint) poly(layer, T([[e.startPoint.x, e.startPoint.y], [e.endPoint.x, e.endPoint.y]]), false); break;

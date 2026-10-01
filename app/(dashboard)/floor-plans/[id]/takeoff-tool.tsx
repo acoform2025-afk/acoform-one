@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { useRouter } from "next/navigation";
 import {
   AppWindow, Check, Crop, DoorOpen, FileDown, Hand, Layers, Loader2, MoveVertical, Maximize, Minus, MousePointer2, PenLine, Plus, Ruler, Save, Square, SquareDashed, Trash2, Undo2, X, Columns3,
@@ -159,7 +160,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         if (!res.ok) throw new Error("Could not download the plan file.");
         let dims: { w: number; h: number };
         if (plan.source_kind === "dxf") {
-          const model = readDxf(await res.text());
+          const model = readDxf(await dxfTextFromBlob(await res.blob()));
           if (cancelled) return;
           modelRef.current = model;
           const saved = normalise(plan.takeoff);

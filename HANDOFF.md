@@ -116,3 +116,7 @@ returns and repairs.
 ## Wall modulation drawings
 - /floor-plans/[id]/panels/modulation → A3 PDF: sheet 1 schedule of face types (identical faces grouped: M01 × n, length, height, panel string, top, filler, face codes); then elevations 2 × 3 per sheet at one common scale with panel widths, wall-top pieces, fillers (red), tie dots (engineering tie spacing), length/height dimensions. lib/pdf/modulation-document.tsx. Button "Modulation drawings PDF" on the panels page.
 - Gorwa: 270 faces → 30 types, 6 sheets.
+
+## Big DWG uploads
+- Browser DWG→DXF skips layers that never carry formwork geometry (SKIP_LAYER in dwg-web.ts: furniture, sanitary, fixtures, hatch, dimensions, trees, cars, tiles…; their TEXT is kept) and writes coordinates to 0.01 mm. plot2.dwg: 95,885 → 3,778 entities.
+- source.dxf is stored gzip-compressed (~8×); lib/floor-plans/dxf-text.ts dxfTextFromBlob() reads plain or gzip on both browser and server (take-off, run-panels, shell-plan, area-sheet). Old plain uploads still read.
