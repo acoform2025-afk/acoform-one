@@ -48,6 +48,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
         </div>
         <div className="flex flex-wrap gap-2">
           <a href={`/floor-plans/${id}/panels/drawing?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Layout drawing PDF</a>
+          <a href={`/floor-plans/${id}/panels/modulation?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />Modulation drawings PDF</a>
           <a href={`/floor-plans/${id}/panels/drawing?${qs}&format=dxf`} className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Layout DXF</a>
           <a href={`/floor-plans/${id}/panels/export?${qs}&format=csv`} className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Excel (CSV)</a>
           <a href={`/floor-plans/${id}/panels/export?${qs}&format=pdf`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />BOM PDF</a>

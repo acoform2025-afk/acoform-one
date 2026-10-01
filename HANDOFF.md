@@ -112,3 +112,7 @@ returns and repairs.
 ## Estimator's own figures (override)
 - params.slabM2 / ductM2 / wallLenM / beamLenM (+ existing wallTopM2) replace the drawing-read values in computeTotals; take-off panel "Use your own measured figures" shows the drawing value beside each box.
 - Gorwa: entering 461.54 / 18.2 / 565.72 / 119.09 / 36.45 gives 2215.21 m² (+10 % = 2436.73) — identical to ACOFORM's sheet. Auto: 2192.83 (ducts 9.72 vs 18.2 — 4 shafts not detected; walls 555.52 vs 565.72; beams 112.48 vs 119.09; slab 463.52 vs 461.54).
+
+## Wall modulation drawings
+- /floor-plans/[id]/panels/modulation → A3 PDF: sheet 1 schedule of face types (identical faces grouped: M01 × n, length, height, panel string, top, filler, face codes); then elevations 2 × 3 per sheet at one common scale with panel widths, wall-top pieces, fillers (red), tie dots (engineering tie spacing), length/height dimensions. lib/pdf/modulation-document.tsx. Button "Modulation drawings PDF" on the panels page.
+- Gorwa: 270 faces → 30 types, 6 sheets.
