@@ -52,7 +52,8 @@ function PlanSvg({ zones, walls, box, w, h, numbers, codes }: { zones: Zone[]; w
   const fs = (pt: number) => pt / sc;
   const inBox = (b: number[]) => b[2] >= bx0 && b[0] <= bx0 + bw && b[3] >= by0 && b[1] <= by0 + bh;
   // walls as one even-odd path (outer rings and their holes)
-  const wallPath = walls.map((r) => d(r)).join(" ");
+  const near = walls.filter((r) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of r) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return inBox([x0, y0, x1, y1]); });
+  const wallPath = near.map((r) => d(r)).join(" ");
   return (
     <Svg width={bw * sc} height={bh * sc} viewBox={`${bx0} ${by0} ${bw} ${bh}`}>
       {zones.filter((z) => inBox(z.box)).map((z) => (
@@ -104,9 +105,11 @@ export function InstallationDocument({ zones, walls, wallPanels, info }: { zones
   const big = zones.filter((z) => z.panels.length > 60), small = zones.filter((z) => z.panels.length <= 60);
   const zonePages: Zone[][] = [...big.map((z) => [z]), ...chunk(small, 4)];
   const deckRows = all.map((p) => ({ no: p.no, zone: p.no.split("-")[0], code: p.code, size: `${p.w} × ${p.L}`, special: p.custom }));
-  const listRows = [...deckRows.map((r) => [r.no, r.zone, r.code, r.size, r.special ? "special" : ""]), ...wallPanels.map((r) => [r.no, r.face, r.code, `${r.w} × ${r.h}`, /^WF|^WT/.test(r.code) ? "special" : ""])];
+  // deck panels in the PDF list; the full list (deck + every wall panel) is the Excel download
+  const listRows = deckRows.map((r) => [r.no, r.zone, r.code, r.size, r.special ? "special" : ""]);
   const PER = 4 * 46;
-  const listPages = chunk(listRows, PER);
+  // the per-zone tables already list every number; the full list is the Excel download (keeps the PDF light)
+  const listPages: string[][][] = listRows.length > 400 ? [] : chunk(listRows, PER);
   const totalPages = 1 + zonePages.length + listPages.length;
   let pg = 0;
   const stdCount = all.filter((p) => !p.custom).length;
@@ -150,7 +153,7 @@ export function InstallationDocument({ zones, walls, wallPanels, info }: { zones
       })}
       {listPages.map((rows, i) => (
         <Page key={`l${i}`} size="A3" orientation="landscape" style={pageStyle}>
-          <Text style={{ fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>PANEL NUMBERING LIST {i === 0 ? `(${deckRows.length} deck panels · ${wallPanels.length} wall panels)` : "(continued)"}</Text>
+          <Text style={{ fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>DECK PANEL NUMBERING LIST {i === 0 ? `(${deckRows.length} deck panels — wall panels (${wallPanels.length}) are numbered F12-01 … in the Excel numbering list)` : "(continued)"}</Text>
           <View style={{ flexDirection: "row" }}>
             {chunk(rows, 46).map((col, c) => (
               <View key={c} style={{ width: "25%", paddingRight: 6, fontSize: 6.6 }}>
