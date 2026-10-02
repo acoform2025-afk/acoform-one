@@ -424,6 +424,68 @@ function stairClusters(paths: DxfPath[], u: number): [number, number, number, nu
   return [...grp.values()].filter((b) => (b[2] - b[0]) * u >= 2 && (b[3] - b[1]) * u >= 2) as [number, number, number, number][];
 }
 
+/**
+ * Flights measured from the tread lines on the stair layers inside one staircase box: parallel lines of about the
+ * same length at a regular 220–350 mm spacing make a flight (width = line length, tread = spacing, treads = lines).
+ * The landing is what is left of the box beside the flights. Units: mm (via u).
+ */
+export type StairMeasure = { box: [number, number, number, number]; flights: { width: number; treads: number; tread: number }[]; landingM2: number };
+export function measureStairs(paths: DxfPath[], boxes: [number, number, number, number][], u: number): StairMeasure[] {
+  const mm = u * 1000;
+  const out: StairMeasure[] = [];
+  for (const box of boxes) {
+    type Seg = { a: Pt; b: Pt; L: number; ang: number };
+    const segs: Seg[] = [];
+    for (const p of paths) for (let i = 1; i < p.pts.length; i++) {
+      const a = p.pts[i - 1], b = p.pts[i];
+      if (a[0] < box[0] - 1 || a[0] > box[2] + 1 || a[1] < box[1] - 1 || a[1] > box[3] + 1) continue;
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) * mm; if (L < 600 || L > 3000) continue;         // a tread line: 0.6–3 m
+      let ang = Math.atan2(b[1] - a[1], b[0] - a[0]); if (ang < 0) ang += Math.PI; if (ang >= Math.PI - 0.02) ang = 0;
+      segs.push({ a, b, L, ang });
+    }
+    // group by direction (5°) and length (10 %)
+    const groups = new Map<string, Seg[]>();
+    for (const sg of segs) { const k = `${Math.round(sg.ang / (Math.PI / 36))}:${Math.round(Math.log(sg.L) / 0.1)}`; (groups.get(k) ?? groups.set(k, []).get(k)!).push(sg); }
+    const flights: StairMeasure["flights"] = [];
+    let flightArea = 0;
+    for (const g of groups.values()) {
+      if (g.length < 3) continue;
+      const ux = Math.cos(g[0].ang), uy = Math.sin(g[0].ang);
+      // offset of each line across its direction; lines that overlap along the direction belong to the same flight
+      const all = g.map((sg) => ({ off: ((sg.a[0] + sg.b[0]) / 2) * -uy + ((sg.a[1] + sg.b[1]) / 2) * ux, along: ((sg.a[0] + sg.b[0]) / 2) * ux + ((sg.a[1] + sg.b[1]) / 2) * uy, L: sg.L })).sort((p1, p2) => p1.along - p2.along);
+      // flights side by side (same direction, different position along the lines) are split first
+      const clusters: (typeof all)[] = [];
+      for (const r2 of all) { const c = clusters[clusters.length - 1]; if (c && Math.abs(r2.along - c[c.length - 1].along) * mm <= 0.5 * r2.L) c.push(r2); else clusters.push([r2]); }
+      for (const cl of clusters) {
+        const rows = cl.sort((p1, p2) => p1.off - p2.off).filter((r2, i, arr) => i === 0 || (r2.off - arr[i - 1].off) * mm >= 20);   // the same line drawn twice counts once
+        let run: typeof rows = [];
+        const flush = () => {
+          if (run.length >= 3) {
+            const sp = run.slice(1).map((r2, i) => (r2.off - run[i].off) * mm), tread = sp.reduce((s2, v) => s2 + v, 0) / sp.length;
+            const width = run.reduce((s2, r2) => s2 + r2.L, 0) / run.length;
+            flights.push({ width: Math.round(width / 5) * 5, treads: run.length, tread: Math.round(tread / 5) * 5 });
+            flightArea += (run.length * tread) * width;
+          }
+          run = [];
+        };
+        for (const r2 of rows) {
+          const prev = run[run.length - 1];
+          if (prev && ((r2.off - prev.off) * mm < 220 || (r2.off - prev.off) * mm > 350)) flush();
+          run.push(r2);
+        }
+        flush();
+      }
+    }
+    if (!flights.length) continue;
+    const boxA = (box[2] - box[0]) * (box[3] - box[1]) * mm * mm;
+    // landing: the rest of the box, else (landing lines not on the stair layer) a landing as deep as the flights are wide
+    const sumW = flights.reduce((s2, fl) => s2 + fl.width, 0), avgW = sumW / flights.length;
+    const landingM2 = Math.max(Math.max(0, Math.min(boxA - flightArea, 2 * sumW * avgW)), flights.length > 1 ? sumW * avgW : 0) / 1e6;
+    out.push({ box, flights, landingM2: Math.round(landingM2 * 100) / 100 });
+  }
+  return out;
+}
+
 const closeRing = (r: Pt[]): [number, number][] => { const o = r.map((q) => [q[0], q[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
 
 /**
@@ -770,7 +832,11 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       return out;
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
-    ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
+    ...(() => {
+      const sp = model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)|楼梯/i.test(p.layer) && !/lift|elev|note|text|anno|iden/i.test(p.layer) && (!keep || keep(p)));
+      const s = stairClusters(sp, u);
+      return { stairCount: s.length, stairBoxes: s, stairsMeasured: measureStairs(sp, s, u) };
+    })(),
     ...(() => {
       const g = wallGaps(U.rings, u, paired ? 1.2 : 0);
       // a window in the gap (window / glazing lines between the two wall ends) has a sill wall under it

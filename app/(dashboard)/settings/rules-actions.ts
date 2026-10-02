@@ -15,7 +15,7 @@ export async function saveMeasurementRules(_p: { ok?: boolean; error?: string } 
   const rules = normaliseRules({
     minOpeningM2: Number(f("minOpeningM2")), kickerMm: Number(f("kickerMm")), stairAllowanceM2: Number(f("stairAllowanceM2")), extraPct: Number(f("extraPct")),
     slabEdges: on("slabEdges"), reveals: on("reveals"), deductWallTops: on("deductWallTops"), deductColumnTops: on("deductColumnTops"),
-    stairs: on("stairs"), printOnQuote: on("printOnQuote"),
+    stairs: on("stairs"), printOnQuote: on("printOnQuote"), stairBasis: f("stairBasis"),
   });
   const supabase = await createClient();
   const { error } = await supabase.from("measurement_rules").upsert({ tenant_id: profile.tenant_id, rules, updated_at: new Date().toISOString() }, { onConflict: "tenant_id" });

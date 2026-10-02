@@ -3,7 +3,7 @@
  * wall faces, slab polygons (with ducts as holes), beam runs and the number of wall corners.
  */
 import { DEFAULT_RULES, type MeasureRules } from "./rules";
-import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
+import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals, autoStairRows } from "./calc";
 import { closedLoops, dxfAuto, dxfFrame, separateAreas, type DxfModel } from "./dxf";
 import { nearRings, wallUnion } from "./geom";
 import { buildShell } from "./shell";
@@ -217,7 +217,12 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     if (!f || !n || !(Number(st.width_mm) > 0)) continue;
     stairs.push({ code: st.label?.trim() || `ST${i + 1}`, label: st.label?.trim() || `Staircase ${i + 1}`, width: Number(st.width_mm), risers: n, riser: Number(st.riser_mm), tread: Number(st.tread_mm), waist: Number(st.waist_mm) || 150, openSides: Math.max(0, Math.min(2, Math.round(Number(st.open_sides) || 0))), landingM2: Number(st.landing_m2) || 0, flights: f, sets: 1, assumed: false });
   }
-  const measured = (lbl: string, calc: string) => /soffit/.test(calc) && /flight/.test(lbl);
+  // staircases measured from the drawing's tread lines (no typed rows): real flights, not the assumed dog-leg
+  if (!stairs.length) for (const [i, st] of autoStairRows(auto, t.params.floorHeight).entries()) {
+    const r = st.row;
+    stairs.push({ code: `ST${i + 1}`, label: `Staircase ${i + 1} (measured) — ${st.desc}`, width: r.width_mm, risers: r.risers, riser: r.riser_mm, tread: r.tread_mm, waist: r.waist_mm, openSides: r.open_sides ?? 1, landingM2: r.landing_m2 ?? 0, flights: r.flights, sets: 1, assumed: false });
+  }
+  const measured = (lbl: string, calc: string) => /soffit/.test(calc) && (/flight/.test(lbl) || /measured/.test(lbl));
   const stairSets = (totals.items ?? []).filter((i) => i.group === "extra" && i.area > 0 && !measured(i.label, i.calc)).map((i) => ({ code: i.code, label: i.label, area: i.area }));
   const Hf = Math.round(t.params.floorHeight * 1000);
   for (const ss of stairSets.filter((x) => /stair/i.test(x.label))) {

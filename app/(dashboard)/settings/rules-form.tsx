@@ -35,6 +35,11 @@ export function RulesForm({ r, canEdit }: { r: MeasureRules; canEdit: boolean })
           <input name="kickerMm" type="number" min={0} max={500} step={5} defaultValue={r.kickerMm} disabled={!canEdit} className={input} /></label>
         <label className="flex flex-col gap-1.5"><span className={lbl}>Staircase allowance <span className="normal-case text-graphite-600">(m² per staircase)</span></span>
           <input name="stairAllowanceM2" type="number" min={0} max={2000} step={1} defaultValue={r.stairAllowanceM2} disabled={!canEdit} className={input} /></label>
+        <label className="flex flex-col gap-1.5"><span className={lbl}>Staircase area on the quote</span>
+          <select name="stairBasis" defaultValue={r.stairBasis} disabled={!canEdit} className={input}>
+            <option value="allowance">Allowance per staircase (measured flights shown for information)</option>
+            <option value="measured">Measured from the drawing (soffit, risers, stringers, landings)</option>
+          </select></label>
         <label className="flex flex-col gap-1.5"><span className={lbl}>Default add % <span className="normal-case text-graphite-600">(specials / wastage)</span></span>
           <input name="extraPct" type="number" min={0} max={100} step={1} defaultValue={r.extraPct} disabled={!canEdit} className={input} /></label>
       </div>

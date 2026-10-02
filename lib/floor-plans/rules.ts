@@ -12,13 +12,14 @@ export type MeasureRules = {
   kickerMm: number;           // external kicker height added along the outer slab edge (0 = none)
   stairs: boolean;            // staircases are included in the quoted area
   stairAllowanceM2: number;   // formwork area allowed per staircase found on the drawing (when not measured flight by flight)
+  stairBasis: "allowance" | "measured";   // quoted stair area: the allowance per staircase, or the area measured from the tread lines (soffit, risers, stringers, landings)
   extraPct: number;           // default % added on the typical floor (wastage / specials)
   printOnQuote: boolean;      // print these rules on the quotation
 };
 
 export const DEFAULT_RULES: MeasureRules = {
   minOpeningM2: 0.4, slabEdges: false, reveals: true, deductWallTops: true, deductColumnTops: true,
-  kickerMm: 0, stairs: true, stairAllowanceM2: 100, extraPct: 10, printOnQuote: true,
+  kickerMm: 0, stairs: true, stairAllowanceM2: 100, stairBasis: "allowance", extraPct: 10, printOnQuote: true,
 };
 
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
@@ -40,6 +41,7 @@ export function normaliseRules(raw: unknown): MeasureRules {
     kickerMm: numIn(r.kickerMm, d.kickerMm, 0, 500),
     stairs: bool(r.stairs, d.stairs),
     stairAllowanceM2: numIn(r.stairAllowanceM2, d.stairAllowanceM2, 0, 2000),
+    stairBasis: r.stairBasis === "measured" ? "measured" : d.stairBasis,
     extraPct: numIn(r.extraPct, d.extraPct, 0, 100),
     printOnQuote: bool(r.printOnQuote, d.printOnQuote),
   };
@@ -57,7 +59,7 @@ export function describeRules(r: MeasureRules): string[] {
     "Beam sides below the slab, edge-beam outer faces at full depth and beam bottoms where marked are measured.",
   ];
   if (r.kickerMm > 0) out.push(`External kicker of ${r.kickerMm} mm is added along the outer edge.`);
-  out.push(r.stairs ? `Staircases are included${r.stairAllowanceM2 > 0 ? ` (${r.stairAllowanceM2} m² per staircase unless measured flight by flight)` : " (waist soffit, risers, open stringers, landings)"}.` : "Staircases are excluded.");
+  out.push(r.stairs ? `Staircases are included${r.stairBasis === "measured" || r.stairAllowanceM2 <= 0 ? " (measured: waist soffit, risers, open stringers, landings)" : ` (${r.stairAllowanceM2} m² per staircase unless measured flight by flight)`}.` : "Staircases are excluded.");
   out.push("Openings in wall lines get a beam / lintel up to the slab: both sides measured (depth − slab).");
   out.push("Contact area = formwork in contact with concrete (IS 1200 Part 5).");
   return out;

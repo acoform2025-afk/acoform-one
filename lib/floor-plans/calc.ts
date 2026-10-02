@@ -116,6 +116,7 @@ export type DxfAuto = {
   wallOpenings?: { ring: number; edge: number; t0: number; t1: number; door: boolean; thk: number }[];   // door / window stretches of wall faces (drawing units along wallRings[ring] edge `edge`)
   stairCount?: number;                              // staircases found on stair layers
   stairBoxes?: [number, number, number, number][];  // drawing units
+  stairsMeasured?: { box: [number, number, number, number]; flights: { width: number; treads: number; tread: number }[]; landingM2: number }[];   // flights read from the tread lines (mm)
   beamRingDepth?: number[];                         // mm, depth of each beam ring
   upstands?: { label: string; h: number; length: number; parapet?: boolean }[];   // upstand / planter walls on the slab: h mm, face length m (both faces)
   gapSpan?: number;                                 // openings in wall lines (door / window / passage widths), m
@@ -201,6 +202,28 @@ export function stairBreakdown(st: StairRow) {
   const cheeks = Math.max(0, Math.min(2, Math.round(Number(st.open_sides) || 0))) * (n * R * T / 2 + slope * w);
   const landing = Math.max(0, Number(st.landing_m2) || 0);
   return { f, n, R, T, slope, soffit, risers, cheeks, landing, total: (soffit + risers + cheeks + landing) * f };
+}
+
+/** Stair rows from the flights measured on the drawing: risers per flight = tread lines (+1 where that gives a riser
+ *  nearer 150–180 mm), riser height = floor height ÷ risers of the staircase, one open side per flight (stair well). */
+export function autoStairRows(auto: DxfAuto | null | undefined, floorHeight: number): { row: StairRow; desc: string; width: number }[] {
+  const out: { row: StairRow; desc: string; width: number }[] = [];
+  const H = floorHeight * 1000;
+  for (const st of auto?.stairsMeasured ?? []) {
+    if (!st.flights.length) continue;
+    const lines = st.flights.reduce((s, f) => s + f.treads, 0), nF = st.flights.length;
+    const pick = [lines, lines + nF].map((n) => ({ n, r: H / n })).sort((a, b) => Math.abs(a.r - 165) - Math.abs(b.r - 165))[0];
+    const risersTotal = pick.n, riser = H / risersTotal;
+    if (riser < 120 || riser > 200 || lines < 4) continue;      // not a staircase (a symbol, a ramp): the allowance applies
+    const width = Math.round(st.flights.reduce((s, f) => s + f.width, 0) / nF), tread = Math.round(st.flights.reduce((s, f) => s + f.tread, 0) / nF);
+    // one row for the whole staircase: risers per flight averaged (the area is the same), landing shared
+    out.push({
+      row: { width_mm: width, risers: Math.round(risersTotal / nF), riser_mm: Math.round(riser), tread_mm: tread, waist_mm: 150, open_sides: 1, landing_m2: st.landingM2 / nF, flights: nF },
+      desc: `${nF} flight${nF > 1 ? "s" : ""}, ${risersTotal} risers ${Math.round(riser)}/${tread}, ${(width / 1000).toFixed(2)} m wide${st.landingM2 ? `, landing ${st.landingM2.toFixed(1)} m²` : ""}`,
+      width,
+    });
+  }
+  return out;
 }
 
 export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: Partial<MeasureRules> | null): Totals {
@@ -384,10 +407,20 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     items.push({ code: code("ST", st.label), group: "extra", label: `Staircase${st.label ? ` ${st.label}` : ""} — ${f} flight${f > 1 ? "s" : ""} × ${n} risers ${Math.round(R * 1000)}/${Math.round(T * 1000)}`,
       calc: `${f > 1 ? `${f} × ` : ""}(soffit ${n2(soffit)} + risers ${n2(risers)}${cheeks ? ` + stringers ${n2(cheeks)}` : ""}${landing ? ` + landing soffit ${n2(landing)}` : ""})`, area: a });
   }
-  if (rules.stairs && rules.stairAllowanceM2 > 0 && auto?.stairCount && !(t.stairs ?? []).length && !(t.extras ?? []).some((x) => Number(x.area_m2) > 0)) {
+  // staircases measured from the tread lines on the drawing (riser height from the floor height); else the allowance
+  const noTyped = !(t.stairs ?? []).length && !(t.extras ?? []).some((x) => Number(x.area_m2) > 0);
+  const measuredStairs = rules.stairs && noTyped ? autoStairRows(auto, floorHeight) : [];
+  const useMeasured = measuredStairs.length > 0 && (rules.stairBasis === "measured" || rules.stairAllowanceM2 <= 0);
+  if (useMeasured) for (const [i, st] of measuredStairs.entries()) {
+    const b = stairBreakdown(st.row); if (!b) continue;
+    extraArea += b.total;
+    items.push({ code: code("ST"), group: "extra", label: `Staircase ${i + 1} (measured from the drawing) — ${st.desc}`, calc: `soffit ${n2(b.soffit * b.f)} + risers ${n2(b.risers * b.f)}${b.cheeks ? ` + stringer ${n2(b.cheeks * b.f)}` : ""}${b.landing ? ` + landing ${n2(b.landing * b.f)}` : ""}`, area: b.total });
+  }
+  if (!useMeasured && rules.stairs && rules.stairAllowanceM2 > 0 && auto?.stairCount && noTyped) {
     const a = auto.stairCount * rules.stairAllowanceM2;
     extraArea += a;
-    items.push({ code: code("ST"), group: "extra", label: `Staircase${auto.stairCount > 1 ? `s × ${auto.stairCount}` : ""} (company allowance, auto)`, calc: `${auto.stairCount} × ${n2(rules.stairAllowanceM2)} m²`, area: a });
+    const meas = measuredStairs.reduce((s2, st) => s2 + (stairBreakdown(st.row)?.total ?? 0), 0);
+    items.push({ code: code("ST"), group: "extra", label: `Staircase${auto.stairCount > 1 ? `s × ${auto.stairCount}` : ""} (company allowance, auto)`, calc: `${auto.stairCount} × ${n2(rules.stairAllowanceM2)} m²${meas > 0 ? ` · measured flights ${n2(meas)} m² (${measuredStairs.map((st) => st.desc).join("; ")})` : ""}`, area: a });
   }
   for (const x of t.extras ?? []) {
     const a = Math.max(0, Number(x.area_m2) || 0); if (!a) continue;
