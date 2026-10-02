@@ -14,6 +14,7 @@ export type Scene3 = {
   H: number; slab: number; box: [number, number, number, number];
   walls: Poly2[]; slabPoly: Poly2[]; beams: { a: Pt; b: Pt; w: number; d: number }[];
   panels: Panel3[]; mb: [Pt, Pt][]; zones: { code: string; at: Pt }[]; stats: { wall: number; deck: number; special: number };
+  issues?: { id: string; sev: "error" | "warn"; text: string; at: Pt; y: number }[];
 };
 
 const ring = (r: Pt[]): [number, number][] => { const o = r.map((p) => [p[0], p[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };

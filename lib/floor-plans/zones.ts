@@ -52,6 +52,15 @@ export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[]
   return rows.flatMap((r) => r.sort((a, b) => a.box[0] - b.box[0]));
 }
 
+function inPoly(p: Pt, poly: Pt[]) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+
 /** Fill one zone with deck panels: rows of the deck length (mm) across the short side, a mid beam between rows. */
 export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: [number, number, number, number] }, deckW: number[], deckLen: number, codeFor: (w: number, L: number) => string, mbGap = 100, tol = 25): Zone {
   const w = z.box[2] - z.box[0], h = z.box[3] - z.box[1];
@@ -72,13 +81,17 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
       let t = lo;
       const put = (wmm: number, custom: boolean) => {
         const t1 = t + wmm / 1000;
+        // a wall / column corner pushing into the row: leave this panel out (the spot becomes a special)
+        const e = 0.03, inZone = (x: number, y: number) => inPoly([x, y], outer) && !holes.some((h) => inPoly([x, y], h));
+        const xsS = [sa + e, (sa + sb) / 2, sb - e], ysS = [t + e, (t + t1) / 2, t1 - e];
+        if (!xsS.every((x) => ysS.every((y) => inZone(x, y)))) { t = t1; return; }
         const a = sw([sa, t]), b = sw([sb, t1]);
         const cust = custom || len !== deckLen;
         panels.push({ no: `${code}-${String(++n).padStart(2, "0")}`, x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]), w: wmm, L: len, custom: cust, code: cust ? `DS-${wmm}-${len}` : codeFor(wmm, len) });
         t = t1;
       };
       for (const wm of ws) put(wm, false);
-      const fl = left < tol ? 0 : Math.round(left / 5) * 5;
+      const fl = left <= tol ? 0 : Math.round(left / 5) * 5;
       if (fl) put(fl, true);
     }
     if (sb < s1 - 0.05) {                                  // mid beam line between this row and the next

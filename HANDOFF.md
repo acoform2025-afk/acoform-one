@@ -159,3 +159,10 @@ returns and repairs.
 ## 3D model (three.js 0.169)
 - `lib/floor-plans/scene3d.ts` builds the scene (metres): walls = even-odd of zone wall rings extruded to clear height; wall panels as quads on every face (std / top / filler); deck panels from zones at the soffit; mid-beam lines; beams over openings; slab.
 - Page `/floor-plans/[id]/panels/3d` (server builds scene, client `viewer.tsx` renders with OrbitControls): layer toggles, 3D / top / front views, click a panel to see its number. Button on the Panels page.
+
+## Design check, stock check, packing list by zone (from the YJK-LMB reference)
+- `lib/design-engine/design-check.ts` — `designCheck()` model review + clash check: face fit, wall-panel strips (65 rail + 5 mm, open side found by `faceFrames`) clashing between faces (narrow gaps / crossing corners), wall panels inside concrete, deck panels on walls / across beams over openings / overlapping, uncovered slab per zone, pin-hole check of specials. Issues carry an id (C001…), severity, where (panel / face / zone) and a plan point.
+- `lib/floor-plans/check-run.ts` — `checkLayout(r)` = zones + check (used by the check page, CSV and 3D).
+- Pages / routes: `panels/check` (summary + list, "See in 3D" → `panels/3d?focus=C012`), `panels/check-list` (CSV), `panels/stock` + `panels/stock-list` (stock first: need vs in-stock QR panels → shortfall to produce), `panels/packing` (CSV, one bundle per zone: its deck panels + wall panels of faces around it; EXT = outer faces).
+- 3D model: "Design check" layer with red (error) / amber (warning) balls; click shows the problem.
+- `zones.ts layoutZone`: deck panels whose spot is not fully inside the zone (wall / column corner in the row) are left out (become specials); fillers ≤ 25 mm dropped.
