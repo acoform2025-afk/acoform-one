@@ -92,7 +92,7 @@ export function QuickQuoteForm({ leads, rates, nextCode, leadId, prefill, areaDe
               {hasOpt2 && formworkType === "monolithic" ? (
                 <label className="mt-2 flex items-center gap-2 text-graphite-300"><input type="checkbox" checked={bothOptions} onChange={(e) => setBothOptions(e.target.checked)} />Quote both options side by side (client chooses)</label>
               ) : null}
-              <input type="hidden" name="blocks" value={JSON.stringify(blocks.map((b) => ({ name: b.name, area: formworkType === "vertical" ? [b.vertical] : bothOptions && hasOpt2 ? [b.full, b.thin] : [b.full] })))} />
+              <input type="hidden" name="blocks" value={JSON.stringify(blocks.map((b) => ({ id: b.id, name: b.name, area: formworkType === "vertical" ? [b.vertical] : bothOptions && hasOpt2 ? [b.full, b.thin] : [b.full] })))} />
               <input type="hidden" name="optionLabels" value={bothOptions && hasOpt2 && formworkType === "monolithic" ? JSON.stringify(["All walls in concrete", `Walls under ${limitMm} mm in blockwork by others`]) : ""} />
             </div>
           ) : null}

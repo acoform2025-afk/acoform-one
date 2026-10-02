@@ -25,6 +25,7 @@ export type SheetGeo = {
   wallLines: Pt[][];                         // loose wall lines
   slab: Pt[][]; ducts: Pt[][]; gaps: [Pt, Pt][]; stairs: [number, number, number, number][];
   columns: Pt[][];
+  parapets?: Pt[][]; edgeBeams?: [Pt, Pt][];
 };
 export type SheetSection = { no: number; key: string; title: string; heading: string; lines: string[]; total: string; value: number; figure: string; panes: ("slab" | "duct" | "walltop" | "walls" | "beams" | "stairs" | "columns" | "none")[] };
 export type SheetInfo = { title: string; project: string; client: string; planName: string; date: string; company: string; extraPct: number; contact: number; quote: number; nonTypical: { label: string; area: number }[]; set: number };

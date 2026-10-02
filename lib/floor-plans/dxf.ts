@@ -760,20 +760,23 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       const win = g.filter((x) => isWin(x.a, x.b, x.thk));
       // slab edges with no full-height wall under them (balcony fronts under a parapet, open slab edges): edge beam.
       // Door / window gaps in the outer walls are left out (their beam is the lintel above).
-      let edgeLen = 0;
+      let edgeLen = 0; const edgeSegs: [Pt, Pt][] = [];
       const nearGap = (q: Pt) => g.some((x) => { const L = Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) || 1; const t2 = ((q[0] - x.a[0]) * (x.b[0] - x.a[0]) + (q[1] - x.a[1]) * (x.b[1] - x.a[1])) / (L * L); const px = x.a[0] + (x.b[0] - x.a[0]) * Math.max(0, Math.min(1, t2)), py = x.a[1] + (x.b[1] - x.a[1]) * Math.max(0, Math.min(1, t2)); return Math.hypot(q[0] - px, q[1] - py) <= (x.thk / u) / 2 + 0.25 / u; });
       if (U.rings.length) for (const sl of slab) {
         const r = sl.p.pts;
         for (let i = 0; i < r.length; i++) {
           const a = r[i], b = r[(i + 1) % r.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.round((L * u) / 0.1));
-          for (let k = 0; k < n; k++) { const q: Pt = [a[0] + ((b[0] - a[0]) * (k + 0.5)) / n, a[1] + ((b[1] - a[1]) * (k + 0.5)) / n]; if (!nearRings(q, U.rings, 0.03 / u) && !nearGap(q)) edgeLen += (L * u) / n; }
+          let run: number | null = null;
+          const flush = (k: number) => { if (run != null) { edgeSegs.push([[a[0] + ((b[0] - a[0]) * run) / n, a[1] + ((b[1] - a[1]) * run) / n], [a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]]); run = null; } };
+          for (let k = 0; k < n; k++) { const q: Pt = [a[0] + ((b[0] - a[0]) * (k + 0.5)) / n, a[1] + ((b[1] - a[1]) * (k + 0.5)) / n]; if (!nearRings(q, U.rings, 0.03 / u) && !nearGap(q)) { edgeLen += (L * u) / n; if (run == null) run = k; } else flush(k); }
+          flush(n);
         }
       }
       return {
         gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })),
         gapSoffit: g.reduce((s, x) => s + x.span * x.thk, 0),
         windowGaps: { count: win.length, span: win.reduce((s, x) => s + x.span, 0), top: win.reduce((s, x) => s + x.span * x.thk, 0) },
-        edgeBeamLength: edgeLen,
+        edgeBeamLength: edgeLen, edgeBeams: edgeSegs.slice(0, 4000), parapetRings: UP?.rings ?? [],
       };
     })(),
   };

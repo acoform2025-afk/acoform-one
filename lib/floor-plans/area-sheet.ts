@@ -106,6 +106,7 @@ export function sheetGeo(auto: DxfAuto | null): SheetGeo | null {
     walls: auto.wallRings ?? [], wallLines: auto.wallLoose ?? [],
     slab: auto.slabLoops ?? [], ducts: auto.openingLoops ?? [],
     gaps: (auto.gaps ?? []).map((g) => [g.a, g.b] as [Pt, Pt]),
-    stairs: auto.stairBoxes ?? [], columns: [],
+    stairs: auto.stairBoxes ?? [], columns: auto.columnRings ?? [],
+    parapets: auto.parapetRings ?? [], edgeBeams: auto.edgeBeams ?? [],
   };
 }

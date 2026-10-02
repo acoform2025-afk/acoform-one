@@ -3,7 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { QuotationDocument, type PdfLine, type PdfQuotation, type PdfCompany } from "@/lib/pdf/quotation-document";
 import { formworkKind, pdfFileName } from "@/lib/quotations/document-content";
 import { mediaForPdf } from "@/lib/quotations/media";
-import { totalsRows, type Totals } from "@/lib/floor-plans/calc";
+import { computeTotals, totalsRows, UNIT_TO_M, type DxfAuto, type Takeoff, type Totals } from "@/lib/floor-plans/calc";
+import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
+import { dxfAuto, dxfFrame, readDxf, separateAreas, type DxfModel } from "@/lib/floor-plans/dxf";
+import { sheetGeo } from "@/lib/floor-plans/area-sheet";
 import type { PdfFloorPlan } from "@/lib/pdf/quotation-document";
 import { describeRules, loadRules, normaliseRules } from "@/lib/floor-plans/rules";
 
@@ -41,30 +44,52 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const media = q.show_references === false ? { photos: [], logos: [] } : await mediaForPdf(supabase);
 
-  let plan: PdfFloorPlan | null = null;
-  if (q.floor_plan_id) {
-    const { data: fp } = await supabase.from("floor_plans").select("name, totals, preview_path").eq("id", q.floor_plan_id).maybeSingle();
-    if (fp) {
-      let image: PdfFloorPlan["image"] = null;
-      if (fp.preview_path) {
-        const { data: img } = await supabase.storage.from("floor-plans").download(fp.preview_path);
-        if (img) image = { data: Buffer.from(await img.arrayBuffer()), format: "jpg" };
+  // measured floor plans to print: the attached plan, or every block of a "quote all blocks" quotation
+  const opts = q.options as { blocks?: { id?: string }[] } | null;
+  const planIds = [...new Set([q.floor_plan_id, ...((opts?.blocks ?? []).map((b) => b.id))].filter((x): x is string => !!x && /^[0-9a-f-]{36}$/i.test(x)))];
+  const plans: PdfFloorPlan[] = [];
+  const models = new Map<string, DxfModel | null>();
+  const companyRules = await loadRules(supabase);
+  for (const pid of planIds) {
+    const { data: fp } = await supabase.from("floor_plans").select("name, totals, preview_path, source_kind, file_path, takeoff").eq("id", pid).maybeSingle();
+    if (!fp) continue;
+    let image: PdfFloorPlan["image"] = null;
+    const t = (fp.totals ?? {}) as Record<string, number> & { params?: { floorHeight?: number; slabMm?: number; floors?: number; beamDepthMm?: number; parapetMm?: number; minWallMm?: number } };
+    const pr = t.params ?? {};
+    const saved = (t as unknown as { rules?: unknown }).rules;
+    const mr = saved ? normaliseRules(saved) : companyRules;
+    // coloured plan + 3D view from the drawing (DXF plans); picture fallback for PDF / image plans
+    let geo: PdfFloorPlan["geo"] = null; let unitToM = 0.001;
+    const tk = fp.takeoff as Takeoff | null;
+    if (fp.source_kind === "dxf" && tk?.dxf && Array.isArray(tk.shapes)) {
+      let model = models.get(fp.file_path) ?? null;
+      if (!models.has(fp.file_path)) { const { data: blob } = await supabase.storage.from("floor-plans").download(fp.file_path); try { model = blob ? readDxf(await dxfTextFromBlob(blob)) : null; } catch { model = null; } models.set(fp.file_path, model); }
+      if (model) {
+        const reg = tk.dxf.region, f = dxfFrame(model, 2400);
+        const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((qq) => { const [x, y] = f.toPx(qq); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
+        unitToM = UNIT_TO_M[tk.dxf.units] ?? 0.001;
+        const auto: DxfAuto = dxfAuto(model, tk.dxf.layerRoles, unitToM, keep, tk.params.minOpeningM2 != null && String(tk.params.minOpeningM2) !== "" ? Number(tk.params.minOpeningM2) : mr.minOpeningM2, separateAreas(tk.shapes, f), { minWallMm: Number(tk.params.minWallMm) || 0 });
+        geo = sheetGeo(auto);
+        if (!Array.isArray((t as unknown as Totals).items) || !(t as unknown as Totals).items.length) { const tot = computeTotals(tk, auto, mr); (t as unknown as Totals).items = tot.items; }
       }
-      const t = (fp.totals ?? {}) as Record<string, number> & { params?: { floorHeight?: number; slabMm?: number; floors?: number } };
-      const pr = t.params ?? {};
-      const saved = (t as unknown as { rules?: unknown }).rules;
-      const mr = saved ? normaliseRules(saved) : await loadRules(supabase);
-      plan = {
-        name: fp.name, image, rows: totalsRows(t as unknown as Partial<Totals>),
-        rules: mr.printOnQuote ? describeRules(mr) : undefined,
-        items: Array.isArray((t as unknown as Totals).items) ? (t as unknown as Totals).items.slice(0, 400) : undefined,
-        note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight != null ? Math.round(pr.floorHeight * 1000) : "-"} mm, slab ${pr.slabMm ?? "-"} mm. One formwork set is reused on all floors (typical floor basis${Number((t as Record<string, number>).nontypical_area) > 0 ? " + additional pieces for non-typical floors" : ""}). Final quantities as per approved GFC drawings.`,
-      };
     }
+    if (!geo && fp.preview_path) {
+      const { data: img } = await supabase.storage.from("floor-plans").download(fp.preview_path);
+      if (img) image = { data: Buffer.from(await img.arrayBuffer()), format: "jpg" };
+    }
+    plans.push({
+      name: fp.name, image, geo, rows: totalsRows(t as unknown as Partial<Totals>),
+      dims: { floorMm: Math.round((pr.floorHeight ?? 3) * 1000), slabMm: pr.slabMm ?? 150, beamMm: pr.beamDepthMm ?? 600, parapetMm: pr.parapetMm ?? 900, unitToM, thin: (Number(pr.minWallMm) || 0) > 75 },
+      rules: mr.printOnQuote ? describeRules(mr) : undefined,
+      items: Array.isArray((t as unknown as Totals).items) ? (t as unknown as Totals).items.slice(0, 400) : undefined,
+      note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight != null ? Math.round(pr.floorHeight * 1000) : "-"} mm, slab ${pr.slabMm ?? "-"} mm. One formwork set is reused on all floors (typical floor basis${Number((t as Record<string, number>).nontypical_area) > 0 ? " + additional pieces for non-typical floors" : ""}). Final quantities as per approved GFC drawings.`,
+    });
   }
+  models.clear();
+  const plan = plans[0] ?? null;
 
   const buffer = await renderToBuffer(
-    <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} plan={plan} />,
+    <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} plan={plan} plans={plans} />,
   );
 
   const name = pdfFileName(q.quotation_code, q.revision_no, formworkKind(q.formwork_type), q.quotation_date);

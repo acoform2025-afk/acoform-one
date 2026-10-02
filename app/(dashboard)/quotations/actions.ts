@@ -154,12 +154,12 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
   // made from the measured blocks of a project → one line per block (and the second wall option, when quoted)
   const blocksRaw = String(formData.get("blocks") ?? "");
   if (blocksRaw) {
-    const bl = z.array(z.object({ name: z.string().min(1).max(60), area: z.array(z.number().min(0)).min(1).max(2) })).max(40).safeParse(JSON.parse(blocksRaw));
+    const bl = z.array(z.object({ id: z.string().uuid().optional(), name: z.string().min(1).max(60), area: z.array(z.number().min(0)).min(1).max(2) })).max(40).safeParse(JSON.parse(blocksRaw));
     const labels = z.array(z.string().max(80)).length(2).safeParse(JSON.parse(String(formData.get("optionLabels") || "null")));
     if (bl.success && bl.data.length) {
       const desc = ["Aluminium formwork — typical floor", ...bl.data.map((b) => `${b.name}: ${b.area[0]} Sqm`)].join("; ");
       const two = labels.success && bl.data.every((b) => b.area.length === 2);
-      await supabase.from("quotations").update({ schedule_description: desc, options: two ? { labels: labels.data, blocks: bl.data, note: "Amount in words and the summary figures are for Option 1. Quantities as per approved GFC drawings." } : null }).eq("id", data as string);
+      await supabase.from("quotations").update({ schedule_description: desc, floor_plan_id: bl.data[0].id ?? null, options: two ? { labels: labels.data, blocks: bl.data, note: "Amount in words and the summary figures are for Option 1. Quantities as per approved GFC drawings." } : { blocks: bl.data } }).eq("id", data as string);
     }
   }
   // made from a measured floor plan → print that plan on the quotation

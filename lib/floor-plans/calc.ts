@@ -123,6 +123,8 @@ export type DxfAuto = {
   gapSoffit?: number;                               // underside of the beams over wall openings (span × wall thickness), m²
   windowGaps?: { count: number; span: number; top: number };   // openings with a window: sill wall under it (span m, sill top m²)
   edgeBeamLength?: number;                          // slab edges with no full-height wall under them (balcony fronts, open edges), m
+  edgeBeams?: [Pt, Pt][];                           // those edges (drawing units), for drawings
+  parapetRings?: Pt[][];                            // balcony parapet outlines (drawing units)
   gaps?: { a: Pt; b: Pt; span: number; thk?: number }[];  // a, b in drawing units; span, thk in m
 };
 

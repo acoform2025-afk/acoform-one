@@ -1,5 +1,8 @@
+import React from "react";
 import path from "node:path";
 import { Document, Font, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import type { SheetGeo } from "./area-sheet-document";
+import { IsoFigure, PlanFigure, SectionFigure } from "./plan-figures";
 import {
   ADVANTAGES, accessoriesFor, CLOSING, DEFAULT_PAYMENT_TERMS, DELIVERY_SCHEDULE, SCHEDULE_NOTE, SET_LABEL, TECH_SPECS, TERMS,
   formworkKind,
@@ -20,7 +23,7 @@ const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 // Site photos + client logos come from Settings (lib/quotations/media.ts): a file path or raw image bytes
 export type PdfImage = string | { data: Buffer; format: "png" | "jpg" };
 export type PdfMedia = { photos: PdfImage[]; logos: PdfImage[] };
-export type PdfFloorPlan = { name: string; image: PdfImage | null; rows: [string, string][]; note: string; rules?: string[]; items?: { code: string; label: string; calc: string; area: number }[] };
+export type PdfFloorPlan = { name: string; image: PdfImage | null; rows: [string, string][]; note: string; rules?: string[]; items?: { code: string; label: string; calc: string; area: number }[]; geo?: SheetGeo | null; dims?: { floorMm: number; slabMm: number; beamMm: number; parapetMm: number; unitToM: number; thin: boolean } };
 
 const ORANGE = "#ef9d2f";
 const ORANGE_SOFT = "#fdf3e4";
@@ -371,7 +374,8 @@ function DetailedSchedule({ q, lines }: { q: PdfQuotation; lines: PdfLine[] }) {
   );
 }
 
-export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] }, plan = null }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia; plan?: PdfFloorPlan | null }) {
+export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] }, plan = null, plans }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia; plan?: PdfFloorPlan | null; plans?: PdfFloorPlan[] }) {
+  const planPages: PdfFloorPlan[] = plans?.length ? plans : plan ? [plan] : [];
   const kind = formworkKind(q.formwork_type);
   const setLabel = SET_LABEL[kind];
   const payment = q.payment_terms && q.payment_terms.length > 0 ? q.payment_terms : DEFAULT_PAYMENT_TERMS[kind];
@@ -498,62 +502,82 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
         </View>
       </Page>
 
-      {/* 3a. Project floor plan + area take-off */}
-      {plan ? (
-        <Page size="A4" style={s.page}>
-          {chrome}
-          <Text style={[s.h2, { marginTop: 0 }]}>PROJECT FLOOR PLAN &amp; FORMWORK AREA</Text>
-          <Text style={{ fontSize: 9, color: GRAY, marginBottom: 6 }}>{plan.name}</Text>
-          {plan.image ? (
-            <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, alignItems: "center" }} wrap={false}>
-              <Image src={plan.image} style={{ maxWidth: "100%", maxHeight: 430, objectFit: "contain" }} />
+      {/* 3a. Project floor plan + area take-off (one set of pages per measured block) */}
+      {planPages.map((plan, pi) => (
+        <React.Fragment key={pi}>
+          <Page size="A4" style={s.page}>
+            {chrome}
+            <Text style={[s.h2, { marginTop: 0 }]}>PROJECT FLOOR PLAN &amp; FORMWORK AREA</Text>
+            <Text style={{ fontSize: 9, color: GRAY, marginBottom: 6 }}>{plan.name}</Text>
+            {plan.geo ? (
+              <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, alignItems: "center" }} wrap={false}>
+                <PlanFigure geo={plan.geo} w={500} h={plan.geo.box[3] - plan.geo.box[1] > 1.3 * (plan.geo.box[2] - plan.geo.box[0]) ? 430 : 330} />
+              </View>
+            ) : plan.image ? (
+              <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, alignItems: "center" }} wrap={false}>
+                <Image src={plan.image} style={{ maxWidth: "100%", maxHeight: 430, objectFit: "contain" }} />
+              </View>
+            ) : null}
+            <View style={[s.table, { marginTop: 10, fontSize: 9 }]} wrap={false}>
+              {plan.rows.map(([k, v], i) => (
+                <View key={k} style={i % 2 ? [s.tr, s.alt] : s.tr}>
+                  <Text style={[s.cell, { width: "65%" }, i === plan.rows.length - 1 ? { fontWeight: "bold" } : {}]}>{k}</Text>
+                  <Text style={[s.cell, { width: "35%", textAlign: "right" }, i === plan.rows.length - 1 ? { fontWeight: "bold" } : {}]}>{v}</Text>
+                </View>
+              ))}
             </View>
+            <Text style={{ fontSize: 7.5, color: GRAY, marginTop: 4 }}>{plan.note}</Text>
+            {plan.rules && plan.rules.length ? (
+              <View style={{ marginTop: 8 }} wrap={false}>
+                <Text style={{ fontSize: 8.5, fontWeight: "bold", marginBottom: 2 }}>MEASUREMENT BASIS</Text>
+                {plan.rules.map((r, i) => <Text key={i} style={{ fontSize: 7.5, color: GRAY, marginBottom: 1 }}>{`${i + 1}. ${r}`}</Text>)}
+              </View>
+            ) : null}
+          </Page>
+          {plan.geo && plan.dims ? (
+            <Page size="A4" style={s.page}>
+              {chrome}
+              <Text style={[s.h2, { marginTop: 0 }]}>WHAT WE FORM — {plan.name.toUpperCase()}</Text>
+              <Text style={{ fontSize: 8.5, color: GRAY, marginBottom: 6 }}>Concrete of the typical floor as read from your drawing: walls, parapets and columns shown in 3D (deck panels sit on top of the walls and are not drawn). Heights from the drawing's sections.</Text>
+              <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, alignItems: "center" }} wrap={false}>
+                <IsoFigure geo={plan.geo} H={(plan.dims.floorMm - plan.dims.slabMm) / 1000} parapetH={plan.dims.parapetMm / 1000} w={500} h={320} unitToM={plan.dims.unitToM} />
+              </View>
+              <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, marginTop: 8, alignItems: "center" }} wrap={false}>
+                <SectionFigure floorMm={plan.dims.floorMm} slabMm={plan.dims.slabMm} beamMm={plan.dims.beamMm} parapetMm={plan.dims.parapetMm} w={500} h={210} thin={plan.dims.thin} />
+              </View>
+              <Text style={{ fontSize: 7.5, color: GRAY, marginTop: 6 }}>Walls are formed on both faces from the slab top to the underside of the slab above ({plan.dims.floorMm - plan.dims.slabMm} mm). Beams over doors and windows and edge beams are formed on both sides and the underside ({plan.dims.beamMm} mm deep). Balcony parapets are formed on both faces to {plan.dims.parapetMm} mm. The deck is formed on the slab underside less wall tops.</Text>
+            </Page>
           ) : null}
-          <View style={[s.table, { marginTop: 10, fontSize: 9 }]} wrap={false}>
-            {plan.rows.map(([k, v], i) => (
-              <View key={k} style={i % 2 ? [s.tr, s.alt] : s.tr}>
-                <Text style={[s.cell, { width: "65%" }, i === plan.rows.length - 1 ? { fontWeight: "bold" } : {}]}>{k}</Text>
-                <Text style={[s.cell, { width: "35%", textAlign: "right" }, i === plan.rows.length - 1 ? { fontWeight: "bold" } : {}]}>{v}</Text>
+          {plan.items && plan.items.length > 0 ? (
+            <Page size="A4" style={s.page}>
+              {chrome}
+              <Text style={[s.h2, { marginTop: 0 }]}>FORMWORK AREA LIST (TYPICAL FLOOR) — {plan.name.toUpperCase()}</Text>
+              <View style={[s.table, { fontSize: 8.5 }]}>
+                <View style={[s.tr, { backgroundColor: ORANGE_SOFT }]} fixed>
+                  <Text style={[s.cell, { width: "10%", fontWeight: "bold" }]}>CODE</Text>
+                  <Text style={[s.cell, { width: "32%", fontWeight: "bold" }]}>ELEMENT</Text>
+                  <Text style={[s.cell, { width: "40%", fontWeight: "bold" }]}>CALCULATION</Text>
+                  <Text style={[s.cell, { width: "18%", fontWeight: "bold", textAlign: "right" }]}>AREA (m²)</Text>
+                </View>
+                {plan.items.map((it, i) => (
+                  <View key={i} style={i % 2 ? [s.tr, s.alt] : s.tr} wrap={false}>
+                    <Text style={[s.cell, { width: "10%" }]}>{it.code}</Text>
+                    <Text style={[s.cell, { width: "32%" }]}>{it.label}</Text>
+                    <Text style={[s.cell, { width: "40%" }]}>{it.calc}</Text>
+                    <Text style={[s.cell, { width: "18%", textAlign: "right" }]}>{it.area.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  </View>
+                ))}
+                {plan.rows.slice(-2).map(([k, v]) => (
+                  <View key={k} style={s.tr} wrap={false}>
+                    <Text style={[s.cell, { width: "82%", fontWeight: "bold" }]}>{k}</Text>
+                    <Text style={[s.cell, { width: "18%", textAlign: "right", fontWeight: "bold" }]}>{v.replace(" m²", "")}</Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
-          <Text style={{ fontSize: 7.5, color: GRAY, marginTop: 4 }}>{plan.note}</Text>
-          {plan.rules && plan.rules.length ? (
-            <View style={{ marginTop: 8 }} wrap={false}>
-              <Text style={{ fontSize: 8.5, fontWeight: "bold", marginBottom: 2 }}>MEASUREMENT BASIS</Text>
-              {plan.rules.map((r, i) => <Text key={i} style={{ fontSize: 7.5, color: GRAY, marginBottom: 1 }}>{`${i + 1}. ${r}`}</Text>)}
-            </View>
+            </Page>
           ) : null}
-        </Page>
-      ) : null}
-      {plan && plan.items && plan.items.length > 0 ? (
-        <Page size="A4" style={s.page}>
-          {chrome}
-          <Text style={[s.h2, { marginTop: 0 }]}>FORMWORK AREA LIST (TYPICAL FLOOR)</Text>
-          <View style={[s.table, { fontSize: 8.5 }]}>
-            <View style={[s.tr, { backgroundColor: ORANGE_SOFT }]} fixed>
-              <Text style={[s.cell, { width: "10%", fontWeight: "bold" }]}>CODE</Text>
-              <Text style={[s.cell, { width: "32%", fontWeight: "bold" }]}>ELEMENT</Text>
-              <Text style={[s.cell, { width: "40%", fontWeight: "bold" }]}>CALCULATION</Text>
-              <Text style={[s.cell, { width: "18%", fontWeight: "bold", textAlign: "right" }]}>AREA (m²)</Text>
-            </View>
-            {plan.items.map((it, i) => (
-              <View key={i} style={i % 2 ? [s.tr, s.alt] : s.tr} wrap={false}>
-                <Text style={[s.cell, { width: "10%" }]}>{it.code}</Text>
-                <Text style={[s.cell, { width: "32%" }]}>{it.label}</Text>
-                <Text style={[s.cell, { width: "40%" }]}>{it.calc}</Text>
-                <Text style={[s.cell, { width: "18%", textAlign: "right" }]}>{it.area.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-              </View>
-            ))}
-            {plan.rows.slice(-2).map(([k, v]) => (
-              <View key={k} style={s.tr} wrap={false}>
-                <Text style={[s.cell, { width: "82%", fontWeight: "bold" }]}>{k}</Text>
-                <Text style={[s.cell, { width: "18%", textAlign: "right", fontWeight: "bold" }]}>{v.replace(" m²", "")}</Text>
-              </View>
-            ))}
-          </View>
-        </Page>
-      ) : null}
+        </React.Fragment>
+      ))}
 
       {/* 3b. Our work at site + esteemed clients */}
       {showReferences ? (
