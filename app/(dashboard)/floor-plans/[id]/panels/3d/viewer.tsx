@@ -165,10 +165,16 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
-        {(Object.keys(LABEL) as Layer[]).map((l) => (
-          <button key={l} type="button" onClick={() => toggle(l)}
-            className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : "border border-graphite-700 text-graphite-300 hover:bg-graphite-800"}`}>{LABEL[l]}</button>
-        ))}
+        {(Object.keys(LABEL) as Layer[]).map((l) => {
+          // how many pieces each layer has — a layer with nothing on this floor (e.g. no columns in a shear-wall building) is shown greyed with "0"
+          const n = l === "walls" ? scene.walls.length : l === "columns" ? (scene.cols?.length ?? 0) : l === "wallPanels" ? scene.panels.filter((p) => p.k !== "deck" && p.k !== "dspec").length
+            : l === "deck" ? scene.panels.filter((p) => p.k === "deck" || p.k === "dspec").length : l === "slab" ? scene.slabPoly.length : l === "beams" ? (scene.beamSolids?.length ?? 0) + scene.beams.length
+            : l === "stairs" ? (scene.steps?.length ?? 0) : (scene.issues?.length ?? 0);
+          return (
+            <button key={l} type="button" onClick={() => toggle(l)} title={n ? `${n} on this floor` : "nothing of this kind on this floor"}
+              className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : n ? "border border-graphite-700 text-graphite-300 hover:bg-graphite-800" : "border border-dashed border-graphite-800 text-graphite-600"}`}>{LABEL[l]}{n ? "" : " (0)"}</button>
+          );
+        })}
         <span className="mx-1 h-5 w-px bg-graphite-700" />
         <button type="button" title="Turn left 45°" onClick={() => api.current?.turn(-45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↺ 45°</button>
         <button type="button" title="Turn right 45°" onClick={() => api.current?.turn(45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↻ 45°</button>
