@@ -282,9 +282,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : []);
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDxf, t.dxf, size, t.params.minOpeningM2, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|")]);
+  }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|")]);
   const totals: Totals = useMemo(() => computeTotals(t, auto, rules), [t, auto, rules]);
   // the same figures read from the drawing only (without the estimator's typed-in figures) — shown next to them
   const drawnTotals: Totals = useMemo(() => computeTotals({ ...t, params: { ...t.params, slabM2: undefined, ductM2: undefined, wallLenM: undefined, beamLenM: undefined } }, auto, rules), [t, auto, rules]);
@@ -862,6 +862,14 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
             <Field label="Beam width (mm)"><NumInput value={t.params.beamWidthMm ?? 200} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamWidthMm: v } }))} /></Field>
             <Field label="Beam depth (mm)"><NumInput value={t.params.beamDepthMm ?? 600} step={25} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamDepthMm: v } }))} /></Field>
           </div>
+          {auto?.wallPairs ? (
+            <div className="mt-2">
+              <Field label="Thinnest concrete wall (mm)"><NumInput value={t.params.minWallMm ?? 75} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, minWallMm: v } }))} /></Field>
+              <p className="mt-1 text-[11px] text-graphite-500">
+                Walls on this drawing are loose lines, read as pairs: {Object.entries(auto.wallPairs.byThk).filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} mm ${Math.round(v)} m`).join(", ")}. Thinner walls (blockwork) are left out — e.g. 125 leaves out 100 mm walls.
+              </p>
+            </div>
+          ) : null}
           <p className="mt-1 text-[11px] text-graphite-500">
             Wall tops ≈ wall length × thickness — at 150 mm that is {fmtArea(totals.wall_length * 0.15)}; at 125 mm {fmtArea(totals.wall_length * 0.125)}.
           </p>

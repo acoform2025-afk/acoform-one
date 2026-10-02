@@ -45,6 +45,7 @@ export type Params = {
   extraPct?: number;        // add % on the typical-floor total (e.g. 10)
   beamDepthMm?: number;     // default beam depth (drawn beams and DXF beam layers)
   beamWidthMm?: number;     // default width of drawn beams
+  minWallMm?: number;      // thinnest wall that is concrete (walls read from paired lines); thinner pairs are blockwork / finishes
   autoLintels?: boolean;    // beams / lintels over wall openings found on the drawing (default on)
   wallThkMm?: number;       // default thickness of drawn walls (3D view, wall tops)
 };
@@ -82,6 +83,7 @@ export type DxfAuto = {
   slabArea: number; slabPerimeter: number;
   openingArea: number; openingPerimeter: number;
   wallLineLength: number;                           // total length of lines on wall layers
+  wallPairs?: { byThk: Record<number, number>; unpaired: number };   // walls rebuilt from pairs of loose lines: face length (m) by thickness (mm), single lines left out (m)
   beamLineLength?: number;                          // total length of lines on beam layers without a size (= beam side length)
   beamSized?: { b: number; d: number; len: number; bottom: number; count: number; inner?: number; outer?: number; lintel?: number }[];   // inner / outer: side-face length (m) with / without slab beyond; lintel: length of beams that are wall lintels   // beams sized by their layer name: b, d mm; len m (clear of walls / columns); bottom m²
   beamRings?: Pt[][];                               // outlines of the sized beams (drawing units) — deck zones stop at them
@@ -258,7 +260,8 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     if (auto.wallLineLength) {
       const faces = t.dxf?.wallsDrawn === "centre" ? 2 * auto.wallLineLength : auto.wallLineLength;
       wallCentre += faces / 2; wallFaces += faces; wallArea += faces * H;
-      items.push({ code: code("W"), group: "wall", label: "Walls (DXF layers)", calc: `${n2(faces)} m faces × ${n3(H)} m`, area: faces * H });
+      const wp = auto.wallPairs, thk = wp ? Object.entries(wp.byThk).filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} mm ${Math.round(v)} m`).join(", ") : "";
+      items.push({ code: code("W"), group: "wall", label: wp ? `Walls (from paired lines on the wall layers${thk ? ": " + thk : ""})` : "Walls (DXF layers)", calc: `${n2(faces)} m faces × ${n3(H)} m${wp && wp.unpaired >= 1 ? ` · ${n2(wp.unpaired)} m of single lines and thinner walls left out` : ""}`, area: faces * H });
     }
     // doors / windows found inside the walls (each face listed once; reveals shared by the two faces of a wall)
     const uM = UNIT_TO_M[t.dxf?.units ?? "mm"] ?? 0.001;

@@ -265,3 +265,70 @@ export function labelledSpaces(rings: Pt[][], loose: Pt[][], points: Pt[], unitT
   }
   return out;
 }
+
+/**
+ * Walls drawn as loose lines (Revit / ArchiCAD exports: every wall face a separate LINE, nothing closed):
+ * a wall is two parallel lines a wall thickness apart (minMm–maxMm). Each overlapping stretch of such a pair
+ * becomes a thin rectangle; merged with wallUnion they give the wall outlines, so wall faces, wall tops and the
+ * openings between wall ends (beams over doors / windows) are measured as for closed outlines. Door ticks,
+ * window lines and other single lines without a partner are left out. Returns rectangles + length by thickness.
+ */
+export function pairedWallStrips(lines: Pt[][], unitToM: number, minMm = 75, maxMm = 400): { strips: Pt[][]; byThk: Record<number, number> } {
+  type S = { a: Pt; b: Pt; L: number; ux: number; uy: number; bb: number[] };
+  const u = unitToM, segs: S[] = [];
+  for (const l of lines) for (let i = 1; i < l.length; i++) {
+    const a = l[i - 1], b = l[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L * u < 0.1) continue;
+    segs.push({ a, b, L, ux: (b[0] - a[0]) / L, uy: (b[1] - a[1]) / L, bb: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] });
+  }
+  const strips: Pt[][] = []; const byThk: Record<number, number> = {};
+  if (!segs.length) return { strips, byThk };
+  // 1 m grid on the segment boxes (grown by the largest thickness) → candidate partners
+  const C = 1 / u, pad = maxMm / 1000 / u, grid = new Map<string, number[]>();
+  segs.forEach((s, i) => {
+    for (let gx = Math.floor(s.bb[0] / C); gx <= Math.floor(s.bb[2] / C); gx++) for (let gy = Math.floor(s.bb[1] / C); gy <= Math.floor(s.bb[3] / C); gy++) {
+      const k = `${gx},${gy}`; (grid.get(k) ?? grid.set(k, []).get(k)!).push(i);
+    }
+  });
+  const lo = minMm / 1000 / u, hi = maxMm / 1000 / u, minOv = 0.1 / u;
+  const near = (s: S, f: (j: number) => void) => {
+    const seen = new Set<number>();
+    for (let gx = Math.floor((s.bb[0] - pad) / C); gx <= Math.floor((s.bb[2] + pad) / C); gx++) for (let gy = Math.floor((s.bb[1] - pad) / C); gy <= Math.floor((s.bb[3] + pad) / C); gy++)
+      for (const j of grid.get(`${gx},${gy}`) ?? []) if (!seen.has(j)) { seen.add(j); f(j); }
+  };
+  // finish / tile / skirting lines drawn just inside a wall face (≤ 40 mm off, mostly alongside a longer line):
+  // left out, or they would pair with the far face as a second, wrong thickness
+  const drop = new Uint8Array(segs.length), dupTol = 0.04 / u;
+  segs.forEach((s, i) => near(s, (j) => {
+    if (drop[i] || j === i || drop[j]) return;
+    const t = segs[j];
+    if (t.L < s.L || (t.L === s.L && j > i) || Math.abs(s.ux * t.uy - s.uy * t.ux) > 0.02) return;
+    const d = Math.abs((s.a[0] - t.a[0]) * -t.uy + (s.a[1] - t.a[1]) * t.ux); if (d > dupTol) return;
+    const p0 = (s.a[0] - t.a[0]) * t.ux + (s.a[1] - t.a[1]) * t.uy, p1 = (s.b[0] - t.a[0]) * t.ux + (s.b[1] - t.a[1]) * t.uy;
+    if (Math.min(t.L, Math.max(p0, p1)) - Math.max(0, Math.min(p0, p1)) >= 0.7 * s.L) drop[i] = 1;
+  }));
+  segs.forEach((s, i) => {
+    if (drop[i] || s.L * u < 0.2) return;
+    const seen = new Set<number>();
+    for (let gx = Math.floor((s.bb[0] - pad) / C); gx <= Math.floor((s.bb[2] + pad) / C); gx++) for (let gy = Math.floor((s.bb[1] - pad) / C); gy <= Math.floor((s.bb[3] + pad) / C); gy++) {
+      for (const j of grid.get(`${gx},${gy}`) ?? []) {
+        if (j <= i || seen.has(j) || drop[j]) continue; seen.add(j);
+        const t = segs[j];
+        if (Math.abs(s.ux * t.uy - s.uy * t.ux) > 0.02) continue;                     // parallel
+        const d = (t.a[0] - s.a[0]) * -s.uy + (t.a[1] - s.a[1]) * s.ux;              // offset (signed)
+        const ad = Math.abs(d); if (ad < lo || ad > hi) continue;
+        const p0 = (t.a[0] - s.a[0]) * s.ux + (t.a[1] - s.a[1]) * s.uy, p1 = (t.b[0] - s.a[0]) * s.ux + (t.b[1] - s.a[1]) * s.uy;
+        let o0 = Math.max(0, Math.min(p0, p1)), o1 = Math.min(s.L, Math.max(p0, p1));
+        if (o1 - o0 < minOv) continue;
+        // at an L / T corner the outer face runs on past the inner one by about the thickness: the strip runs on too,
+        // so the corner square is filled (at a door / window jamb both lines stop together: nothing changes)
+        o0 = Math.max(Math.min(0, p0, p1), o0 - ad * 1.05); o1 = Math.min(Math.max(s.L, p0, p1), o1 + ad * 1.05);
+        const nx = -s.uy * d, ny = s.ux * d;
+        const A: Pt = [s.a[0] + s.ux * o0, s.a[1] + s.uy * o0], B: Pt = [s.a[0] + s.ux * o1, s.a[1] + s.uy * o1];
+        strips.push([A, B, [B[0] + nx, B[1] + ny], [A[0] + nx, A[1] + ny]]);
+        const k = Math.round((ad * u * 1000) / 25) * 25; byThk[k] = (byThk[k] ?? 0) + (o1 - o0) * u;
+      }
+    }
+  });
+  return { strips, byThk };
+}

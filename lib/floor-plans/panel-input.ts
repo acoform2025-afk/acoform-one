@@ -27,7 +27,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   if (model && t.dxf) {
     const f = dxfFrame(model, 2400); frame = f; const reg = t.dxf.region;
     const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
-    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f));
+    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0 });
   }
   let corners = 0, extCorners = 0;          // internal (room) corners → IC, external (outside) corners → EC
   let solidPx: Pt[][] = [];

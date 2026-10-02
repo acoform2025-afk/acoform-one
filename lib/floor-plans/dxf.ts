@@ -5,7 +5,7 @@
 import DxfParser from "dxf-parser";
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
-import { nearRings, outlineFromWalls, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
+import { nearRings, outlineFromWalls, pairedWallStrips, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
 import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, suggestLayerRole } from "./layer-rules";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
@@ -455,7 +455,7 @@ function wallOpeningsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" 
 const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
-export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = []): DxfAuto {
+export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number } = {}): DxfAuto {
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)));
   const u = unitToM, u2 = unitToM * unitToM;
   const tol = 0.005 / u;                                      // 5 mm in drawing units
@@ -473,10 +473,16 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
 
   // walls: closed outlines merged (duplicates / overlaps once) → wall tops + face length; loose lines add their length
   const wallPaths = of("walls");
-  const U = wallUnion([...wallPaths.filter((p) => p.closed).map((p) => p.pts), ...colWalls]);
-  let looseLen = 0; const loose: Pt[][] = [];
+  // walls drawn only as loose lines (no closed outlines): rebuild the outlines from pairs of parallel lines
+  let openWallLen = 0, closedWallLen = 0;
+  for (const p of wallPaths) { const L = polyLength(p.pts, p.closed); if (p.closed) closedWallLen += L; else openWallLen += L; }
+  const paired = openWallLen * u > 20 && openWallLen > 1.5 * closedWallLen ? pairedWallStrips(wallPaths.filter((p) => !p.closed).map((p) => p.pts), u, Math.max(75, Number(opts.minWallMm) || 0)) : null;
+  const U = wallUnion([...wallPaths.filter((p) => p.closed).map((p) => p.pts), ...colWalls, ...(paired?.strips ?? [])]);
+  let looseLen = 0, unpairedLen = 0; const loose: Pt[][] = [];
   for (const p of wallPaths) {
     if (p.closed) continue;
+    // paired mode: a line with no partner is not a wall face (door ticks, window / sill lines, hatch ends)
+    if (paired) { const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2]; if (!nearRings(mid, U.rings, 0.02 / u)) unpairedLen += polyLength(p.pts, false) * u; continue; }
     const L = polyLength(p.pts, false);
     const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2];
     if (U.rings.length && nearRings(mid, U.rings, 0.02 / u) && nearRings(p.pts[0], U.rings, 0.02 / u)) continue;   // lies on a wall already counted
@@ -645,6 +651,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     })).filter(Boolean) : [],
     wallSeparate, separateWall: { faces: sepFaces, cols: sepCols.length, colPerimeter: sepCols.reduce((s2, c) => s2 + c.perimeter, 0) },
     wallTopArea: U.area * u2,
+    ...(paired ? { wallPairs: { byThk: paired.byThk, unpaired: unpairedLen } } : {}),
     beamLineLength: unsizedLen,
     beamSized, beamRings, beamRingDepth,
     // upstands / planters: closed outlines → perimeter = both faces; height from the layer name ("UPSTAND 250", "PLANTER 1050H")
@@ -675,7 +682,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
     ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
-    ...(() => { const g = wallGaps(U.rings, u); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })) }; })(),
+    ...(() => { const g = wallGaps(U.rings, u, paired ? 1.2 : 0); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })) }; })(),
   };
 }
 
