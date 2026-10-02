@@ -13,8 +13,11 @@ export type Zone = { code: string; rings: Pt[][]; area: number; box: [number, nu
 
 const ring = (pts: Pt[]): [number, number][] => { const r = pts.map((p) => [p[0], p[1]] as [number, number]); if (r.length && (r[0][0] !== r[r.length - 1][0] || r[0][1] !== r[r.length - 1][1])) r.push(r[0]); return r; };
 const safeDiff = (a: MultiPolygon, ...b: MultiPolygon[]): MultiPolygon => {
+  const cuts = b.filter((m) => m.length);
+  // all cuts in one sweep (much faster than one by one); one by one only if a bad piece breaks the sweep
+  try { return cuts.length ? polygonClipping.difference(a, ...cuts) : a; } catch { /* fall back */ }
   let out = a;
-  for (const m of b) { if (!m.length) continue; try { out = polygonClipping.difference(out, m); } catch { /* skip a bad piece */ } }
+  for (const m of cuts) { try { out = polygonClipping.difference(out, m); } catch { /* skip a bad piece */ } }
   return out;
 };
 
