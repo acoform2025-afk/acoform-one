@@ -5,8 +5,8 @@
 import DxfParser from "dxf-parser";
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
-import { nearRings, outlineFromWalls, pairedWallStrips, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
-import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, isRailLayer, suggestLayerRole } from "./layer-rules";
+import { labelledSpaces, nearRings, outlineFromWalls, pairedWallStrips, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
+import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, isRailLayer, suggestLayerRole, WET_ROOM } from "./layer-rules";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
@@ -832,6 +832,20 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       return out;
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
+    // wet rooms (toilet / kitchen / balcony names on the plan): the room around the label, bounded by the walls —
+    // a concrete kerb (upstand / sunk-slab edge) runs along its walls and is formed on both faces
+    wetRooms: (() => {
+      const pts = (model.texts ?? []).filter((t) => WET_ROOM.test(t.text) && t.text.length <= 24 && (!keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false })));
+      if (!pts.length || !U.rings.length) return [];
+      const labels = pts.map((t) => t.text.trim());
+      // bounded by walls, parapets and the slab edge (balconies are open on one side); door gaps up to 1.1 m are bridged
+      // block / brick partition walls (not formed, but the kerb runs under them) bound the rooms too
+      const brick = model.paths.filter((p) => /brik|brick|block|masonry|砌块|砖/i.test(p.layer) && (roles[p.layer] ?? "ignore") !== "walls" && (!keep || keep(p))).map((p) => (p.closed ? [...p.pts, p.pts[0]] : p.pts));
+      const bounds = [...loose, ...brick, ...slab.map((x) => [...x.p.pts, x.p.pts[0]]), ...(UP?.rings ?? []).map((r) => [...r, r[0]])];
+      // a wet room is small; a "room" of 25 m²+ means the partition walls are not on this drawing (block walls left out)
+      // and the space ran into the rest of the flat — not a kerb line, left out
+      return labelledSpaces(U.rings, bounds, pts.map((t) => [t.x, t.y] as Pt), u, 40, 0.55).map((sp, i) => ({ label: labels[i] ?? "", area: sp.area, perimeter: sp.perimeter, box: sp.box })).filter((r) => r.area <= 25);
+    })(),
     ...(() => {
       const sp = model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)|楼梯/i.test(p.layer) && !/lift|elev|note|text|anno|iden/i.test(p.layer) && (!keep || keep(p)));
       const s = stairClusters(sp, u);

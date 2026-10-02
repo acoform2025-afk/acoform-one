@@ -116,6 +116,7 @@ export type DxfAuto = {
   wallOpenings?: { ring: number; edge: number; t0: number; t1: number; door: boolean; thk: number }[];   // door / window stretches of wall faces (drawing units along wallRings[ring] edge `edge`)
   stairCount?: number;                              // staircases found on stair layers
   stairBoxes?: [number, number, number, number][];  // drawing units
+  wetRooms?: { label: string; area: number; perimeter: number; box: [number, number, number, number] }[];   // toilets / kitchens / balconies found by their names (m², m)
   stairsMeasured?: { box: [number, number, number, number]; flights: { width: number; treads: number; tread: number }[]; landingM2: number }[];   // flights read from the tread lines (mm)
   beamRingDepth?: number[];                         // mm, depth of each beam ring
   upstands?: { label: string; h: number; length: number; parapet?: boolean }[];   // upstand / planter walls on the slab: h mm, face length m (both faces)
@@ -329,6 +330,14 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
       items.push({ code: code("X"), group: "wall", label: "Separate set (core / cast separately) — not in the typical floor", calc: `${n2(sw.faces)} m wall faces${sw.cols ? ` + ${sw.cols} columns (${n2(sw.colPerimeter)} m)` : ""} left out`, area: 0 });
     }
     // upstands / planters on the slab: both faces (outline length) × height (layer name, else 250 mm)
+    // kerbs along the walls of wet rooms (toilet / kitchen / balcony): both faces × kerb height — unless the drawing
+    // marks sunk slabs on a layer (then those are measured as drop formwork instead)
+    const kerb = Number(rules.wetKerbMm) || 0;
+    if (kerb > 0 && auto.wetRooms?.length && !(auto.sunk ?? []).length) {
+      const per = auto.wetRooms.reduce((s2, r) => s2 + r.perimeter, 0), a = 2 * per * (kerb / 1000);
+      wallArea += a;
+      items.push({ code: code("U"), group: "wall", label: `Kerbs at ${auto.wetRooms.length} wet rooms (${[...new Set(auto.wetRooms.map((r) => r.label))].slice(0, 4).join(", ")})`, calc: `2 × ${n2(per)} m × ${n3(kerb / 1000)} m`, area: a });
+    }
     for (const up of auto.upstands ?? []) {
       const pMm = Number(t.params.parapetMm) || 900;
       const h = (up.parapet ? pMm : up.h || 250) / 1000, a = up.length * h;

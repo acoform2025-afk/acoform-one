@@ -33,6 +33,8 @@ export function RulesForm({ r, canEdit }: { r: MeasureRules; canEdit: boolean })
           </select></label>
         <label className="flex flex-col gap-1.5"><span className={lbl}>External kicker height <span className="normal-case text-graphite-600">(mm, 0 = none)</span></span>
           <input name="kickerMm" type="number" min={0} max={500} step={5} defaultValue={r.kickerMm} disabled={!canEdit} className={input} /></label>
+        <label className="flex flex-col gap-1.5"><span className={lbl}>Kerb at wet rooms <span className="normal-case text-graphite-600">(mm, toilets / kitchens / balconies; 0 = none)</span></span>
+          <input name="wetKerbMm" type="number" min={0} max={1000} step={10} defaultValue={r.wetKerbMm} disabled={!canEdit} className={input} /></label>
         <label className="flex flex-col gap-1.5"><span className={lbl}>Staircase allowance <span className="normal-case text-graphite-600">(m² per staircase)</span></span>
           <input name="stairAllowanceM2" type="number" min={0} max={2000} step={1} defaultValue={r.stairAllowanceM2} disabled={!canEdit} className={input} /></label>
         <label className="flex flex-col gap-1.5"><span className={lbl}>Staircase area on the quote</span>

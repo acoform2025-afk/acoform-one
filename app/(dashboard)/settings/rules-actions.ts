@@ -13,7 +13,7 @@ export async function saveMeasurementRules(_p: { ok?: boolean; error?: string } 
   const f = (k: string) => formData.get(k);
   const on = (k: string) => f(k) === "on";
   const rules = normaliseRules({
-    minOpeningM2: Number(f("minOpeningM2")), kickerMm: Number(f("kickerMm")), stairAllowanceM2: Number(f("stairAllowanceM2")), extraPct: Number(f("extraPct")),
+    minOpeningM2: Number(f("minOpeningM2")), kickerMm: Number(f("kickerMm")), wetKerbMm: Number(f("wetKerbMm")), stairAllowanceM2: Number(f("stairAllowanceM2")), extraPct: Number(f("extraPct")),
     slabEdges: on("slabEdges"), reveals: on("reveals"), deductWallTops: on("deductWallTops"), deductColumnTops: on("deductColumnTops"),
     stairs: on("stairs"), printOnQuote: on("printOnQuote"), stairBasis: f("stairBasis"),
   });

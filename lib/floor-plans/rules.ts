@@ -10,6 +10,7 @@ export type MeasureRules = {
   deductWallTops: boolean;    // plan area on top of walls is taken off the slab soffit
   deductColumnTops: boolean;  // plan area on top of columns is taken off the slab soffit
   kickerMm: number;           // external kicker height added along the outer slab edge (0 = none)
+  wetKerbMm: number;          // kerb (upstand) along the walls of toilets / kitchens / balconies named on the plan, both faces (0 = none)
   stairs: boolean;            // staircases are included in the quoted area
   stairAllowanceM2: number;   // formwork area allowed per staircase found on the drawing (when not measured flight by flight)
   stairBasis: "allowance" | "measured";   // quoted stair area: the allowance per staircase, or the area measured from the tread lines (soffit, risers, stringers, landings)
@@ -19,7 +20,7 @@ export type MeasureRules = {
 
 export const DEFAULT_RULES: MeasureRules = {
   minOpeningM2: 0.4, slabEdges: false, reveals: true, deductWallTops: true, deductColumnTops: true,
-  kickerMm: 0, stairs: true, stairAllowanceM2: 100, stairBasis: "allowance", extraPct: 10, printOnQuote: true,
+  kickerMm: 0, wetKerbMm: 200, stairs: true, stairAllowanceM2: 100, stairBasis: "allowance", extraPct: 10, printOnQuote: true,
 };
 
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
@@ -39,6 +40,7 @@ export function normaliseRules(raw: unknown): MeasureRules {
     deductWallTops: bool(r.deductWallTops, d.deductWallTops),
     deductColumnTops: bool(r.deductColumnTops, d.deductColumnTops),
     kickerMm: numIn(r.kickerMm, d.kickerMm, 0, 500),
+    wetKerbMm: numIn(r.wetKerbMm, d.wetKerbMm, 0, 1000),
     stairs: bool(r.stairs, d.stairs),
     stairAllowanceM2: numIn(r.stairAllowanceM2, d.stairAllowanceM2, 0, 2000),
     stairBasis: r.stairBasis === "measured" ? "measured" : d.stairBasis,
@@ -59,6 +61,7 @@ export function describeRules(r: MeasureRules): string[] {
     "Beam sides below the slab, edge-beam outer faces at full depth and beam bottoms where marked are measured.",
   ];
   if (r.kickerMm > 0) out.push(`External kicker of ${r.kickerMm} mm is added along the outer edge.`);
+  if (r.wetKerbMm > 0) out.push(`Kerbs of ${r.wetKerbMm} mm along the walls of toilets, kitchens and balconies are measured on both faces (where the drawing names the rooms).`);
   out.push(r.stairs ? `Staircases are included${r.stairBasis === "measured" || r.stairAllowanceM2 <= 0 ? " (measured: waist soffit, risers, open stringers, landings)" : ` (${r.stairAllowanceM2} m² per staircase unless measured flight by flight)`}.` : "Staircases are excluded.");
   out.push("Openings in wall lines get a beam / lintel up to the slab: both sides measured (depth − slab).");
   out.push("Contact area = formwork in contact with concrete (IS 1200 Part 5).");

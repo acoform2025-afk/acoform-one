@@ -120,7 +120,7 @@ const totalsSchema = z.object({
   source: z.enum(["manual", "dxf", "mixed"]),
   rules: z.object({
     minOpeningM2: z.number().min(0).max(5), slabEdges: z.boolean(), reveals: z.boolean(), deductWallTops: z.boolean(), deductColumnTops: z.boolean(),
-    kickerMm: z.number().min(0).max(500), stairs: z.boolean(), stairAllowanceM2: z.number().min(0).max(2000).default(100), stairBasis: z.enum(["allowance", "measured"]).optional(), extraPct: z.number().min(0).max(100), printOnQuote: z.boolean(),
+    kickerMm: z.number().min(0).max(500), wetKerbMm: z.number().min(0).max(1000).optional(), stairs: z.boolean(), stairAllowanceM2: z.number().min(0).max(2000).default(100), stairBasis: z.enum(["allowance", "measured"]).optional(), extraPct: z.number().min(0).max(100), printOnQuote: z.boolean(),
   }).optional(),
 });
 
