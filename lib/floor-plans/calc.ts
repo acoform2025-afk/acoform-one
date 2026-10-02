@@ -80,7 +80,10 @@ export type DxfAuto = {
   slabArea: number; slabPerimeter: number;
   openingArea: number; openingPerimeter: number;
   wallLineLength: number;                           // total length of lines on wall layers
-  beamLineLength?: number;                          // total length of lines on beam layers (= beam side length)
+  beamLineLength?: number;                          // total length of lines on beam layers without a size (= beam side length)
+  beamSized?: { b: number; d: number; len: number; bottom: number; count: number }[];   // beams sized by their layer name: b, d mm; len m (clear of walls / columns); bottom m²
+  beamRings?: Pt[][];                               // outlines of the sized beams (drawing units) — deck zones stop at them
+  columnRings?: Pt[][];                             // outlines of the columns (drawing units)
   columns: { w: number; d: number; perimeter: number; area: number }[];
   wallTopArea?: number;                             // wall outlines merged (overlaps counted once), m²
   slabFromWalls?: boolean;                          // no slab layer: slab = outer outline of the walls
@@ -255,12 +258,17 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
       const per = auto.columns.reduce((x, c) => x + c.perimeter, 0);
       items.push({ code: code("C"), group: "column", label: `${auto.columns.length} columns (DXF layers)`, calc: `${n2(per)} m × ${n3(H)} m`, area: per * H });
     }
-    if (auto.gapSpan && t.params.autoLintels !== false && !(t.beams ?? []).some((b) => b.qty > 0 && b.length_m > 0)) {
+    if (auto.gapSpan && t.params.autoLintels !== false && !(auto.beamSized ?? []).length && !(t.beams ?? []).some((b) => b.qty > 0 && b.length_m > 0)) {
       // aluminium formwork: every opening in a wall line gets a beam / lintel up to the slab — both sides measured
       const dMm = Number(t.params.beamDepthMm) || 600, side = Math.max(0, dMm / 1000 - slab), L2 = 2 * auto.gapSpan;
       const a = L2 * side;
       beamArea += a;
       items.push({ code: code("B"), group: "beam", label: `Beams over ${auto.gapCount ?? ""} wall openings (auto)`, calc: `2 × ${n2(auto.gapSpan)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
+    }
+    for (const g of auto.beamSized ?? []) {
+      const a = 2 * g.len * Math.max(0, g.d / 1000 - slab);
+      beamArea += a;
+      items.push({ code: code("B"), group: "beam", label: `Beams ${g.b}×${g.d} (${g.count} on the drawing)`, calc: `2 × ${n2(g.len)} m × (${n3(g.d / 1000)} − ${n3(slab)}) m · bottom ${n2(g.bottom)} m² in the slab`, area: a });
     }
     if (auto.beamLineLength) {
       const dMm = Number(t.params.beamDepthMm) || 600, a = auto.beamLineLength * Math.max(0, dMm / 1000 - slab);

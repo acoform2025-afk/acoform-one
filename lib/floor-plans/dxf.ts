@@ -3,8 +3,10 @@
  * a picture of the plan, and automatic quantities per layer role (walls / columns / slab outline / openings).
  */
 import DxfParser from "dxf-parser";
+import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
 import { nearRings, outlineFromWalls, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
+import { beamSizeFromLayer, isNoiseLayer, suggestLayerRole } from "./layer-rules";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
@@ -48,17 +50,7 @@ function bulgePts(vs: { x: number; y: number; bulge?: number }[], closed: boolea
   return out;
 }
 
-function suggestRole(name: string): LayerRole {
-  const n = name.toLowerCase();
-  if (/parapet|compound|hatch|elev|elv|sec(tion)?[^a-z]|text|dim|furn|door|win|grid/.test(n)) return "ignore";
-  if (/(^|[^a-z])(col|cols|clm|column|columns)([^a-z]|$)|column/.test(n)) return "columns";
-  if (/beam|(^|[^a-z])bm([^a-z]|$)/.test(n)) return "beams";
-  if (/wall|shear|brick|masonry|(^|[^a-z])rcc([^a-z]|$)|_rcc$|(^|[^a-z])wl([^a-z]|$)/.test(n)) return "walls";
-  if (/shaft|cut ?out|opening|duct|lift|stair.?open/.test(n)) return "opening";
-  if (/^[a-z]-flor$|^a-flor-mcut$/.test(n)) return "slab";          // Revit floor edges
-  if (/slab|outline|boundary|plate|periphery|edge|built.?up/.test(n)) return "slab";
-  return "ignore";
-}
+const suggestRole = (name: string): LayerRole => suggestLayerRole(name);
 
 const VIEW_LAYER = "ACOFORM-VIEWS";
 
@@ -180,13 +172,22 @@ export function readDxf(raw: string): DxfModel {
   const paths: DxfPath[] = [];
   const texts: DxfText[] = [];
   const views: DxfView[] = [];
+  const noiseCache = new Map<string, boolean>();
+  const extentPts: number[] = [];
 
   const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number) => {
     for (const e of ents) {
       if (paths.length > 150000) return;
       if (e.inPaperSpace) continue;
       const layer: string = (e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0");
-      const push = (pts: Pt[], closed: boolean) => { if (pts.length >= 2) paths.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed }); };
+      // doors, windows, glazing, furniture … never carry formwork geometry: skip their lines (keep their texts)
+      const noise = noiseCache.get(layer) ?? (noiseCache.set(layer, isNoiseLayer(layer)), noiseCache.get(layer)!);
+      const push = (pts: Pt[], closed: boolean) => {
+        if (pts.length < 2) return;
+        if (!noise) { paths.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed }); return; }
+        // skipped lines still count for the drawing extents, so saved plan regions (in picture pixels) stay put
+        if (extentPts.length < 4_000_000) for (const [x, y] of pts) { const q = ap(m, x, y); extentPts.push(q[0], q[1]); }
+      };
       switch (e.type) {
         case "LINE": if (e.vertices?.length >= 2) push([[e.vertices[0].x, e.vertices[0].y], [e.vertices[1].x, e.vertices[1].y]], false); break;
         case "LWPOLYLINE": case "POLYLINE": {
@@ -242,6 +243,7 @@ export function readDxf(raw: string): DxfModel {
   // extents: ignore a few far-away stray objects
   const xs: number[] = [], ys: number[] = [];
   for (const p of paths) for (const [x, y] of p.pts) { xs.push(x); ys.push(y); }
+  for (let i = 0; i < extentPts.length; i += 2) { xs.push(extentPts[i]); ys.push(extentPts[i + 1]); }
   xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
   const q = (arr: number[], f: number) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(f * (arr.length - 1))))];
   let [x0, x1, y0, y1] = [xs[0], xs[xs.length - 1], ys[0], ys[ys.length - 1]];
@@ -383,6 +385,7 @@ function stairClusters(paths: DxfPath[], u: number): [number, number, number, nu
   return [...grp.values()].filter((b) => (b[2] - b[0]) * u >= 2 && (b[3] - b[1]) * u >= 2) as [number, number, number, number][];
 }
 
+const closeRing = (r: Pt[]): [number, number][] => { const o = r.map((q) => [q[0], q[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
 const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
@@ -392,9 +395,17 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   const tol = 0.005 / u;                                      // 5 mm in drawing units
   const loops = (r: LayerRole, gaps = false) => closedLoops(of(r), tol, gaps).map((pts) => ({ layer: r, pts, closed: true }) as DxfPath);
 
+  // columns: small rectangular / round outlines; big or L-shaped ones (shear walls, lift cores) are walls
+  const colAll = outermost(loops("columns", true).filter((p) => p.pts.length >= 3)).map(({ p }) => {
+    const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
+    const w = (Math.max(...xs) - Math.min(...xs)) * u, d = (Math.max(...ys) - Math.min(...ys)) * u, area = polyArea(p.pts) * u2;
+    return { p, w, d, perimeter: polyLength(p.pts, true) * u, area, isCol: area > 0 && w >= 0.1 && d >= 0.1 && w <= 4 && d <= 4 && (area >= 0.8 * w * d || p.pts.length > 8) };
+  });
+  const colWalls = colAll.filter((c) => !c.isCol && c.area > 0.05).map((c) => c.p.pts);
+
   // walls: closed outlines merged (duplicates / overlaps once) → wall tops + face length; loose lines add their length
   const wallPaths = of("walls");
-  const U = wallUnion(wallPaths.filter((p) => p.closed).map((p) => p.pts));
+  const U = wallUnion([...wallPaths.filter((p) => p.closed).map((p) => p.pts), ...colWalls]);
   let looseLen = 0; const loose: Pt[][] = [];
   for (const p of wallPaths) {
     if (p.closed) continue;
@@ -408,21 +419,70 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   // IS 1200-5: openings under 0.4 m² are not deducted
   const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]).filter((x) => x.a * u2 >= minOpeningM2);
 
-  // slab: slab layer outlines; if none, the outer face of the walls
+  // beams: outlines on beam layers. A size in the layer name ("BEAM 300X750H") gives each beam its own width and
+  // depth: the part clear of walls / columns is its length → both sides (depth − slab) and the bottom. Beam layers
+  // without a size keep the old rule (line length × one default depth).
+  const beamPaths = of("beams");
+  const byLayer = new Map<string, DxfPath[]>();
+  for (const p of beamPaths) (byLayer.get(p.layer) ?? byLayer.set(p.layer, []).get(p.layer)!).push(p);
+  const solid: MultiPolygon = [];
+  for (const r of U.rings) if (r.length >= 3) solid.push([closeRing(r)]);
+  for (const c of colAll) if (c.isCol) solid.push([closeRing(c.p.pts)]);
+  let solidU: MultiPolygon = [];
+  try { solidU = solid.length ? polygonClipping.union(solid[0] as Polygon, ...(solid.slice(1) as Polygon[])) : []; } catch { solidU = []; }
+  const sized = new Map<string, { b: number; d: number; len: number; bottom: number; count: number }>();
+  const beamRings: Pt[][] = [];
+  let unsizedLen = 0;
+  // a size written next to the beam ("B:125X750H", "IVP:100X375H", "B1 230x450") when the layer has none
+  const sizeTexts = (model.texts ?? []).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
+  const sizeNear = (r: Pt[], wMm: number) => {
+    const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]), pad = 0.6 / u;
+    const b = [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
+    const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+    // the label of this beam: inside its box, and its width matches the drawn width
+    const hits = sizeTexts.filter((x) => x.t.x >= b[0] && x.t.x <= b[2] && x.t.y >= b[1] && x.t.y <= b[3] && Math.abs(x.sz!.b - wMm) <= 0.5 * x.sz!.b);
+    hits.sort((p1, p2) => Math.hypot(p1.t.x - cx, p1.t.y - cy) - Math.hypot(p2.t.x - cx, p2.t.y - cy));
+    return hits[0]?.sz ?? null;
+  };
+  for (const [layer, ps] of byLayer) {
+    const lsz = beamSizeFromLayer(layer);
+    const L = closedLoops(ps, tol).filter((r) => r.length >= 3 && Math.abs(polyArea(r)) * u2 > 0.01);
+    if (!L.length) { unsizedLen += ps.reduce((s2, p) => s2 + polyLength(p.pts, p.closed), 0) * u; continue; }
+    for (const r of L) {
+      // a beam outline is a narrow strip about as wide as the beam (not a room enclosed by chained beam lines)
+      const wEst = (2 * Math.abs(polyArea(r)) * u2) / Math.max(1e-9, polyLength(r, true) * u) * 1000;
+      const sz = lsz ?? sizeNear(r, wEst);
+      if (!sz || wEst < 0.4 * sz.b || wEst > 1.8 * sz.b) { unsizedLen += polyLength(r, true) * u; continue; }
+      beamRings.push(r);
+      let clearA = Math.abs(polyArea(r)) * u2;
+      try { if (solidU.length) { const diff = polygonClipping.difference([closeRing(r)] as Polygon, solidU); clearA = diff.reduce((s2, poly) => s2 + Math.abs(polyArea(poly[0].slice(0, -1) as Pt[])) - poly.slice(1).reduce((h, q) => h + Math.abs(polyArea(q.slice(0, -1) as Pt[])), 0), 0) * u2; } } catch { /* keep the full area */ }
+      const k = `${sz.b}x${sz.d}`;
+      const g = sized.get(k) ?? { b: sz.b, d: sz.d, len: 0, bottom: 0, count: 0 };
+      g.len += clearA / (sz.b / 1000); g.bottom += clearA; g.count++; sized.set(k, g);
+    }
+  }
+  const beamSized = [...sized.values()].sort((a, b) => b.len - a.len);
+
+  // slab: slab layer outlines; if none, the outer face of the walls (with columns and beams: a framed building's
+  // slab runs out to its beams)
   let slab = outermost(loops("slab"));
   let slabFromWalls = false;
-  if (!slab.length && wallPaths.length) {
+  // a slab layer that covers only a small corner of the walls (a detail, a balcony) is not the floor outline
+  if (slab.length && wallPaths.length) {
+    const xs = wallPaths.flatMap((p) => p.pts.map((q) => q[0])), ys = wallPaths.flatMap((p) => p.pts.map((q) => q[1]));
+    const wallBox = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    if (slab.reduce((s2, x) => s2 + x.a, 0) < 0.25 * wallBox) slab = [];
+  }
+  if (!slab.length && (wallPaths.length || beamRings.length)) {
     // balcony parapets / railings mark slab edges outside the walls
     const edgeHints = model.paths.filter((p) => SLAB_EDGE_HINT.test(p.layer) && (!keep || keep(p)));
-    const o = outlineFromWalls([...wallPaths, ...edgeHints], 1 / u);
+    const frame = beamRings.length ? [...beamRings.map((pts) => ({ pts, closed: true })), ...colAll.map((c) => ({ pts: c.p.pts, closed: true }))] : [];
+    const o = outlineFromWalls([...wallPaths, ...colWalls.map((pts) => ({ pts, closed: true })), ...frame, ...edgeHints], 1 / u);
     const outer = o.loops.filter((l) => polyArea(l) > 0);
     if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
   }
 
-  const cols = outermost(loops("columns", true).filter((p) => p.pts.length >= 3)).map(({ p }) => {
-    const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
-    return { w: (Math.max(...xs) - Math.min(...xs)) * u, d: (Math.max(...ys) - Math.min(...ys)) * u, perimeter: polyLength(p.pts, true) * u, area: polyArea(p.pts) * u2 };
-  }).filter((c) => c.area > 0 && c.w >= 0.1 && c.d >= 0.1 && c.w <= 4 && c.d <= 4);
+  const cols = colAll.filter((c) => c.isCol).map(({ w, d, perimeter, area, p }) => ({ w, d, perimeter, area, pts: p.pts }));
   return {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
@@ -430,8 +490,9 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     openingPerimeter: openL.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
     wallLineLength: (U.perimeter + looseLen) * u,
     wallTopArea: U.area * u2,
-    beamLineLength: of("beams").reduce((s, p) => s + polyLength(p.pts, p.closed), 0) * u,
-    columns: cols,
+    beamLineLength: unsizedLen,
+    beamSized, beamRings,
+    columns: cols.map(({ w, d, perimeter, area }) => ({ w, d, perimeter, area })), columnRings: cols.map((c) => c.pts),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,
     ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
@@ -445,7 +506,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
  */
 export type PlanCandidate = { box: [number, number, number, number]; count: number; w: number; h: number; title?: string; score: number; floors?: number };
 
-const BAD_TITLE = /section|elevation|site|roof|terrace|parking|basement|stilt|podium|detail|stair|lift|key\s*plan|location|schedule|foundation|footing|column\s*layout|centre\s*line|center\s*line/i;
+const BAD_TITLE = /section|elevation|site|roof|terrace|parking|basement|stilt|podium|detail|stair|lift|key\s*plan|location|schedule|foundation|footing|column\s*layout|centre\s*line|center\s*line|剖面|立面|屋面|地下|详图|大样|楼梯|总平面/i;
 /** Floors from a title like "TYPICAL 1ST TO 14TH FLOOR PLAN" or "2nd-12th floor". */
 function floorsFromTitle(t: string): number | undefined {
   const m = t.match(/(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor\s*)?(?:to|-|–|&|upto|up to)\s*(\d{1,3})\s*(?:st|nd|rd|th)?/i);
@@ -460,8 +521,8 @@ function titleFor(texts: DxfText[], box: [number, number, number, number], other
   const inOther = (t: DxfText) => others.some((o) => t.x > o[0] && t.x < o[2] && t.y > o[1] && t.y < o[3] && !(t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1));
   const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.25 && !inOther(t))
     .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
-    .filter((t) => /plan|section|elevation|layout|floor|block|tower|wing/i.test(t.text) && !/\b(lvl|level|slab|beam)\b/i.test(t.text) && t.text.length >= 4);
-  const pri = (x: string) => (/plan|section|elevation|layout/i.test(x) ? 1 : 0);
+    .filter((t) => /plan|section|elevation|layout|floor|block|tower|wing|平面图|剖面|立面图|深化图|大样/i.test(t.text) && !/\b(lvl|level|slab|beam)\b/i.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
+  const pri = (x: string) => (/plan|section|elevation|layout|平面图|剖面|立面图|深化图/i.test(x) ? 1 : 0);
   // a big title written inside the drawing's own outline wins; otherwise "… PLAN / SECTION / ELEVATION" titles, biggest first
   const maxH = Math.max(0, ...near.map((t) => t.h));
   const own = (t: DxfText) => (t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1 && t.h >= 0.6 * maxH ? 1 : 0);
@@ -626,8 +687,11 @@ export function viewLabel(name: string): string {
   return view.toUpperCase().includes(b) ? view : `${b} · ${view}`;
 }
 export function partKind(t: string): PartKind {
-  if (/section|sectional|\bsec\b/i.test(t)) return "section";
-  if (/elevation|\belev\b/i.test(t)) return "elevation";
+  if (/section|sectional|\bsec\b|剖面/i.test(t)) return "section";
+  if (/elevation|\belev\b|立面/i.test(t)) return "elevation";
+  if (/大样|详图/.test(t)) return "detail";
+  if (/总平面/.test(t)) return "site";
+  if (/平面图|深化图|标准层/.test(t)) return "plan";
   if (/site|master|location|key\s*plan|layout\s*plan|parking/i.test(t)) return "site";
   if (/schedule|legend|notes?\b|title/i.test(t)) return "detail";
   if (/plan|floor|block|tower|wing|layout/i.test(t)) return "plan";
@@ -653,6 +717,11 @@ function clusterBoxes(model: DxfModel, gap: number, vBoxes: Box[]): { box: Box; 
   const key = (x: number, y: number) => `${Math.floor((x - bx0) / C)},${Math.floor((y - by0) / C)}`;
   const inBox = (x: number, y: number) => x >= bx0 - span * 0.05 && x <= bx1 + span * 0.05 && y >= by0 - span * 0.05 && y <= by1 + span * 0.05;
   for (const p of model.paths) {
+    // long slanting single lines are note leaders / match lines drawn across sheets: they do not join drawings
+    if (p.pts.length === 2) {
+      const dx = Math.abs(p.pts[1][0] - p.pts[0][0]), dy = Math.abs(p.pts[1][1] - p.pts[0][1]);
+      if (Math.hypot(dx, dy) > 3 * C && Math.min(dx, dy) > 0.05 * Math.max(dx, dy)) continue;
+    }
     for (let i = 0; i < p.pts.length; i++) {
       const [x, y] = p.pts[i]; if (!inBox(x, y)) continue;
       const k0 = key(x, y); cells.set(k0, (cells.get(k0) ?? 0) + 1);
@@ -681,13 +750,45 @@ function clusterBoxes(model: DxfModel, gap: number, vBoxes: Box[]): { box: Box; 
   return out;
 }
 
+
+/**
+ * Sheet frames drawn in model space (several A1 / A0 sheets laid side by side, each with its own border and title
+ * block): big axis-aligned rectangles of drawing-sheet proportions. A double border counts once; a frame drawn around
+ * several sheets is left out (its sheets are the drawings).
+ */
+export function sheetFrames(model: DxfModel, unitToM: number): Box[] {
+  const out: Box[] = [];
+  for (const p of model.paths) {
+    if (!p.closed || p.pts.length < 4 || p.pts.length > 5) continue;
+    const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
+    const b: Box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const w = (b[2] - b[0]) * unitToM, h = (b[3] - b[1]) * unitToM;
+    if (Math.min(w, h) < 10 || Math.max(w, h) / Math.min(w, h) < 1.2 || Math.max(w, h) / Math.min(w, h) > 2.2) continue;
+    // a rectangle: every corner on the box
+    const tol = Math.max(b[2] - b[0], b[3] - b[1]) * 0.002;
+    if (!p.pts.every(([x, y]) => (Math.abs(x - b[0]) < tol || Math.abs(x - b[2]) < tol) && (Math.abs(y - b[1]) < tol || Math.abs(y - b[3]) < tol))) continue;
+    if (!out.some((o) => boxInter(o, b) > 0.98 * Math.max(boxArea(o), boxArea(b)))) out.push(b);
+  }
+  out.sort((a, b) => boxArea(b) - boxArea(a));
+  const keep = new Set(out);
+  for (const f of out) {
+    if (!keep.has(f)) continue;
+    const inner = out.filter((g) => g !== f && keep.has(g) && boxArea(g) < boxArea(f) && boxInter(f, g) >= 0.95 * boxArea(g));
+    if (inner.length >= 2) keep.delete(f);                      // a border around several sheets
+    else if (inner.length === 1 && boxArea(inner[0]) >= 0.8 * boxArea(f)) keep.delete(inner[0]);  // double border
+  }
+  return out.filter((f) => keep.has(f));
+}
+
 /**
  * Splits the whole file into its separate drawings: everything closer than 3 m belongs together (closer drawings are
  * split again where each piece has its own title, or by their walls); named blocks / Revit views are drawings of their
  * own. Each gets a title (drawing title text or view name) and a type. Numbered in reading order (top row first).
  */
 export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<string, LayerRole>): DrawingPart[] {
-  const views = (model.views ?? []).filter((v) => (v.box[2] - v.box[0]) * unitToM >= 2 && (v.box[3] - v.box[1]) * unitToM >= 2);
+  // named blocks that hold only skipped layers (glazing, doors, railings in elevations) are not drawings
+  const linesIn = (b: number[]) => { let n = 0; for (const p of model.paths) { const [x, y] = p.pts[0]; if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] && ++n >= 30) break; } return n; };
+  const views = (model.views ?? []).filter((v) => (v.box[2] - v.box[0]) * unitToM >= 2 && (v.box[3] - v.box[1]) * unitToM >= 2 && linesIn(v.box) >= 30);
   const vBoxes = views.map((v) => v.box);
   const texts = model.texts ?? [];
   const minHits = 12;
@@ -697,12 +798,21 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
   for (const v of views) if (!raw.some((r) => boxInter(r.box, v.box) > 0.95 * Math.max(boxArea(r.box), boxArea(v.box)))) raw.push({ box: v.box, view: v.name, hits: 1000 });
   const big = clusterBoxes(model, 3 / unitToM, vBoxes);
   const small = clusterBoxes(model, 1.5 / unitToM, vBoxes).filter((c) => c.hits >= minHits && bigEnough(c.box));
-  const TITLE = /plan|section|elevation|layout|floor|block|tower|wing/i;
+  const TITLE = /plan|section|elevation|layout|floor|block|tower|wing|平面图|剖面|立面图|深化图/i;
   const cands = roles ? planCandidates(model, roles, unitToM) : [];
   const plansIn = (b: Box) => cands.filter((c) => partKind(c.title ?? "plan") === "plan" && boxInter(c.box, b) >= 0.8 * boxArea(c.box) && !views.some((v) => boxInter(c.box, v.box) >= 0.8 * boxArea(c.box)));
+  const frames = sheetFrames(model, unitToM);
+  const pointsIn = (b: Box) => { let n = 0; for (const p of model.paths) { const [x, y] = p.pts[0]; if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) n++; } return n; };
   for (const c of big) {
     if (c.hits < minHits || !bigEnough(c.box)) continue;
     if (views.some((v) => boxInter(c.box, v.box) >= 0.85 * boxArea(c.box))) continue;  // already listed as a named drawing
+    // several drawing sheets side by side, each in its own frame: every sheet is one drawing
+    const fr = frames.filter((f) => boxInter(f, c.box) >= 0.9 * boxArea(f));
+    if (fr.length >= 2) {
+      for (const f of fr) { const n = pointsIn(f); if (n >= minHits) raw.push({ box: f, hits: n }); }
+      for (const s2 of small) if (boxInter(s2.box, c.box) >= 0.9 * boxArea(s2.box) && s2.hits >= 40 && !fr.some((f) => boxInter(f, s2.box) >= 0.3 * boxArea(s2.box))) raw.push({ box: s2.box, hits: s2.hits });
+      continue;
+    }
     const inside = views.filter((v) => boxInter(c.box, v.box) >= 0.9 * boxArea(v.box));
     const covered = inside.reduce((s2, v) => s2 + boxArea(v.box), 0);
     if (c.outside < Math.max(minHits, c.hits * 0.12) && (inside.length >= 2 || covered >= 0.5 * boxArea(c.box))) continue; // only named drawings + a sheet frame
@@ -729,8 +839,9 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
     } else raw.push({ box: c.box, hits: c.hits });
   }
   // plans joined by grid / dimension lines are split again by their walls
+  const isFrame = (b: Box) => frames.some((f) => f === b);
   for (let i = raw.length - 1; i >= 0; i--) {
-    const r = raw[i]; if (r.view) continue;
+    const r = raw[i]; if (r.view || isFrame(r.box)) continue;
     const own = r.title ?? (texts.length ? titleFor(texts, r.box) : undefined);
     if (own && /section|elevation|elev\b/i.test(own)) continue;
     const inside = cands.filter((c) => partKind(c.title ?? "plan") === "plan" && boxInter(c.box, r.box) >= 0.8 * boxArea(c.box) && !views.some((v) => boxInter(c.box, v.box) >= 0.8 * boxArea(c.box)));

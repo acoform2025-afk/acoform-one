@@ -22,7 +22,7 @@ const safeDiff = (a: MultiPolygon, ...b: MultiPolygon[]): MultiPolygon => {
  * Zones = slab outlines − walls − beams over openings (strips across the wall gaps) − ducts.
  * wallRings: merged wall outline rings (outer rings and their holes, any order — combined even-odd).
  */
-export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[][], gaps: { a: Pt; b: Pt; thk: number }[], minArea = 0.25): { rings: Pt[][]; area: number; box: [number, number, number, number] }[] {
+export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[][], gaps: { a: Pt; b: Pt; thk: number }[], minArea = 0.25, solids: Pt[][] = []): { rings: Pt[][]; area: number; box: [number, number, number, number] }[] {
   let slab: MultiPolygon = [];
   for (const s of slabs) if (s.pts.length >= 3) { try { slab = slab.length ? polygonClipping.union(slab, [ring(s.pts)]) : [[ring(s.pts)]]; } catch { /* skip */ } }
   if (!slab.length) return [];
@@ -35,7 +35,8 @@ export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[]
     strips.push([ring([[g.a[0] + nx, g.a[1] + ny], [g.b[0] + nx, g.b[1] + ny], [g.b[0] - nx, g.b[1] - ny], [g.a[0] - nx, g.a[1] - ny]])] as Polygon);
   }
   const holes: MultiPolygon = slabs.flatMap((s) => s.holes.filter((h) => h.length >= 3).map((h) => [ring(h)] as Polygon));
-  const zones = safeDiff(slab, walls, strips, holes);
+  const solid: MultiPolygon = solids.filter((r) => r.length >= 3).map((r) => [ring(r)] as Polygon);
+  const zones = safeDiff(slab, walls, strips, holes, ...solid.map((p) => [p] as MultiPolygon));
   const out: { rings: Pt[][]; area: number; box: [number, number, number, number] }[] = [];
   for (const poly of zones) {
     const rings = poly.map((r) => r.slice(0, -1) as Pt[]);

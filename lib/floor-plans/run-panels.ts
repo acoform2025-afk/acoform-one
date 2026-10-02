@@ -45,5 +45,5 @@ export function buildZones(inp: ReturnType<typeof panelInputs>, catalog: CatPane
   const deck = catalog.filter((c) => c.panel_category === "deck_panel" && Number(c.height_mm) === 1200);
   const deckW = deck.map((c) => Number(c.width_mm));
   const codeFor = (w: number, L: number) => deck.find((c) => Number(c.width_mm) === w && Number(c.height_mm) === L)?.panel_code ?? `DP-${w}-${L}`;
-  return deckZones(inp.decks, inp.zoneWalls, inp.zoneGaps).map((z, i) => layoutZone(`M${i + 1}`, z, deckW.length ? deckW : [600, 500, 450, 400, 300], 1200, codeFor));
+  return deckZones(inp.decks, inp.zoneWalls, inp.zoneGaps, 0.25, inp.zoneBeams).map((z, i) => layoutZone(`M${i + 1}`, z, deckW.length ? deckW : [600, 500, 450, 400, 300], 1200, codeFor));
 }

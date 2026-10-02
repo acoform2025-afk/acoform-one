@@ -143,13 +143,17 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     const sides = b.sides == null ? 1 : Math.max(1, Math.min(2, Math.round(b.sides))) as 1 | 2;
     beams.push({ code: b.label || `BT${i + 1}`, length: b.length_m * 1000 * b.qty, b: b.bottom ? Number(b.width_mm) || 0 : 0, d: b.depth_mm, sides, bottom: !!b.bottom });
   }
-  for (const l of g.dxf.beams ?? []) {
+  if (auto?.beamSized?.length) {
+    // beams sized by their layer names: each size its own run (clear length, both sides, bottom)
+    for (const b of auto.beamSized) beams.push({ code: `B${b.b}x${b.d}`, length: b.len * 1000, b: b.b, d: b.d, sides: 2, bottom: true });
+    if ((auto.beamLineLength ?? 0) > 0.1) beams.push({ code: "BL", length: auto.beamLineLength! * 1000, b: 0, d: t.params.beamDepthMm ?? 600, sides: 1, bottom: false });
+  } else for (const l of g.dxf.beams ?? []) {
     let L = 0; for (let i = 1; i < l.pts.length; i++) L += mm(Math.hypot(l.pts[i][0] - l.pts[i - 1][0], l.pts[i][1] - l.pts[i - 1][1]));
     if (L > 100) beams.push({ code: "BL", length: L, b: 0, d: t.params.beamDepthMm ?? 600, sides: 1, bottom: false });
   }
 
   // beams / lintels over openings found in the wall lines (same rule as the area take-off)
-  if (auto?.gaps?.length && t.params.autoLintels !== false && !(t.beams ?? []).some((b) => b.qty > 0 && b.length_m > 0)) {
+  if (auto?.gaps?.length && t.params.autoLintels !== false && !auto.beamSized?.length && !(t.beams ?? []).some((b) => b.qty > 0 && b.length_m > 0)) {
     const D = Number(t.params.beamDepthMm) || 600;
     for (const gp of auto.gaps) {
       beams.push({ code: "LB", length: gp.span * 1000, b: Math.round((gp.thk ?? 0.15) * 1000), d: D, sides: 2, bottom: true });
@@ -207,6 +211,8 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     }
     zoneWalls = wallUnion(rects).rings;
   }
-  const zoneGaps = frame && auto?.gaps ? auto.gaps.map((gp) => ({ a: toM(frame!.toPx(gp.a)), b: toM(frame!.toPx(gp.b)), thk: gp.thk ?? (t.params.wallThkMm ?? 150) / 1000 })) : [];
-  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps };
+  // beams and columns in the slab (framed buildings): the deck stops at them (beam bottoms are their own panels)
+  const zoneBeams: Pt[][] = frame ? [...(auto?.beamRings ?? []), ...(auto?.columnRings ?? [])].map((r) => r.map((q) => toM(frame!.toPx(q)))) : [];
+  const zoneGaps = frame && auto?.beamSized?.length ? [] : frame && auto?.gaps ? auto.gaps.map((gp) => ({ a: toM(frame!.toPx(gp.a)), b: toM(frame!.toPx(gp.b)), thk: gp.thk ?? (t.params.wallThkMm ?? 150) / 1000 })) : [];
+  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams };
 }

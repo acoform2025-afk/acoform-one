@@ -5,6 +5,7 @@
  * arcs and circles, with blocks (INSERT) exploded and layer names kept.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { isNoiseLayer } from "./layer-rules";
 type Xf = [number, number, number, number, number, number]; // a b c d e f  → x' = a x + c y + e ; y' = b x + d y + f
 const ID: Xf = [1, 0, 0, 1, 0, 0];
 const mul = (m: Xf, n: Xf): Xf => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
@@ -76,7 +77,7 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
     for (const e of ents ?? []) {
       if (count >= maxEntities) return;
       const layer = String((e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0")).replace(/[\r\n]/g, " ");
-      if (SKIP_LAYER.test(layer) && e.type !== "TEXT" && e.type !== "MTEXT") continue;
+      if ((SKIP_LAYER.test(layer) || isNoiseLayer(layer)) && e.type !== "TEXT" && e.type !== "MTEXT") continue;
       const T = (pts: [number, number][]) => pts.map(([x, y]) => ap(m, x, y));
       switch (e.type) {
         case "LINE": if (e.startPoint && e.endPoint) poly(layer, T([[e.startPoint.x, e.startPoint.y], [e.endPoint.x, e.endPoint.y]]), false); break;
