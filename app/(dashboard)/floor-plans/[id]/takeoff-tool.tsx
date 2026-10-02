@@ -554,7 +554,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
       const path = `${tenantId}/${plan.id}/preview.jpg`;
       const up = await createClient().storage.from("floor-plans").upload(path, blob, { contentType: "image/jpeg", upsert: true });
       if (up.error) throw new Error("Could not save the plan picture: " + up.error.message);
-      const res = await saveTakeoff(plan.id, { ...t, image: { ...(t.image ?? {}), w: size.w, h: size.h } }, totals, path);
+      const thinChosen = (Number(t.params.minWallMm) || 0) > 75;
+      const wo = totalsAlt ? { all: thinChosen ? { contact: totalsAlt.contact_area, quote: totalsAlt.quote_area } : { contact: totals.contact_area, quote: totals.quote_area }, thin: thinChosen ? { contact: totals.contact_area, quote: totals.quote_area } : { contact: totalsAlt.contact_area, quote: totalsAlt.quote_area }, limitMm: thinChosen ? Number(t.params.minWallMm) : 125, chosen: thinChosen ? "thin" as const : "all" as const } : undefined;
+      const res = await saveTakeoff(plan.id, { ...t, image: { ...(t.image ?? {}), w: size.w, h: size.h } }, { ...totals, ...(wo ? { wall_options: wo } : {}) }, path);
       if (res.error) throw new Error(res.error);
       setDirty(false); setMsg({ ok: "Saved." });
       router.refresh();

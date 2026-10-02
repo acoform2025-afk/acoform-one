@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { EditLeadForm } from "./edit-lead-form";
-import { fmtArea } from "@/lib/floor-plans/calc";
+import { fmtArea, type WallOptions } from "@/lib/floor-plans/calc";
+import { Download, FileText } from "lucide-react";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -16,7 +17,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .select("id, quotation_code, quotation_type, status, total_with_gst, created_at")
     .eq("lead_id", id).neq("status", "superseded").order("created_at", { ascending: false });
   const { data: plans } = await supabase.from("floor_plans")
-    .select("id, name, drawing_type, source_kind, original_path, totals, updated_at").eq("lead_id", id).order("created_at", { ascending: false });
+    .select("id, name, drawing_type, source_kind, original_path, totals, updated_at").eq("lead_id", id).order("name");
 
   return (
     <div className="fade-in max-w-5xl">
@@ -53,6 +54,54 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </table>
         </div>
       ) : null}
+
+      {(() => {
+        // project summary: every measured block side by side, with both wall options when the drawing allows them
+        type T = Record<string, number> & { wall_options?: WallOptions; params?: { scope?: string; floorHeight?: number; slabMm?: number } };
+        const blocks = (plans ?? []).filter((p) => p.drawing_type === "plan" && Number((p.totals as T)?.contact_area) > 0).map((p) => ({ id: p.id, name: p.name, t: p.totals as T }));
+        if (blocks.length < 1) return null;
+        const hasOpt2 = blocks.every((b) => b.t.wall_options);
+        const limit = blocks.find((b) => b.t.wall_options)?.t.wall_options?.limitMm ?? 125;
+        const o1 = (b: typeof blocks[number]) => b.t.wall_options ? b.t.wall_options.all : { contact: b.t.contact_area, quote: b.t.quote_area };
+        const o2 = (b: typeof blocks[number]) => b.t.wall_options?.thin;
+        const sum = (f: (b: typeof blocks[number]) => number) => blocks.reduce((a, b) => a + f(b), 0);
+        const pct = blocks[0].t.extra_pct ?? 0;
+        return (
+          <div className="mt-6 overflow-hidden rounded-lg border border-brand-orange/40">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-graphite-900 px-4 py-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-brand-orange">Project summary — {blocks.length} block{blocks.length > 1 ? "s" : ""} · typical floor</p>
+              <div className="flex flex-wrap gap-1.5">
+                <a href={`/leads/${lead.id}/area-sheets`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-graphite-700 px-2.5 py-1 text-xs text-graphite-200 hover:border-brand-orange"><FileText className="size-3.5" />Area sheets (all blocks)</a>
+                {hasOpt2 ? <a href={`/leads/${lead.id}/area-sheets?options=both`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-graphite-700 px-2.5 py-1 text-xs text-graphite-200 hover:border-brand-orange"><Download className="size-3.5" />Area sheets (both options)</a> : null}
+                {canQuote ? <Link href={`/quotations?lead=${lead.id}&mode=quick&blocks=1`} className="rounded-md bg-brand-orange px-2.5 py-1 text-xs font-medium text-white hover:opacity-90">⚡ Quote all blocks{hasOpt2 ? " (both options)" : ""}</Link> : null}
+              </div>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead className="bg-graphite-900/60 text-[10px] uppercase tracking-wide text-graphite-500">
+                <tr><th className="px-4 py-1.5">Block</th><th className="px-4 py-1.5 text-right">Option 1 · all walls concrete</th><th className="px-4 py-1.5 text-right">+{pct}%</th>{hasOpt2 ? <><th className="px-4 py-1.5 text-right">Option 2 · walls under {limit} mm in block</th><th className="px-4 py-1.5 text-right">+{pct}%</th></> : null}<th className="px-4 py-1.5 text-right">Chosen</th></tr>
+              </thead>
+              <tbody className="divide-y divide-graphite-800">
+                {blocks.map((b) => (
+                  <tr key={b.id} className="bg-graphite-950">
+                    <td className="px-4 py-2"><Link href={`/floor-plans/${b.id}`} className="text-graphite-100 hover:text-brand-orange hover:underline">{b.name}</Link><span className="ml-2 text-[11px] text-graphite-500">{b.t.params?.floorHeight ? `${Math.round(b.t.params.floorHeight * 1000)} / ${b.t.params.slabMm} mm` : ""}</span></td>
+                    <td className="px-4 py-2 text-right font-mono text-xs text-graphite-200">{fmtArea(o1(b).contact)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-xs text-graphite-400">{fmtArea(o1(b).quote)}</td>
+                    {hasOpt2 ? <><td className="px-4 py-2 text-right font-mono text-xs text-graphite-200">{fmtArea(o2(b)!.contact)}</td><td className="px-4 py-2 text-right font-mono text-xs text-graphite-400">{fmtArea(o2(b)!.quote)}</td></> : null}
+                    <td className="px-4 py-2 text-right text-[11px] text-graphite-400">{b.t.wall_options ? (b.t.wall_options.chosen === "thin" ? "Option 2" : "Option 1") : "—"}</td>
+                  </tr>
+                ))}
+                <tr className="bg-graphite-900 font-medium">
+                  <td className="px-4 py-2 text-graphite-100">Total</td>
+                  <td className="px-4 py-2 text-right font-mono text-xs text-graphite-50">{fmtArea(sum((b) => o1(b).contact))}</td>
+                  <td className="px-4 py-2 text-right font-mono text-xs text-graphite-300">{fmtArea(sum((b) => o1(b).quote))}</td>
+                  {hasOpt2 ? <><td className="px-4 py-2 text-right font-mono text-xs text-graphite-50">{fmtArea(sum((b) => o2(b)!.contact))}</td><td className="px-4 py-2 text-right font-mono text-xs text-graphite-300">{fmtArea(sum((b) => o2(b)!.quote))}</td></> : null}
+                  <td className="px-4 py-2 text-right text-[11px] text-graphite-500">{hasOpt2 ? `${fmtArea(sum((b) => o1(b).contact) - sum((b) => o2(b)!.contact))} apart` : ""}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
 
       <div className="mt-6 overflow-hidden rounded-lg border border-graphite-800">
         <div className="flex items-center justify-between bg-graphite-900 px-4 py-2">

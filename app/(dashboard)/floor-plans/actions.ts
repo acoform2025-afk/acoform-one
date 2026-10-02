@@ -105,6 +105,7 @@ const totalsSchema = z.object({
   beam_area: num, vertical_area: num, contact_area: num, clear_height: num,
   extra_area: num.default(0), wall_top_area: num.default(0), extra_pct: z.number().min(0).max(100).default(0), quote_area: num.default(0), typical_quote: num.default(0), nontypical_area: num.default(0),
   wall_top_drawn: num.default(0),
+  wall_options: z.object({ all: z.object({ contact: num, quote: num }), thin: z.object({ contact: num, quote: num }), limitMm: z.number().min(75).max(500), chosen: z.enum(["all", "thin"]) }).optional(),
   items: z.array(z.object({
     code: z.string().max(20), group: z.enum(["slab", "deduct", "edge", "wall", "opening", "column", "beam", "loft", "extra"]),
     label: z.string().transform((v) => v.slice(0, 120)), calc: z.string().transform((v) => v.slice(0, 160)), area: z.number().finite().min(-1e7).max(1e7),
@@ -114,6 +115,7 @@ const totalsSchema = z.object({
     floorHeight: z.number().min(0).max(50), slabMm: z.number().min(0).max(2000), floors: z.number().min(1).max(500),
     wallTopM2: num.optional(), slabM2: num.optional(), ductM2: num.optional(), wallLenM: num.optional(), beamLenM: num.optional(), includeEdges: z.boolean().optional(), extraPct: z.number().min(0).max(100).optional(), minOpeningM2: z.number().min(0).max(5).optional(), autoLintels: z.boolean().optional(),
     beamDepthMm: num.optional(), beamWidthMm: num.optional(), wallThkMm: num.optional(),
+    scope: z.enum(["full", "vertical", "columns", "framed", "deck"]).optional(), minWallMm: num.optional(), parapetMm: num.optional(), sillMm: num.optional(), autoEdgeBeams: z.boolean().optional(),
   }),
   source: z.enum(["manual", "dxf", "mixed"]),
   rules: z.object({

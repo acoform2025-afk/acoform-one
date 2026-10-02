@@ -95,7 +95,9 @@ export type PdfQuotation = {
   quick_rate_per_sqm: number | null; nalco_rate_per_kg: number | null; nalco_rate_date: string | null;
   accessories?: unknown; // edited accessories list (null = standard list)
   show_references?: boolean | null; // print the "Our work at site & esteemed clients" page
+  options?: QuoteOptions | null;   // quote with two alternatives (wall options), one line per block
 };
+export type QuoteOptions = { labels: [string, string]; blocks: { name: string; area: number[] }[]; note?: string };
 
 export type PdfLine = {
   id: string; line_type: string; description: string | null; unit: string | null; quantity: number;
@@ -194,7 +196,56 @@ export function quickBlocks(desc: string | null, total: number | null): { title:
   return { title: rest.join(" · "), blocks };
 }
 
+/** Two alternatives side by side (e.g. all walls concrete / thin walls in block): the client picks one. */
+function OptionsSchedule({ q, o }: { q: PdfQuotation; o: QuoteOptions }) {
+  const rate = Number(q.quick_rate_per_sqm) || 0, gstPct = Number(q.gst_percentage) || 0;
+  const tot = [0, 1].map((k) => o.blocks.reduce((a, b) => a + (b.area[k] ?? 0), 0));
+  const W = { sr: "6%", desc: "28%", a: "15%", r: "12%", amt: "19.5%" };
+  const kind = SET_LABEL[formworkKind(q.formwork_type)];
+  return (
+    <View style={s.table} wrap={false}>
+      <View style={s.thead}>
+        <Text style={[s.cell, { width: W.sr }, s.center]}>Sr.</Text>
+        <Text style={[s.cell, { width: W.desc }]}>Description</Text>
+        <Text style={[s.cell, { width: W.a }, s.right]}>Option 1 Qty (Sqm)</Text>
+        <Text style={[s.cell, { width: W.a }, s.right]}>Option 2 Qty (Sqm)</Text>
+        <Text style={[s.cell, { width: W.r }, s.right]}>Rate (₹/Sqm)</Text>
+        <Text style={[s.cell, { width: "24%" }, s.right]}>Amount Opt. 1 / Opt. 2</Text>
+      </View>
+      {o.blocks.map((b, i) => (
+        <View key={i} style={s.tr}>
+          <Text style={[s.cell, { width: W.sr }, s.center]}>{i + 1}</Text>
+          <View style={[s.cell, { width: W.desc }]}><Text style={s.bold}>{b.name}</Text><Text style={s.small}>{kind} · typical floor contact area</Text></View>
+          <Text style={[s.cell, { width: W.a }, s.right]}>{num(b.area[0] ?? 0)}</Text>
+          <Text style={[s.cell, { width: W.a }, s.right]}>{num(b.area[1] ?? 0)}</Text>
+          <Text style={[s.cell, { width: W.r }, s.right]}>{num(rate, 0)}</Text>
+          <Text style={[s.cell, { width: "24%" }, s.right]}>{rupee((b.area[0] ?? 0) * rate)}{"\n"}{rupee((b.area[1] ?? 0) * rate)}</Text>
+        </View>
+      ))}
+      {[["Subtotal", 1], [`GST @ ${gstPct.toFixed(0)}%`, gstPct / 100]].map(([label, f], i) => (
+        <View key={i} style={s.tr}>
+          <Text style={[s.cell, { width: "34%" }, s.right]}>{label as string}</Text>
+          <Text style={[s.cell, { width: W.a }, s.right]}>{i === 0 ? num(tot[0]) : ""}</Text>
+          <Text style={[s.cell, { width: W.a }, s.right]}>{i === 0 ? num(tot[1]) : ""}</Text>
+          <Text style={[s.cell, { width: W.r }, s.right]} />
+          <Text style={[s.cell, { width: "24%" }, s.right]}>{rupee(tot[0] * rate * (f as number))}{"\n"}{rupee(tot[1] * rate * (f as number))}</Text>
+        </View>
+      ))}
+      <View style={s.totalRow}>
+        <Text style={[s.cell, { width: "76%" }, s.right]}>Total Amount — Option 1 / Option 2</Text>
+        <Text style={[s.cell, { width: "24%" }, s.right]}>{rupee(tot[0] * rate * (1 + gstPct / 100))}{"\n"}{rupee(tot[1] * rate * (1 + gstPct / 100))}</Text>
+      </View>
+      <View style={{ padding: 5 }}>
+        <Text style={s.small}>Option 1: {o.labels[0]}.   Option 2: {o.labels[1]}.   Amounts shown as Option 1 / Option 2.</Text>
+        {o.note ? <Text style={s.small}>{o.note}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 function QuickSchedule({ q }: { q: PdfQuotation }) {
+  const o = q.options;
+  if (o && Array.isArray(o.blocks) && o.blocks.length && Array.isArray(o.labels) && o.labels.length === 2) return <OptionsSchedule q={q} o={o} />;
   const qb = quickBlocks(q.schedule_description, q.total_area_sqm);
   if (qb.blocks.length) {
     const rate = Number(q.quick_rate_per_sqm) || 0;
@@ -332,6 +383,8 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
   const { photos, logos } = media;
   const showReferences = q.show_references !== false && (photos.length > 0 || logos.length > 0);
   const qtyLabel = q.quotation_type === "quick" ? "QUANTITY" : "FORMWORK AREA";
+  const hasOpts = !!(q.options && Array.isArray(q.options.blocks) && q.options.blocks.length && q.options.labels?.length === 2);
+  const opt2Area = hasOpts ? q.options!.blocks.reduce((a, b) => a + (b.area[1] ?? 0), 0) : 0;
 
   return (
     <Document title={`${q.quotation_code} – ${q.customer_name}`} author={companyName} subject="Techno-Commercial Proposal">
@@ -372,13 +425,13 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
         </View>
 
         <View style={s.figures}>
-          <View style={s.fig}><Text style={s.figK}>{qtyLabel}</Text><Text style={s.figV}>{num(q.total_area_sqm)} Sqm</Text></View>
+          <View style={s.fig}><Text style={s.figK}>{qtyLabel}{hasOpts ? " (OPTION 1 / 2)" : ""}</Text><Text style={s.figV}>{num(q.total_area_sqm)} Sqm{hasOpts ? ` / ${num(opt2Area)} Sqm` : ""}</Text></View>
           {q.quotation_type === "quick" ? (
             <View style={s.fig}><Text style={s.figK}>RATE</Text><Text style={s.figV}>{rupee(q.quick_rate_per_sqm)} / Sqm</Text></View>
           ) : (
             <View style={s.fig}><Text style={s.figK}>SUBTOTAL</Text><Text style={s.figV}>{rupee(q.total_amount)}</Text></View>
           )}
-          <View style={[s.fig, { borderRightWidth: 0 }]}><Text style={s.figK}>TOTAL INCL. GST</Text><Text style={s.figV}>{rupee(q.total_with_gst)}</Text></View>
+          <View style={[s.fig, { borderRightWidth: 0 }]}><Text style={s.figK}>TOTAL INCL. GST{hasOpts ? " (OPTION 1 / 2)" : ""}</Text><Text style={s.figV}>{rupee(q.total_with_gst)}{hasOpts ? ` / ${rupee(opt2Area * (Number(q.quick_rate_per_sqm) || 0) * (1 + (Number(q.gst_percentage) || 0) / 100))}` : ""}</Text></View>
         </View>
 
         <Text style={s.p}>Dear Sir,</Text>

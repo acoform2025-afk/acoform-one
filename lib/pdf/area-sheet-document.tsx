@@ -79,11 +79,27 @@ const KEY_W = 250, PANE_W = 175, INFO_W = 175, NUM_W = 30;
 const HEAD = 14;
 
 export function AreaSheetDocument({ geo, info, sections }: { geo: SheetGeo | null; info: SheetInfo; sections: SheetSection[] }) {
+  return (
+    <Document title={`Area calculation — ${info.planName}`} author={info.company}>
+      <AreaSheetPage geo={geo} info={info} sections={sections} />
+    </Document>
+  );
+}
+
+/** Several sheets in one PDF (all blocks of a project, both wall options …). */
+export function AreaSheetsDocument({ title, company, sheets }: { title: string; company: string; sheets: { geo: SheetGeo | null; info: SheetInfo; sections: SheetSection[] }[] }) {
+  return (
+    <Document title={title} author={company}>
+      {sheets.map((sh, i) => <AreaSheetPage key={i} geo={sh.geo} info={sh.info} sections={sh.sections} />)}
+    </Document>
+  );
+}
+
+export function AreaSheetPage({ geo, info, sections }: { geo: SheetGeo | null; info: SheetInfo; sections: SheetSection[] }) {
   const rowsH = PH - 2 * M - 40 - 110;                      // title + total box
   const ROW = Math.min(122, Math.floor(rowsH / Math.max(1, sections.length)) - HEAD - 6);
   const gridX = KEY_W + 30;
   return (
-    <Document title={`Area calculation — ${info.planName}`} author={info.company}>
       <Page size="A3" orientation="landscape" style={{ fontFamily: "Carlito", fontSize: 8, color: INK, padding: M }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}>
           <Text style={{ fontSize: 15 }}>{info.title}</Text>
@@ -155,6 +171,5 @@ export function AreaSheetDocument({ geo, info, sections }: { geo: SheetGeo | nul
           </View>
         </View>
       </Page>
-    </Document>
   );
 }

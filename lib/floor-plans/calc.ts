@@ -151,7 +151,11 @@ export type Totals = {
   wall_top_drawn: number;  // wall tops of drawn walls (length × thickness), offered as the deduction
   items: AreaItem[];
   rules?: MeasureRules;     // company measurement rules used for this take-off
+  wall_options?: WallOptions;   // both wall options of this plan (all walls concrete / thin walls in block), for quotes with options
 };
+/** The two wall options of a plan: contact and quote (+extra %) areas, and the block-wall limit. */
+export type WallOptions = { all: { contact: number; quote: number }; thin: { contact: number; quote: number }; limitMm: number; chosen: "all" | "thin" };
+export const WALL_OPTION_LABEL = (limitMm: number) => ["All walls in concrete", `Walls under ${limitMm} mm in blockwork by others`] as const;
 
 export const emptyTakeoff = (): Takeoff => ({
   v: 1, params: { floorHeight: 3, slabMm: 150, floors: 1 }, metersPerPx: null, shapes: [], columns: [], beams: [],

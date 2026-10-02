@@ -8,8 +8,8 @@ import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Quotations" };
 
-export default async function QuotationsPage({ searchParams }: { searchParams: Promise<{ all?: string; lead?: string; mode?: string; plan?: string }> }) {
-  const { all, lead: leadParam, mode, plan: planParam } = await searchParams;
+export default async function QuotationsPage({ searchParams }: { searchParams: Promise<{ all?: string; lead?: string; mode?: string; plan?: string; blocks?: string }> }) {
+  const { all, lead: leadParam, mode, plan: planParam, blocks: blocksParam } = await searchParams;
   const showAll = all === "1";
   const supabase = await createClient();
   let query = supabase.from("quotations")
@@ -46,6 +46,17 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
       fromLead.plan = { id: fp.id, name: fp.name, monolithic: full, vertical: Number(tt.vertical_area ?? 0) };
       fromLead.areaSqm = String(full);
     }
+  }
+  // Opened from the project summary ("Quote all blocks"): one line per measured block, both wall options
+  if (fromLead && blocksParam === "1") {
+    const { data: fps } = await supabase.from("floor_plans").select("id, name, totals").eq("lead_id", fromLead.leadId).eq("drawing_type", "plan").order("name");
+    const blocks = (fps ?? []).map((fp) => {
+      const tt = (fp.totals ?? {}) as Record<string, unknown> & { wall_options?: { all: { quote: number }; thin: { quote: number }; limitMm: number } };
+      const q1 = Number(tt.quote_area || tt.contact_area || 0); if (!(q1 > 0)) return null;
+      const wo = tt.wall_options;
+      return { id: fp.id, name: fp.name.replace(/^.*?—\s*/, "").replace(/\s*typical floor$/i, ""), vertical: Number(tt.vertical_area ?? 0), full: wo ? wo.all.quote : q1, thin: wo ? wo.thin.quote : undefined, limitMm: wo?.limitMm };
+    }).filter((b): b is NonNullable<typeof b> => !!b);
+    if (blocks.length) { fromLead.blocks = blocks; fromLead.areaSqm = String(Math.round(blocks.reduce((s, b) => s + b.full, 0) * 100) / 100); }
   }
   const initialMode = mode === "quick" ? "quick" : fromLead ? "detailed" : undefined;
   const { data: quickRates } = await supabase.from("quick_quote_rates").select("formwork_type, rate_per_sqm").eq("is_active", true);

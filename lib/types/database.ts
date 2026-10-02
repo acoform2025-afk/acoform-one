@@ -1779,6 +1779,7 @@ export type Database = {
         Row: {
           accessories: Json | null
           show_references: boolean
+          options: Json | null
           floor_plan_id: string | null
           approved_at: string | null
           approved_by: string | null
@@ -1819,6 +1820,7 @@ export type Database = {
         Insert: {
           accessories?: Json | null
           show_references?: boolean
+          options?: Json | null
           floor_plan_id?: string | null
           approved_at?: string | null
           approved_by?: string | null
@@ -1859,6 +1861,7 @@ export type Database = {
         Update: {
           accessories?: Json | null
           show_references?: boolean
+          options?: Json | null
           floor_plan_id?: string | null
           approved_at?: string | null
           approved_by?: string | null
