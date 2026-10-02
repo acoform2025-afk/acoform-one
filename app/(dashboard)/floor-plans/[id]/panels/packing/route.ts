@@ -16,7 +16,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const r = await runPanels(await createClient(), id, q);
   if (!r) return new Response("Floor plan not found", { status: 404 });
   if (r.error || !r.inp || !r.shell) return new Response(r.error ?? "Measure and save this plan first.", { status: 400 });
-  const zones = buildZones(r.inp, r.catalog);
+  const zones = buildZones(r.inp, r.catalog, r.layoutRules);
   const cat = new Map(r.catalog.map((c) => [c.panel_code, c]));
   const wallCode = (w: number) => r.catalog.find((c) => c.panel_category === "wall_panel" && Number(c.width_mm) === w && Number(c.height_mm) === r.opt.stdHeight)?.panel_code ?? `WP-${w}-${r.opt.stdHeight}`;
   const wallPanels = wallPanelNumbers(r.result.faces, r.opt.stdHeight, wallCode);

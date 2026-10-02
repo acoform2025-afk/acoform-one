@@ -193,7 +193,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     addCol(w, d, s.h && s.h > 0 ? s.h : H, round, polyLength(s.pts, true) * mpp * 1000, 1);
   }
   for (const c of t.columns ?? []) addCol(c.w_mm, c.d_mm, H, false, 2 * (c.w_mm + c.d_mm), Math.round(c.qty || 0));
-  for (const c of auto?.columns ?? []) addCol(c.w * 1000, c.d * 1000, H, c.area < 0.85 * c.w * c.d, c.perimeter * 1000, 1);
+  for (const c of auto?.columns ?? []) addCol(c.w * 1000, c.d * 1000, H, c.round ?? c.area < 0.85 * c.w * c.d, c.perimeter * 1000, 1);
   const columns = [...colMap.values()].sort((a, b) => b.qty - a.qty);
 
   // inputs for the deck zones (installation drawing): walls and beams over openings in metres

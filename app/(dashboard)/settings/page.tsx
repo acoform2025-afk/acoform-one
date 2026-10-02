@@ -4,6 +4,8 @@ import { titleCase } from "@/lib/format";
 import { CompanyForm } from "./company-form";
 import { EngineeringForm } from "./engineering-form";
 import { RulesForm } from "./rules-form";
+import { LayoutRulesForm } from "./layout-rules-form";
+import { loadLayoutRules } from "@/lib/design-engine/layout-rules";
 import { loadRules } from "@/lib/floor-plans/rules";
 import { hasPermission } from "@/lib/auth/permissions";
 import { listMedia, mediaViewUrls } from "@/lib/quotations/media";
@@ -20,6 +22,7 @@ export default async function SettingsPage() {
   const canEng = await hasPermission("designs", "approve");
   const canMedia = await hasPermission("quotations", "approve");
   const rules = await loadRules(supabase);
+  const layoutRules = await loadLayoutRules(supabase);
   const media = await listMedia(supabase);
   const mediaUrls = await mediaViewUrls(supabase, media);
   const tiles: MediaTile[] = media.filter((m) => mediaUrls[m.id]).map((m) => ({ id: m.id, kind: m.kind, url: mediaUrls[m.id], caption: m.caption }));
@@ -42,6 +45,10 @@ export default async function SettingsPage() {
 
       <div className="mt-8">
         <RulesForm r={rules} canEdit={canEng || canMedia} />
+      </div>
+
+      <div className="mt-8">
+        <LayoutRulesForm r={layoutRules} canEdit={canEng} />
       </div>
 
       <div className="mt-8">

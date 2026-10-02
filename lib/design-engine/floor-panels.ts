@@ -12,6 +12,7 @@
  */
 import type { Pt } from "@/lib/floor-plans/calc";
 import { fabSpec } from "./fabrication";
+import type { LayoutRules } from "./layout-rules";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
 export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
@@ -27,7 +28,7 @@ export type Fit = { panels: number[]; filler: number };
 export type ColumnLayout = { code: string; w: number; d: number; h: number; qty: number; round: boolean; faceW: Fit; faceD: Fit; top: number; clamps: number };
 export type BeamLayout = { code: string; length: number; b: number; d: number; side: number; sides: number; bottom: boolean; pieces: number[]; props: number };
 export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number };
-export type PanelOptions = { stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
+export type PanelOptions = { rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "stair" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
 export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo };
@@ -87,14 +88,22 @@ export function overlap(a: [number, number][], b: [number, number][]) {
 export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], corners: number, catalog: CatPanel[], o: PanelOptions): PanelResult {
   const warnings: string[] = [];
   const cat = (c: string) => catalog.filter((p) => p.panel_category === c);
+  const R = o.rules;
+  const sysStd = !!R && R.system !== "acoform";                 // a chosen system's own sizes count as standard panels
   const wallCat = cat("wall_panel").filter((p) => Math.abs(p.height_mm - o.stdHeight) < 1);
-  const wallW = wallCat.map((p) => p.width_mm);
+  const wallW = R?.wallWidths.length ? R.wallWidths : wallCat.map((p) => p.width_mm);
+  // the catalogue panel of this width, or the system's own panel (code WP-w-h, weight from the standard sections)
+  const wallPanel = (w: number): CatPanel => wallCat.find((x) => x.width_mm === w)
+    ?? { id: "", panel_code: `WP-${w}-${o.stdHeight}`, panel_category: "wall_panel", width_mm: w, height_mm: o.stdHeight, weight_kg: fabSpec(`WP-${w}-${o.stdHeight}`, "", w, o.stdHeight, 1).kgEach, area_sqm: (w * o.stdHeight) / 1e6 };
   if (!wallW.length) warnings.push(`No ${o.stdHeight} mm wall panels in the panel catalogue.`);
   // deck panels: the most common length (1200) is the strip length; other lengths are for specials
   const deckAll = cat("deck_panel");
   const lenCount = new Map<number, number>(); deckAll.forEach((p) => lenCount.set(p.height_mm, (lenCount.get(p.height_mm) ?? 0) + 1));
-  const deckLen = [...lenCount.entries()].sort((a, b) => b[1] - a[1] || Math.abs(a[0] - 1200) - Math.abs(b[0] - 1200))[0]?.[0] || o.deckLen;
-  const deckCat = deckAll.filter((p) => p.height_mm === deckLen); const deckW = deckCat.map((p) => p.width_mm);
+  const deckLen = R?.deckLengths.length && R.system !== "acoform" ? R.deckLengths[0] : [...lenCount.entries()].sort((a, b) => b[1] - a[1] || Math.abs(a[0] - 1200) - Math.abs(b[0] - 1200))[0]?.[0] || o.deckLen;
+  const deckCatRaw = deckAll.filter((p) => p.height_mm === deckLen);
+  const deckW = R?.deckWidths.length ? R.deckWidths : deckCatRaw.map((p) => p.width_mm);
+  const deckCat: CatPanel[] = deckW.map((w) => deckCatRaw.find((x) => x.width_mm === w)
+    ?? { id: "", panel_code: `DP-${w}-${deckLen}`, panel_category: "deck_panel", width_mm: w, height_mm: deckLen, weight_kg: fabSpec(`DP-${w}-${deckLen}`, "", w, deckLen, 1).kgEach, area_sqm: (w * deckLen) / 1e6 });
   const widest = (c: string) => cat(c).sort((a, b) => b.width_mm - a.width_mm)[0];
   const item = (c: string, re?: RegExp) => cat(c).find((p) => !re || re.test(p.panel_code));
   const byCode = new Map<string, BomRow>();
@@ -109,6 +118,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   // ---- wall faces
   const layouts: FaceLayout[] = [];
   const endMax = o.endMax ?? 250, tol = o.tolerance ?? 25;
+  const strip = R?.fullHeight ? R.bottomStrip : 0;
   let ends = 0;
   const r5 = (v: number) => Math.round(v / 5) * 5;
   for (const f of faces) {
@@ -133,12 +143,14 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo });
     // ACOFORM RK panels: a wall a little taller than the standard panel (25 … 175 mm, 25 steps) gets one W(RK) panel
     // (WRA 25, WRB 50 … WRG 175) instead of a standard panel + a wall-top piece
-    const rk = top > 0 && top <= 175 && top % 25 === 0 ? `WR${"ABCDEFG"[top / 25 - 1]}` : null;
+    const rk = !sysStd && top > 0 && top <= 175 && top % 25 === 0 ? `WR${"ABCDEFG"[top / 25 - 1]}` : null;
+    const isStrip = strip > 0 && top > 0 && top <= strip + 10;   // full-height system: the rest is the bottom strip
     for (const w of panels) {
-      const p = wallCat.find((x) => x.width_mm === w)!;
+      const p = wallPanel(w);
       if (rk) { add(`${rk}-${w}`, { code: `${rk}-${w}`, description: `Wall panel ${o.stdHeight + top} (${o.stdHeight} W + RK ${top}, ${rk})`, group: "wall", w, h: o.stdHeight + top, custom: false }, 1, Number(wallCat.find((x) => x.panel_code === `${rk}-${w}`)?.weight_kg) || fabSpec(`${rk}-${w}`, "", w, o.stdHeight + top, 1).kgEach); continue; }
-      add(p.panel_code, { code: p.panel_code, description: "Wall panel", group: "wall", w, h: o.stdHeight, custom: false }, 1, Number(p.weight_kg));
-      if (top > 0) add(`WT-${w}-${top}`, { code: `WT-${w}-${top}`, description: "Wall top panel (custom height)", group: "wall-top", w, h: top, custom: true }, 1);
+      add(p.panel_code, { code: p.panel_code, description: R?.fullHeight ? "Wall panel (full height)" : "Wall panel", group: "wall", w, h: o.stdHeight, custom: false }, 1, Number(p.weight_kg));
+      if (isStrip) add(`WS-${w}-${top}`, { code: `WS-${w}-${top}`, description: `Bottom strip under full-height panel (${top} mm)`, group: "wall", w, h: top, custom: false }, 1);
+      else if (top > 0) add(`WT-${w}-${top}`, { code: `WT-${w}-${top}`, description: "Wall top panel (custom height)", group: "wall-top", w, h: top, custom: !sysStd }, 1);
     }
     if (left > 0) {
       add(`WF-${left}-${Math.round(f.height)}`, { code: `WF-${left}-${Math.round(f.height)}`, description: "Wall filler (custom width)", group: "filler", w: left, h: Math.round(f.height), custom: true }, 1);
@@ -171,7 +183,10 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       colLayouts.push({ code: c.code, w: dia, d: dia, h: H, qty: q, round: true, faceW: { panels: [], filler: 0 }, faceD: { panels: [], filler: 0 }, top: 0, clamps: Math.ceil(H / 600) });
       continue;
     }
-    const top = Math.max(0, H - o.stdHeight);
+    // columns cast first with their own formwork: panels up to the first pour; the rest is formed with the slab
+    const first = R?.columnsSeparate && R.columnFirstCast > 0 ? Math.min(H, R.columnFirstCast) : H;
+    const rest = H - first;
+    const top = Math.max(0, first - o.stdHeight);
     const parts: string[] = [];
     const fits: Fit[] = [];
     for (const [X, n] of [[Math.round(c.w), 2], [Math.round(c.d), 2]] as [number, number][]) {
@@ -179,21 +194,26 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       const left = fit.left < tol ? 0 : r5(fit.left);
       fits.push({ panels: fit.panels, filler: left });
       for (const w of fit.panels) {
-        const p = wallCat.find((x) => x.width_mm === w)!;
-        add(`col:${p.panel_code}`, { code: p.panel_code, description: "Column panel", group: "column", w, h: o.stdHeight, custom: false }, n * q, Number(p.weight_kg));
-        if (top > 0) add(`col:WT-${w}-${top}`, { code: `WT-${w}-${top}`, description: "Column top panel (custom height)", group: "column", w, h: top, custom: true }, n * q);
+        const p = wallPanel(w);
+        add(`col:${p.panel_code}`, { code: p.panel_code, description: rest > 0 ? `Column panel (column set, first pour ${first})` : "Column panel", group: "column", w, h: o.stdHeight, custom: false }, n * q, Number(p.weight_kg));
+        if (top > 0 && strip > 0 && top <= strip + 10) add(`col:WS-${w}-${top}`, { code: `WS-${w}-${top}`, description: `Bottom strip under full-height panel (${top} mm)`, group: "column", w, h: top, custom: false }, n * q);
+        else if (top > 0) add(`col:WT-${w}-${top}`, { code: `WT-${w}-${top}`, description: "Column top panel (custom height)", group: "column", w, h: top, custom: !sysStd }, n * q);
+        if (rest >= 50) add(`col:CT-${w}-${rest}`, { code: `CT-${w}-${rest}`, description: `Column top above the first pour (${rest} mm, cast with the slab)`, group: "wall-top", w, h: rest, custom: !sysStd }, n * q);
       }
-      if (left > 0) add(`col:CF-${left}-${H}`, { code: `CF-${left}-${H}`, description: "Column filler (custom width)", group: "column", w: left, h: H, custom: true }, n * q);
+      if (left > 0) add(`col:CF-${left}-${first}`, { code: `CF-${left}-${first}`, description: "Column filler (custom width)", group: "column", w: left, h: first, custom: true }, n * q);
       parts.push(`${X}: ${[...fit.panels.map(String), ...(left ? [`F${left}`] : [])].join("+") || "—"}`);
     }
-    add("col:EC", { code: ecCat?.panel_code ?? "EC", description: "Column external corner", group: "column", w: ecCat?.width_mm ?? 65, h: H, custom: !ecCat }, 4 * q, ecCat ? Number(ecCat.weight_kg) : undefined);
-    elements.push({ kind: "column", code: c.code, size: `${Math.round(c.w)}×${Math.round(c.d)}`, qty: q, area, detail: `${parts.join(" · ")} · 4 corners${top ? ` · top ${top}` : ""}` });
-    colLayouts.push({ code: c.code, w: Math.round(c.w), d: Math.round(c.d), h: H, qty: q, round: false, faceW: fits[0], faceD: fits[1], top, clamps: Math.ceil(H / 600) });
+    const ecLeg = R && R.system !== "acoform" ? R.externalCorner : (ecCat?.width_mm ?? 65);
+    add("col:EC", { code: R && R.system !== "acoform" ? `EC-${ecLeg}-${first}` : ecCat?.panel_code ?? "EC", description: `Column external corner (${ecLeg} + ${ecLeg})`, group: "column", w: ecLeg, h: first, custom: !ecCat && !sysStd }, 4 * q, ecCat && !sysStd ? Number(ecCat.weight_kg) : undefined);
+    elements.push({ kind: "column", code: c.code, size: `${Math.round(c.w)}×${Math.round(c.d)}`, qty: q, area, detail: `${parts.join(" · ")} · 4 corners${top ? ` · top ${top}` : ""}${rest > 0 ? ` · cast first to ${first}, top ${rest} with the slab` : ""}` });
+    colLayouts.push({ code: c.code, w: Math.round(c.w), d: Math.round(c.d), h: first, qty: q, round: false, faceW: fits[0], faceD: fits[1], top, clamps: Math.ceil(H / 600) });
   }
 
   // ---- corners
   const ic = widest("internal_corner"), ec = widest("external_corner");
-  if (corners > 0) {
+  if (corners > 0 && sysStd) {
+    add("CORNER", { code: `IC-${R!.internalCorner}x${R!.internalCorner}-${o.stdHeight}`, description: `Internal corner ${R!.internalCorner} × ${R!.internalCorner}`, group: "corner", w: R!.internalCorner, h: o.stdHeight, custom: false }, corners);
+  } else if (corners > 0) {
     const c = ic ?? ec;
     add("CORNER", { code: c ? `${ic?.panel_code ?? ""}${ic && ec ? " / " : ""}${ec?.panel_code ?? ""}` : "IC/EC", description: "Corner piece 65 mm (IC/EC — confirm type)", group: "corner", w: c?.width_mm ?? 65, h: o.stdHeight, custom: false }, corners, c ? Number(c.weight_kg) : undefined);
   }
@@ -202,7 +222,21 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   let fillArea = 0; const deckCount = new Map<number, number>(); let deckFiller = 0;
   const L = deckLen / 1000;
   const deckRows: { code: string; size: string; area: number; n: number; special: number }[] = [];
-  for (const d of decks) {
+  const zd = o.zoneDeck && o.zoneDeck.panels.length ? o.zoneDeck : null;
+  if (zd) {
+    // the numbered room-by-room deck layout (installation drawing) is the deck BOM: rows sized to each room
+    const cnt = new Map<string, { w: number; L: number; custom: boolean; n: number }>();
+    for (const p of zd.panels) { const c = cnt.get(p.code) ?? { w: p.w, L: p.L, custom: p.custom, n: 0 }; c.n++; cnt.set(p.code, c); }
+    for (const [code, c] of cnt) {
+      const cp = deckAll.find((x) => x.panel_code === code);
+      add(code, { code, description: c.custom ? "Deck panel (special length / width)" : "Deck panel", group: "deck", w: c.w, h: c.L, custom: c.custom }, c.n, cp ? Number(cp.weight_kg) : fabSpec(code, "", c.w, c.L, 1).kgEach);
+    }
+    if (zd.specialArea > 0.01) byCode.set("DF", { code: "DF", description: "Deck specials / plywood (odd corners left in the rooms)", group: "filler", w: 0, h: 0, qty: 1, area: zd.specialArea, weight: zd.specialArea * o.kgPerM2, custom: true, unit: "set" });
+    fillArea = zd.area;
+    const lens = [...new Set(zd.panels.map((p) => p.L))].sort((a, b) => b - a);
+    elements.push({ kind: "deck", code: `M1–M${zd.zones}`, size: `${zd.zones} rooms / bays`, qty: 1, area: zd.area, detail: `${zd.panels.length} deck panels, lengths ${lens.slice(0, 6).join(" / ")} · specials ${zd.specialArea.toFixed(2)} m²` });
+  }
+  for (const d of zd ? [] : decks) {
     const xs = d.pts.map((p) => p[0]); const x0 = Math.min(...xs), x1 = Math.max(...xs);
     const ys = d.pts.map((p) => p[1]);
     const before = { fill: fillArea, spec: deckFiller, n: [...deckCount.values()].reduce((a, b) => a + b, 0) };
@@ -221,7 +255,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     }
     deckRows.push({ code: d.code, size: `${(x1 - x0).toFixed(2)} × ${(Math.max(...ys) - Math.min(...ys)).toFixed(2)} m`, area: fillArea - before.fill, n: [...deckCount.values()].reduce((a, b) => a + b, 0) - before.n, special: deckFiller - before.spec });
   }
-  const scale = fillArea > 0 && o.soffitArea > 0 ? Math.min(1, o.soffitArea / fillArea) : 1;
+  const scale = !zd && fillArea > 0 && o.soffitArea > 0 ? Math.min(1, o.soffitArea / fillArea) : 1;
   for (const r of deckRows) elements.push({ kind: "deck", code: r.code, size: r.size, qty: 1, area: r.area * scale, detail: `${Math.round(r.n * scale)} deck panels × ${deckLen} long · specials ${(r.special * scale).toFixed(2)} m²${scale < 0.98 ? ` (net of wall tops / columns, ×${scale.toFixed(2)})` : ""}` });
   if (fillArea > 0 && scale < 0.98) warnings.push(`Deck counts scaled to ${(scale * 100).toFixed(0)}% for wall tops / columns not decked (net soffit ${o.soffitArea.toFixed(2)} m²).`);
   for (const [w, n] of deckCount) {
@@ -236,29 +270,32 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
 
   // deck support (Mivan drop-head system): mid beams span between prop heads; beam lines at deck length + prop head
   const deckArea = o.soffitArea;
-  const ph = item("prop_head"), mb = item("deck_beam");
-  const lineSp = (deckLen + (ph?.width_mm ?? 100)) / 1000;                              // e.g. 1200 + 100 = 1.30 m
-  const alongSp = Math.min(o.propSpacing, mb ? (mb.height_mm + (ph?.width_mm ?? 100)) / 1000 : o.propSpacing);  // e.g. 1150 + 100 = 1.25 m
+  const ph = sysStd ? undefined : item("prop_head"), mb = sysStd ? undefined : item("deck_beam");
+  const phW = sysStd ? R!.propHead[0] : (ph?.width_mm ?? 100), mbW = sysStd ? R!.midBeam : (ph?.width_mm ?? 100);
+  const lineSp = (deckLen + mbW) / 1000;                                                // e.g. 1200 + 100 = 1.30 m
+  const alongSp = Math.min(o.propSpacing, mb ? (mb.height_mm + phW) / 1000 : o.propSpacing);  // e.g. 1150 + 100 = 1.25 m
   if (lineSp > 1.3 + 1e-6 || alongSp > 1.3 + 1e-6) warnings.push(`Prop grid ${lineSp.toFixed(2)} × ${alongSp.toFixed(2)} m is wider than 1.3 m (JGJ 386 practice) — check deflection.`);
   const props = deckArea > 0 ? Math.ceil(deckArea / (lineSp * alongSp)) : 0;
   if (props) {
-    byCode.set("PH", { code: ph?.panel_code ?? "PH", description: `Prop head (grid ${lineSp.toFixed(2)} × ${alongSp.toFixed(2)} m)`, group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (ph ? Number(ph.weight_kg) : 4.5), custom: false, unit: "nos" });
-    byCode.set("MB", { code: mb?.panel_code ?? "MB", description: "Mid beam (deck support between prop heads)", group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (mb ? Number(mb.weight_kg) : 8), custom: false, unit: "nos" });
+    byCode.set("PH", { code: ph?.panel_code ?? (sysStd ? `PH-${R!.propHead[0]}x${R!.propHead[1]}` : "PH"), description: `Prop head${sysStd ? ` ${R!.propHead[0]} × ${R!.propHead[1]}` : ""} (grid ${lineSp.toFixed(2)} × ${alongSp.toFixed(2)} m)`, group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (ph ? Number(ph.weight_kg) : 4.5), custom: false, unit: "nos" });
+    byCode.set("MB", { code: mb?.panel_code ?? (sysStd ? `MB-${R!.midBeam}-${Math.round(alongSp * 1000 - phW)}` : "MB"), description: `Mid beam${sysStd ? ` ${R!.midBeam} wide` : ""} (deck support between prop heads)`, group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (mb ? Number(mb.weight_kg) : 8), custom: false, unit: "nos" });
     const pr = item("accessory", /^PROP/);
     byCode.set("PROP", { code: pr?.panel_code ?? "PROP", description: "Adjustable steel prop", group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (pr ? Number(pr.weight_kg) : 14), custom: false, unit: "nos" });
   }
   const faceLen = layouts.reduce((s, f) => s + f.length, 0);
   if (faceLen && deckArea > 0) {
-    const scp = item("soffit_corner");
-    const L = scp?.height_mm ?? 1200;
+    const scp = sysStd ? undefined : item("soffit_corner");
+    const L = sysStd ? R!.soffitCornerLen : scp?.height_mm ?? 1200;
     const sc = Math.ceil(faceLen / L);
     add("SC", { code: scp?.panel_code ?? `SC-100-${L}`, description: "Soffit corner (top of wall faces)", group: "corner", w: scp?.width_mm ?? 100, h: L, custom: !scp }, sc, scp ? Number(scp.weight_kg) : undefined);
   }
   // external kicker along the outer slab edge (next lift's wall panels sit on it)
-  const kp = item("kicker");
+  const kp = sysStd ? undefined : item("kicker");
   let outer = 0;
   for (const d of decks) for (let i = 0, j = d.pts.length - 1; i < d.pts.length; j = i++) outer += Math.hypot(d.pts[i][0] - d.pts[j][0], d.pts[i][1] - d.pts[j][1]);
-  if (outer > 0) {
+  if (outer > 0 && sysStd && R!.kickerMm > 0) {
+    add("KP", { code: `K-${R!.kickerMm}-1200`, description: `External kicker ${R!.kickerMm} high along slab edge (${outer.toFixed(1)} m)`, group: "corner", w: R!.kickerMm, h: 1200, custom: false }, Math.ceil((outer * 1000) / 1200));
+  } else if (outer > 0 && !sysStd) {
     const L = kp?.height_mm ?? 1200;
     add("KP", { code: kp?.panel_code ?? `KP-100-${L}`, description: `External kicker along slab edge (${outer.toFixed(1)} m)`, group: "corner", w: kp?.width_mm ?? 100, h: L, custom: !kp }, Math.ceil((outer * 1000) / L), kp ? Number(kp.weight_kg) : undefined);
   }
@@ -271,7 +308,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   for (const b of beams) {
     const side = Math.max(0, Math.round(b.d - o.slabMm)), bw = Math.round(b.b);
     const fit = fillRun(b.length, BEAM_LEN);
-    const left = fit.left < tol ? 0 : Math.ceil(fit.left / 5) * 5;        // beam filler made to the exact length (5 mm)
+    const bStep = R?.beamLenStep && R.beamLenStep > 5 ? R.beamLenStep : 5;
+    const left = fit.left < tol ? 0 : Math.ceil(fit.left / bStep) * bStep;  // beam filler made to the system's length step
     const pieces = [...fit.panels, ...(left ? [left] : [])];
     for (const Lp of pieces) {
       const cust = !BEAM_LEN.includes(Lp);
@@ -365,16 +403,17 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   // 1 · joints: pins & wedges on every panel edge (≤ 300 mm c/c, each joint shared by two panels) + 5% spares
   let edge = 0;
   for (const r of byCode.values()) if (r.group !== "accessory" && r.w > 0 && r.h > 0) edge += 2 * (r.w + r.h) * r.qty;
-  const pins = Math.ceil((edge / 600) * 1.05);
+  const loss = 1 + (R ? R.lossPct : 5) / 100;
+  const pins = Math.ceil((edge / 600) * loss);
   const pn = accW(/^PIN/, 0.07), wd = accW(/^WEDGE/, 0.05);
-  acc("PIN", "Joints", pn.code ?? "PIN", "Round pin (panel to panel)", pins, pn.kg, `panel edges ${(edge / 1000).toFixed(0)} m ÷ 0.6 m (pin @ 300, shared edge) + 5% spare`);
+  acc("PIN", "Joints", pn.code ?? "PIN", "Round pin (panel to panel)", pins, pn.kg, `panel edges ${(edge / 1000).toFixed(0)} m ÷ 0.6 m (pin @ 300, shared edge) + ${Math.round((loss - 1) * 100)}% loss`);
   acc("WEDGE", "Joints", wd.code ?? "WEDGE", "Wedge pin", pins, wd.kg, "one per round pin");
   const scRow = byCode.get("SC"), kpRow = byCode.get("KP");
   const longPins = 4 * ((scRow?.qty ?? 0) + (kpRow?.qty ?? 0)) + 4 * beamLayouts.reduce((a, bl) => a + bl.pieces.length * bl.sides, 0);
   acc("LPIN", "Joints", accW(/^LPIN|^LONG/, 0.12).code ?? "LPIN", "Long pin (soffit corner / kicker / beam side to deck)", longPins, accW(/^LPIN|^LONG/, 0.12).kg, "4 per soffit-corner, kicker and beam-side piece");
 
   // 2 · wall ties through both faces at the engineering spacing (Settings → Engineering), ≤ 800 mm practice
-  const tH = o.tieH && o.tieH > 0 ? o.tieH : 800, tV = o.tieV && o.tieV > 0 ? o.tieV : 800;
+  const tH = R && R.system !== "acoform" ? R.tieH : o.tieH && o.tieH > 0 ? o.tieH : 800, tV = R && R.system !== "acoform" ? R.tieV : o.tieV && o.tieV > 0 ? o.tieV : 800;
   let ties = 0;
   for (const f of layouts) ties += (Math.ceil(f.length / tH) + 1) * Math.max(1, Math.ceil(f.height / tV));
   ties = Math.ceil(ties / 2);                                    // one tie serves the two faces of a wall
@@ -382,10 +421,15 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   for (const c of colLayouts) if (!c.round) for (const X of [c.w, c.d]) if (X > 600) colTies += (Math.ceil(X / tH) - 0) * Math.max(1, Math.ceil(c.h / tV)) * c.qty;
   const allTies = ties + colTies;
   const ft = accW(/^FTIE|^TR/, 0.15);
-  acc("TIE", "Ties", ft.code ?? "TIE", `Tie rod / flat tie (@ ${tH} h × ${tV} v mm)`, allTies, ft.kg, `walls: (face ÷ ${tH} + 1) × rows, two faces per tie${colTies ? ` · columns wider than 600: ${colTies}` : ""}`);
-  acc("SLEEVE", "Ties", accW(/^SLV|^PVC/, 0.02).code ?? "PVC-SL", "PVC sleeve for tie (lost each pour)", allTies, accW(/^SLV|^PVC/, 0.02).kg, "one per tie · consumable");
-  acc("CONE", "Ties", accW(/^CONE/, 0.03).code ?? "CONE", "Tie cone", 2 * allTies, accW(/^CONE/, 0.03).kg, "two per tie");
-  acc("WNUT", "Ties", accW(/^WN|^NUT/, 0.35).code ?? "WNUT", "Wing nut with plate washer", 2 * allTies, accW(/^WN|^NUT/, 0.35).kg, "two per tie rod");
+  if (R?.tie === "flat") {
+    acc("TIE", "Ties", "FLAT-TIE", `Flat tie, one-use (@ ${tH} h × ${tV} v mm)`, Math.ceil(allTies * loss), 0.12, `walls: (face ÷ ${tH} + 1) × rows, two faces per tie + ${Math.round((loss - 1) * 100)}% loss · consumable, order by wall thickness`);
+    acc("FTW", "Ties", "FT-WEDGE", "Flat-tie wedge pin", 2 * allTies, 0.05, "two per flat tie (re-used)");
+  } else {
+    acc("TIE", "Ties", ft.code ?? "TIE", `Tie rod (@ ${tH} h × ${tV} v mm)`, allTies, ft.kg, `walls: (face ÷ ${tH} + 1) × rows, two faces per tie${colTies ? ` · columns wider than 600: ${colTies}` : ""}`);
+    acc("SLEEVE", "Ties", accW(/^SLV|^PVC/, 0.02).code ?? "PVC-SL", "PVC sleeve for tie (lost each pour)", Math.ceil(allTies * loss), accW(/^SLV|^PVC/, 0.02).kg, `one per tie + ${Math.round((loss - 1) * 100)}% loss · consumable`);
+    acc("CONE", "Ties", accW(/^CONE/, 0.03).code ?? "CONE", "Tie cone", 2 * allTies, accW(/^CONE/, 0.03).kg, "two per tie");
+    acc("WNUT", "Ties", accW(/^WN|^NUT/, 0.35).code ?? "WNUT", "Wing nut with plate washer", 2 * allTies, accW(/^WN|^NUT/, 0.35).kg, "two per tie rod");
+  }
   if (tH > 800) warnings.push(`Tie spacing ${tH} mm is wider than the usual 800 mm.`);
 
   // 3 · wall alignment: walers on one face (2 rows), waler clips, push-pull props
@@ -421,6 +465,14 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const prop = byCode.get("PROP");
   if (prop) { prop.sub = "Deck support"; prop.basis = `one per prop head${beamProps ? ` + ${beamProps} under beams` : ""}`; }
   tag("PROP", "Deck support", prop?.basis ?? "");
+  // early stripping: panels move up after one floor, props and support heads stay for the floors below
+  if (R && R.supportSets > 1) {
+    const extra = R.supportSets - 1;
+    for (const k of ["PH", "BPH", "PROP"]) {
+      const r = byCode.get(k); if (!r) continue;
+      acc(`${k}-SETS`, "Deck support", r.code, `${r.description} — ${extra === 1 ? "2nd set" : `sets 2–${R.supportSets}`} (stay up under the floors below)`, r.qty * extra, r.qty ? r.weight / r.qty : 0, `${r.qty} × ${extra} more set${extra > 1 ? "s" : ""} (props kept for ${R.supportSets} floors)`);
+    }
+  }
 
   if (ends) warnings.push(`${ends} short faces (≤ ${endMax} mm) treated as wall ends (stop-ends).`);
   const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "stair", "accessory"];

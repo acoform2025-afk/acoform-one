@@ -708,9 +708,9 @@ export type Database = {
         ]
       }
       measurement_rules: {
-        Row: { tenant_id: string; rules: Json; updated_at: string; updated_by: string | null }
-        Insert: { tenant_id?: string; rules?: Json; updated_at?: string; updated_by?: string | null }
-        Update: { tenant_id?: string; rules?: Json; updated_at?: string; updated_by?: string | null }
+        Row: { tenant_id: string; rules: Json; layout: Json | null; updated_at: string; updated_by: string | null }
+        Insert: { tenant_id?: string; rules?: Json; layout?: Json | null; updated_at?: string; updated_by?: string | null }
+        Update: { tenant_id?: string; rules?: Json; layout?: Json | null; updated_at?: string; updated_by?: string | null }
         Relationships: []
       }
       engineering_parameters: {

@@ -399,7 +399,9 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   const colAll = outermost(loops("columns", true).filter((p) => p.pts.length >= 3)).map(({ p }) => {
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
     const w = (Math.max(...xs) - Math.min(...xs)) * u, d = (Math.max(...ys) - Math.min(...ys)) * u, area = polyArea(p.pts) * u2;
-    return { p, w, d, perimeter: polyLength(p.pts, true) * u, area, isCol: area > 0 && w >= 0.1 && d >= 0.1 && w <= 4 && d <= 4 && (area >= 0.8 * w * d || p.pts.length > 8) };
+    // round: many points, as wide as deep and about π/4 of its box; anything else that is not a rectangle is a wall
+    const round = p.pts.length > 8 && Math.abs(w - d) <= 0.1 * Math.max(w, d) && area >= 0.7 * w * d && area <= 0.86 * w * d;
+    return { p, w, d, perimeter: polyLength(p.pts, true) * u, area, round, isCol: area > 0 && w >= 0.1 && d >= 0.1 && w <= 4 && d <= 4 && (area >= 0.86 * w * d || round) };
   });
   const colWalls = colAll.filter((c) => !c.isCol && c.area > 0.05).map((c) => c.p.pts);
 
@@ -482,7 +484,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
   }
 
-  const cols = colAll.filter((c) => c.isCol).map(({ w, d, perimeter, area, p }) => ({ w, d, perimeter, area, pts: p.pts }));
+  const cols = colAll.filter((c) => c.isCol).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
   return {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
@@ -492,7 +494,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     wallTopArea: U.area * u2,
     beamLineLength: unsizedLen,
     beamSized, beamRings,
-    columns: cols.map(({ w, d, perimeter, area }) => ({ w, d, perimeter, area })), columnRings: cols.map((c) => c.pts),
+    columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,
     ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),

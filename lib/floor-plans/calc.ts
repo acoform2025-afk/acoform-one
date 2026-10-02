@@ -84,7 +84,7 @@ export type DxfAuto = {
   beamSized?: { b: number; d: number; len: number; bottom: number; count: number }[];   // beams sized by their layer name: b, d mm; len m (clear of walls / columns); bottom m²
   beamRings?: Pt[][];                               // outlines of the sized beams (drawing units) — deck zones stop at them
   columnRings?: Pt[][];                             // outlines of the columns (drawing units)
-  columns: { w: number; d: number; perimeter: number; area: number }[];
+  columns: { w: number; d: number; perimeter: number; area: number; round?: boolean }[];
   wallTopArea?: number;                             // wall outlines merged (overlaps counted once), m²
   slabFromWalls?: boolean;                          // no slab layer: slab = outer outline of the walls
   slabLoops?: Pt[][];                               // slab outlines used (drawing units) — for deck layout / display

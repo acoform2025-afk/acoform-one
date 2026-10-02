@@ -6,6 +6,7 @@ import { runPanels, type PanelQuery } from "@/lib/floor-plans/run-panels";
 import { fmtArea } from "@/lib/floor-plans/calc";
 import { hasPermission } from "@/lib/auth/permissions";
 import { CreateBom } from "./create-bom";
+import { PRESETS, describeLayoutRules } from "@/lib/design-engine/layout-rules";
 
 export const metadata = { title: "Panel layout & BOM" };
 export const dynamic = "force-dynamic";
@@ -45,6 +46,11 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
           <p className="mt-1 max-w-3xl text-sm text-graphite-400">
             Typical floor of <b>{r.plan.name}</b>{r.lead ? ` · ${r.lead.lead_code} ${r.lead.project_name ?? r.lead.customer_name}` : ""}. First automatic layout on standard aluminium-formwork rules — review with the design team before production.
           </p>
+          {r.layoutRules ? (
+            <p className="mt-1 text-xs text-graphite-400" title={describeLayoutRules(r.layoutRules).join("\n")}>
+              Formwork system: <b className="text-graphite-200">{PRESETS[r.layoutRules.system].label}</b> · <Link href="/settings#layout-rules" className="text-aluminium-300 hover:underline">change the layout rules</Link>
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <a href={`/floor-plans/${id}/panels/drawing?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Layout drawing PDF</a>
