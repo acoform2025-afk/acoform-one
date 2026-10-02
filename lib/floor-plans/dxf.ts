@@ -900,7 +900,8 @@ function levelMarks(texts: DxfText[]): number[] {
 /** Floor-to-floor height (mm) read from the drawing: "FLOOR HEIGHT 3075" / "F.T.F. 3.075", else the usual step between level marks (+3.075, +6.150 …). */
 export function floorHeightFromTexts(texts: DxfText[]): number | undefined {
   for (const t of texts) {
-    const m = t.text.match(/(?:floor\s*(?:to\s*floor\s*)?height|f\s*\.?\s*t\s*\.?\s*f\s*\.?|floor\s*ht\.?)\D{0,8}(\d{4}|\d\.\d{2,3})/i);
+    // "FLOOR HEIGHT = 3000", "F.T.F 3.15", "标准层高 =2900mm" (Chinese: standard storey height)
+    const m = t.text.match(/(?:floor\s*(?:to\s*floor\s*)?height|f\s*\.?\s*t\s*\.?\s*f\s*\.?|floor\s*ht\.?|层高)\D{0,8}(\d{4}|\d\.\d{2,3})/i);
     if (m) { const v = m[1].includes(".") ? Math.round(+m[1] * 1000) : +m[1]; if (v >= 2600 && v <= 4500) return v; }
   }
   const lv = new Set<number>();
