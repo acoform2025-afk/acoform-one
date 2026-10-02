@@ -6,6 +6,7 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { isNoiseLayer } from "./layer-rules";
+import { SECTION_LAYER, sectionLevels, sectionMarker, type SectionLevels } from "./section-read";
 type Xf = [number, number, number, number, number, number]; // a b c d e f  → x' = a x + c y + e ; y' = b x + d y + f
 const ID: Xf = [1, 0, 0, 1, 0, 0];
 const mul = (m: Xf, n: Xf): Xf => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
@@ -62,6 +63,10 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
   // are written as marker texts so the app can list and pick the separate drawings in the file
   let track: [number, number, number, number] | null = null;
   const views: { name: string; box: [number, number, number, number] }[] = [];
+  const sections: SectionLevels[] = [];
+  const secLines = new Map<string, { x0: number; x1: number; y: number }[]>();
+  // metres per drawing unit (sections are read in mm); unknown units: mm, as most building drawings
+  const unitToM = ({ 1: 0.0254, 2: 0.3048, 4: 0.001, 5: 0.01, 6: 1 } as Record<number, number>)[Number(db?.header?.INSUNITS)] ?? 0.001;
   const grow = (x: number, y: number) => { if (track) { if (x < track[0]) track[0] = x; if (y < track[1]) track[1] = y; if (x > track[2]) track[2] = x; if (y > track[3]) track[3] = y; } };
   const f = (v: number) => (Math.round(v * 100) / 100).toString();
   const poly = (layer: string, pts: [number, number][], closed: boolean) => {
@@ -77,6 +82,19 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
     for (const e of ents ?? []) {
       if (count >= maxEntities) return;
       const layer = String((e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0")).replace(/[\r\n]/g, " ");
+      // sections are not drawn, but their floor lines give the slab thickness and floor height (read whatever layer
+      // the section sits on); a section is often placed once per floor, so its lines are gathered by name first
+      if (e.type === "INSERT" && depth === 0 && /section|(^|[^a-z])sec([^a-z]|$)/i.test(String(e.name))) {
+        const b = blocks.get(e.name);
+        if (b?.entities?.length) {
+          const rot = ok(e.rotation) ? e.rotation : 0, sx = ok(e.xScale) && e.xScale ? e.xScale : 1, sy = ok(e.yScale) && e.yScale ? e.yScale : 1;
+          const ip = e.insertionPoint ?? { x: 0, y: 0 }, bp = b.basePoint ?? { x: 0, y: 0 };
+          const t: Xf = [Math.cos(rot) * sx, Math.sin(rot) * sx, -Math.sin(rot) * sy, Math.cos(rot) * sy, ip.x ?? 0, ip.y ?? 0];
+          const nm = String(e.name).slice(0, 100), hl = secLines.get(nm) ?? secLines.set(nm, []).get(nm)!;
+          horizontals(b.entities, mul(m, mul(t, [1, 0, 0, 1, -(bp.x ?? 0), -(bp.y ?? 0)])), 1, hl, null);
+        }
+        if (SKIP_BLOCK.test(String(e.name))) continue;
+      }
       if ((SKIP_LAYER.test(layer) || isNoiseLayer(layer)) && e.type !== "TEXT" && e.type !== "MTEXT") continue;
       const T = (pts: [number, number][]) => pts.map(([x, y]) => ap(m, x, y));
       switch (e.type) {
@@ -102,10 +120,11 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
           break;
         }
         case "INSERT": {
-          const b = blocks.get(e.name); if (!b || depth > 6 || !b.entities?.length || SKIP_BLOCK.test(String(e.name))) break;
+          const b = blocks.get(e.name); if (!b || depth > 6 || !b.entities?.length) break;
           const rot = ok(e.rotation) ? e.rotation : 0, sx = ok(e.xScale) && e.xScale ? e.xScale : 1, sy = ok(e.yScale) && e.yScale ? e.yScale : 1;
           const ip = e.insertionPoint ?? { x: 0, y: 0 }, bp = b.basePoint ?? { x: 0, y: 0 };
           const t: Xf = [Math.cos(rot) * sx, Math.sin(rot) * sx, -Math.sin(rot) * sy, Math.cos(rot) * sy, ip.x ?? 0, ip.y ?? 0];
+          if (SKIP_BLOCK.test(String(e.name))) break;
           const named = depth === 0 && !/^\*|^A\$C[0-9a-f]+$/i.test(String(e.name));
           const before = count;
           if (named) track = [Infinity, Infinity, -Infinity, -Infinity];
@@ -118,7 +137,31 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
       }
     }
   };
+  // horizontal lines of a block (section views), for sectionLevels
+  // level marks, grids, railings, annotation run past the building: not floor lines
+  const NOT_FLOOR = /lev|grid|axis|anno|dim|text|hral|rail|symb|title|sheet|view|elev|ovhd/i;
+  const horizontals = (ents: any[], m: Xf, depth: number, out2: { x0: number; x1: number; y: number }[], parentLayer: string | null = null) => {
+    for (const e of ents ?? []) {
+      if (out2.length > 200_000) return;
+      const layer = String((e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0"));
+      if (NOT_FLOOR.test(layer)) continue;
+      let pts: [number, number][] = [];
+      if (e.type === "LINE" && e.startPoint && e.endPoint) pts = [[e.startPoint.x, e.startPoint.y], [e.endPoint.x, e.endPoint.y]];
+      else if (e.type === "LWPOLYLINE" || e.type === "POLYLINE2D") pts = (e.vertices ?? []).filter((v: any) => ok(v?.x) && ok(v?.y)).map((v: any) => [v.x, v.y]);
+      else if (e.type === "INSERT" && depth < 6) {
+        const b = blocks.get(e.name); if (!b?.entities?.length) continue;
+        const rot = ok(e.rotation) ? e.rotation : 0, sx = ok(e.xScale) && e.xScale ? e.xScale : 1, sy = ok(e.yScale) && e.yScale ? e.yScale : 1;
+        const ip = e.insertionPoint ?? { x: 0, y: 0 }, bp = b.basePoint ?? { x: 0, y: 0 };
+        horizontals(b.entities, mul(m, mul([Math.cos(rot) * sx, Math.sin(rot) * sx, -Math.sin(rot) * sy, Math.cos(rot) * sy, ip.x ?? 0, ip.y ?? 0], [1, 0, 0, 1, -(bp.x ?? 0), -(bp.y ?? 0)])), depth + 1, out2, layer);
+        continue;
+      }
+      const P = pts.map(([x, y]) => ap(m, x, y));
+      for (let i = 1; i < P.length; i++) { const a = P[i - 1], c = P[i]; if (Math.abs(c[0] - a[0]) > 0 && Math.abs(a[1] - c[1]) <= 0.001 * Math.abs(c[0] - a[0])) out2.push({ x0: Math.min(a[0], c[0]), x1: Math.max(a[0], c[0]), y: (a[1] + c[1]) / 2 }); }
+    }
+  };
   walk(top, ID, null, 0);
+  for (const [nm, hl] of secLines) { const sl = sectionLevels(hl, unitToM, nm); if (sl) sections.push(sl); }
+  for (const s of sections) out.push("0", "TEXT", "8", SECTION_LAYER, "10", "0", "20", "0", "30", "0", "40", "0", "1", sectionMarker(s));
   for (const v of views) out.push("0", "TEXT", "8", VIEW_LAYER, "10", f(v.box[0]), "20", f(v.box[3]), "30", "0", "40", "0", "1", ["VIEW", ...v.box.map(f), v.name].join("|"));
   const units = Number(db?.header?.INSUNITS);
   const head = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9", "$INSUNITS", "70", String(Number.isFinite(units) ? units : 0), "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"];

@@ -11,7 +11,7 @@ import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
-import { drawingParts, dxfAuto, dxfFrame, drawDxf, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
+import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { saveTakeoff } from "../actions";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
@@ -351,25 +351,31 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const pick = candidates.length >= 2 ? candidates[0] : null;
     const info = floorInfoFromTexts(modelRef.current.texts ?? [], UNIT_TO_M[t.dxf.units], [plan.name, plan.lead?.label ?? ""]);
     // first time: floor height / floors only replace the untouched defaults (3000 mm, 1 floor); "read again" replaces them
-    const fh = info.heightMm && (force || (Math.round((t.params.floorHeight || 0) * 1000) === 3000 && info.heightMm !== 3000)) ? info.heightMm : undefined;
+    // sections in the drawing: floor-to-floor and slab (concrete only — a floor finish / screed line is left out)
+    const sec = drawingSection(modelRef.current);
+    const fhRead = sec?.floorMm ?? info.heightMm;
+    const fh = fhRead && (force || (Math.round((t.params.floorHeight || 0) * 1000) === 3000 && fhRead !== 3000)) ? fhRead : undefined;
+    const slabMm = sec && (force || (t.params.slabMm ?? 150) === 150) && sec.slabMm !== (t.params.slabMm ?? 150) ? sec.slabMm : undefined;
+    const beamDepthMm = sec?.beamMm && (force || t.params.beamDepthMm == null) ? sec.beamMm : undefined;
     const fl = pick?.floors ?? info.floors;
     const floors = fl && (force || (t.params.floors ?? 1) <= 1) ? fl : undefined;
     const notes: string[] = [];
     if (pick) notes.push(`picked ${pick.title ? `"${pick.title}"` : `drawing ${pick.n}`} (${pick.w.toFixed(1)} × ${pick.h.toFixed(1)} m) as the typical floor`);
     if (floors) notes.push(`${floors} floors (${pick?.floors ? "from the drawing title" : info.source ?? "from the drawing"})`);
-    if (fh) notes.push(`floor height ${fh} mm (${info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing"})`);
-    if (force && !pick && !fh && !floors) notes.push("nothing new could be read — set the region, floors and floor height by hand");
+    if (fh) notes.push(`floor height ${fh} mm (${sec?.floorMm ? "from the sections" : info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing"})`);
+    if (sec) notes.push(`sections: slab ${sec.slabMm} mm concrete${sec.finishMm ? ` (+ ${sec.finishMm} mm floor finish, ${sec.totalMm} mm in all — finish not formed)` : ""}${slabMm ? "" : " — kept the slab you set"}${sec.beamMm ? ` · beams / lintels ${sec.beamMm} mm deep` : ""}`);
+    if (force && !pick && !fh && !floors && !sec) notes.push("nothing new could be read — set the region, floors and floor height by hand");
     const note = notes.length ? notes.join(" · ") + "." : undefined;
     update((pp) => ({
       ...pp,
       auto: { done: true, note },
-      params: { ...pp.params, ...(floors ? { floors } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}) },
+      params: { ...pp.params, ...(floors ? { floors } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}), ...(slabMm ? { slabMm } : {}), ...(beamDepthMm ? { beamDepthMm } : {}) },
       dxf: pp.dxf && pick ? { ...pp.dxf, region: pick.px } : pp.dxf,
     }));
     setAutoNote(note ?? null);
     if (note) setAutoSave(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, t.dxf, t.params.floorHeight, t.params.floors, plan.name, plan.lead?.label, update]);
+  }, [candidates, t.dxf, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update]);
   useEffect(() => {
     if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size) return;
     // only the first time a plan is opened: once the user has a region / saved values, nothing is changed automatically
@@ -1022,7 +1028,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
               <p>
                 <b>Counting:</b> {current ? `${current.title ?? `Drawing ${current.n}`} (${current.w.toFixed(1)} × ${current.h.toFixed(1)} m)` : currentPart ? `${currentPart.title} (${currentPart.w.toFixed(1)} × ${currentPart.h.toFixed(1)} m)` : t.dxf.region ? "your marked region" : "whole drawing"}
                 {canEdit ? <button type="button" onClick={() => { if (!choosing && size) fit(size.w, size.h); else if (choosing) zoomToSelected(); setChoosing((v) => !v); }} className="ml-2 underline hover:text-signal-amber">{choosing ? "Cancel" : "Choose another drawing"}</button> : null}
-                {canEdit ? <button type="button" onClick={() => { if (window.confirm("Read the drawing again? The typical floor, number of floors and floor height are picked again from the drawing (your other figures stay).")) detect(true); }} className="ml-2 inline-flex items-center gap-1 underline hover:text-signal-amber"><RefreshCw className="size-3" />Read drawing again</button> : null}
+                {canEdit ? <button type="button" onClick={() => { if (window.confirm("Read the drawing again? The typical floor, number of floors, floor height, slab thickness and beam depth (from the sections) are picked again from the drawing (your other figures stay).")) detect(true); }} className="ml-2 inline-flex items-center gap-1 underline hover:text-signal-amber"><RefreshCw className="size-3" />Read drawing again</button> : null}
               </p>
               {autoNote ?? t.auto?.note ? <p className="mt-1 text-graphite-400">Read from the drawing when first opened: {autoNote ?? t.auto?.note} Your own changes are never overwritten.</p> : null}
               {choosing ? (

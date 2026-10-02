@@ -7,13 +7,14 @@ import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clippi
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
 import { nearRings, outlineFromWalls, pairedWallStrips, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
 import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, suggestLayerRole } from "./layer-rules";
+import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
 export type DxfText = { text: string; x: number; y: number; h: number };
 /** A named drawing inside the file (Revit view / AutoCAD block), box in drawing units. */
 export type DxfView = { name: string; box: [number, number, number, number] };
-export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -161,6 +162,11 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
   return { header, entities, blocks };
 }
 
+const UNIT_TO_M_LOCAL: Record<string, number> = { mm: 0.001, cm: 0.01, m: 1, in: 0.0254, ft: 0.3048 };
+
+/** Slab thickness / floor height from the sections in the drawing (most sections agreeing), or null. */
+export function drawingSection(model: DxfModel): SectionLevels | null { return agreedSection(model.sections ?? []); }
+
 export function readDxf(raw: string): DxfModel {
   let dxf: { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt> } | null = null;
   try { dxf = leanParseDxf(raw); } catch { dxf = null; }
@@ -172,6 +178,8 @@ export function readDxf(raw: string): DxfModel {
   const paths: DxfPath[] = [];
   const texts: DxfText[] = [];
   const views: DxfView[] = [];
+  const sections: SectionLevels[] = [];
+  const secRanges = new Map<string, [number, number][]>();
   const noiseCache = new Map<string, boolean>();
   const extentPts: number[] = [];
   const dwCache = new Map<string, "door" | "window" | null>();
@@ -216,6 +224,7 @@ export function readDxf(raw: string): DxfModel {
           const local = mul(t, { ...ID, e: -base.x, f: -base.y });
           const before = paths.length;
           walk(b.entities ?? [], mul(m, local), layer, depth + 1);
+          if (depth === 0 && /section|(^|[^a-z])sec([^a-z]|$)/i.test(String(e.name))) { const nm = String(e.name).slice(0, 100); (secRanges.get(nm) ?? secRanges.set(nm, []).get(nm)!).push([before, paths.length]); }
           // a big named block placed in model space is a drawing of its own (e.g. "TOWER B FIRST FLOOR PLAN")
           if (depth === 0 && paths.length - before >= 150 && !/^\*|^A\$C[0-9a-f]+$/i.test(String(e.name))) {
             let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -227,6 +236,7 @@ export function readDxf(raw: string): DxfModel {
         case "TEXT": case "MTEXT": {
           if (texts.length >= 20000 || depth > 2) break;
           const raw = String(e.text ?? "");
+          if (layer === SECTION_LAYER) { const sl = parseSectionMarker(raw); if (sl) sections.push(sl); break; }
           if (layer === VIEW_LAYER && raw.startsWith("VIEW|")) {
             const [, a, b2, c, d2, ...name] = raw.split("|");
             const box = [a, b2, c, d2].map(Number) as [number, number, number, number];
@@ -268,7 +278,21 @@ export function readDxf(raw: string): DxfModel {
   const unitsGuessed = !units;
   if (!units) { const span = Math.max(x1 - x0, y1 - y0); units = span > 2000 ? "mm" : span > 300 ? "cm" : "m"; }
 
-  return { texts, views, dw, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  // DXF saved from AutoCAD / Revit: section views are in the file as named blocks (often one insert per floor) —
+  // their floor lines, gathered by name, give the slab thickness and floor height
+  if (!sections.length && secRanges.size) {
+    const uM = UNIT_TO_M_LOCAL[units] ?? 0.001;
+    for (const [nm, ranges] of secRanges) {
+      const hl: { x0: number; x1: number; y: number }[] = [];
+      for (const [i0, i1] of ranges) for (let k = i0; k < i1; k++) {
+        const p = paths[k]; if (/lev|grid|axis|anno|dim|text|hral|rail|symb|title|elev|ovhd/i.test(p.layer)) continue;
+        for (let i = 1; i < p.pts.length; i++) { const a = p.pts[i - 1], c = p.pts[i]; if (Math.abs(c[0] - a[0]) > 0 && Math.abs(a[1] - c[1]) <= 0.001 * Math.abs(c[0] - a[0])) hl.push({ x0: Math.min(a[0], c[0]), x1: Math.max(a[0], c[0]), y: (a[1] + c[1]) / 2 }); }
+      }
+      const sl = sectionLevels(hl, uM, nm); if (sl) sections.push(sl);
+    }
+  }
+
+  return { texts, views, sections, dw, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */
