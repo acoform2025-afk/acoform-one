@@ -28,9 +28,9 @@ export type Fit = { panels: number[]; filler: number };
 export type ColumnLayout = { code: string; w: number; d: number; h: number; qty: number; round: boolean; faceW: Fit; faceD: Fit; top: number; clamps: number };
 export type BeamLayout = { code: string; length: number; b: number; d: number; side: number; sides: number; bottom: boolean; pieces: number[]; props: number };
 export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number };
-export type PanelOptions = { sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
+export type PanelOptions = { extCorners?: number; upstands?: { h: number; length: number; label: string }[]; sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
-export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
+export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "upstand" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
 export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo; set?: "column" };
 export type PanelResult = {
   bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[]; columns: ColumnLayout[]; beams: BeamLayout[]; stairs: StairLayout[];
@@ -226,8 +226,11 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
 
   // ---- corners
   const ic = widest("internal_corner"), ec = widest("external_corner");
-  if (corners > 0 && sysStd) {
-    add("CORNER", { code: `IC-${R!.internalCorner}x${R!.internalCorner}-${o.stdHeight}`, description: `Internal corner ${R!.internalCorner} × ${R!.internalCorner}`, group: "corner", w: R!.internalCorner, h: o.stdHeight, custom: false }, corners);
+  const legs = (a: number, b: number) => (R?.bothLegs ? a + b : a);    // corner area on both legs (Indian BOM practice) or one leg
+  if (sysStd && (corners > 0 || (o.extCorners ?? 0) > 0)) {
+    const ia = R!.internalCorner, ib = R!.internalCornerLeg || ia, ea = Math.round(R!.externalCorner * 10) / 10;
+    if (corners > 0) add("CORNER", { code: `IC-${ia}x${ib}-${o.stdHeight}`, description: `Internal corner ${ia} × ${ib}${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ia, ib), h: o.stdHeight, custom: false }, corners);
+    if ((o.extCorners ?? 0) > 0 && R!.wallEcAngles) add("ECW", { code: `EC-${ea}x${ea}-${o.stdHeight}`, description: `External corner angle ${ea} × ${ea} (outside corners of walls)${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ea, ea), h: o.stdHeight, custom: false }, o.extCorners!);
   } else if (corners > 0) {
     const c = ic ?? ec;
     add("CORNER", { code: c ? `${ic?.panel_code ?? ""}${ic && ec ? " / " : ""}${ec?.panel_code ?? ""}` : "IC/EC", description: "Corner piece 65 mm (IC/EC — confirm type)", group: "corner", w: c?.width_mm ?? 65, h: o.stdHeight, custom: false }, corners, c ? Number(c.weight_kg) : undefined);
@@ -305,9 +308,18 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const scp = sysStd ? undefined : item("soffit_corner");
     const L = sysStd ? R!.soffitCornerLen : scp?.height_mm ?? 1200;
     const w = scp?.width_mm ?? 100;
+    if (sysStd && (R!.soffitCornerLeg > 0 || R!.beamCapLeg > 0)) {
+      // soffit corner w × leg along wall tops and column faces; beam cap w × deeper leg along beam sides (own line)
+      const sl = R!.soffitCornerLeg || 100, bl = R!.beamCapLeg || sl, ww = R!.soffitCornerW || 100;
+      const nW = (faceLen > 50 ? Math.ceil(faceLen / L) : 0) + (colScLen > 50 ? Math.ceil(colScLen / L) : 0);
+      const where = [faceLen > 50 ? `wall tops ${(faceLen / 1000).toFixed(1)} m` : "", colScLen > 50 ? `column faces ${(colScLen / 1000).toFixed(1)} m` : ""].filter(Boolean).join(", ");
+      if (nW) add("SC", { code: `SC-${ww}x${sl}-${L}`, description: `Soffit corner ${ww} × ${sl} (${where})${R!.bothLegs ? " — area on both legs" : ""}`, group: "corner", w: legs(ww, sl), h: L, custom: false }, nW);
+      if (beamScLen > 50) add("SCB", { code: `SCB-${ww}x${bl}-${L}`, description: `Beam cap (soffit corner on beam sides) ${ww} × ${bl} (${(beamScLen / 1000).toFixed(1)} m)${R!.bothLegs ? " — area on both legs" : ""}`, group: "corner", w: legs(ww, bl), h: L, custom: false }, Math.ceil(beamScLen / L));
+    } else {
     const n = [faceLen, beamScLen, colScLen].reduce((s2, len) => s2 + (len > 50 ? Math.ceil(len / L) : 0), 0);
     const where = [faceLen > 50 ? `wall tops ${(faceLen / 1000).toFixed(1)} m` : "", beamScLen > 50 ? `beam sides ${(beamScLen / 1000).toFixed(1)} m` : "", colScLen > 50 ? `column faces ${(colScLen / 1000).toFixed(1)} m` : ""].filter(Boolean).join(", ");
     if (n) add("SC", { code: scp?.panel_code ?? `SC-${w}-${L}`, description: `Soffit corner (${where})`, group: "corner", w, h: L, custom: !scp }, n, scp ? Number(scp.weight_kg) : undefined);
+    }
   }
   // external kicker along the outer slab edge (next lift's wall panels sit on it)
   const kp = sysStd ? undefined : item("kicker");
@@ -315,9 +327,34 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   for (const d of decks) for (let i = 0, j = d.pts.length - 1; i < d.pts.length; j = i++) outer += Math.hypot(d.pts[i][0] - d.pts[j][0], d.pts[i][1] - d.pts[j][1]);
   if (outer > 0 && sysStd && R!.kickerMm > 0) {
     add("KP", { code: `K-${R!.kickerMm}-1200`, description: `External kicker ${R!.kickerMm} high along slab edge (${outer.toFixed(1)} m)`, group: "corner", w: R!.kickerMm, h: 1200, custom: false }, Math.ceil((outer * 1000) / 1200));
+    // kicker corner pieces at every corner of the slab edge: external (outside corner) and internal (re-entrant corner)
+    if (R!.kickerCornerLen > 0) {
+      let kce = 0, kic = 0;
+      for (const d of decks) {
+        const P = d.pts, n = P.length; if (n < 3) continue;
+        let A = 0; for (let i = 0; i < n; i++) { const p = P[i], q = P[(i + 1) % n]; A += p[0] * q[1] - q[0] * p[1]; }
+        for (let i = 0; i < n; i++) {
+          const a = P[(i + n - 1) % n], v = P[i], c = P[(i + 1) % n];
+          const x1 = v[0] - a[0], y1 = v[1] - a[1], x2 = c[0] - v[0], y2 = c[1] - v[1];
+          const l1 = Math.hypot(x1, y1), l2 = Math.hypot(x2, y2); if (l1 < 0.05 || l2 < 0.05) continue;
+          const cr = (x1 * y2 - y1 * x2) / (l1 * l2); if (Math.abs(cr) < 0.5) continue;      // only real corners (not straight runs)
+          if (Math.sign(cr) === Math.sign(A)) kce++; else kic++;
+        }
+      }
+      const kl = R!.kickerCornerLen, kw = legs(R!.kickerMm, R!.kickerMm);
+      if (kce) add("KCE", { code: `KCE-${R!.kickerMm}-${kl}`, description: `Kicker external corner ${R!.kickerMm} × ${R!.kickerMm} (outside corners of the slab edge)`, group: "corner", w: kw, h: kl, custom: false }, kce);
+      if (kic) add("KIC", { code: `KIC-${R!.kickerMm}-${kl}`, description: `Kicker internal corner ${R!.kickerMm} × ${R!.kickerMm} (re-entrant corners of the slab edge)`, group: "corner", w: kw, h: kl, custom: false }, kic);
+    }
   } else if (outer > 0 && !sysStd) {
     const L = kp?.height_mm ?? 1200;
     add("KP", { code: kp?.panel_code ?? `KP-100-${L}`, description: `External kicker along slab edge (${outer.toFixed(1)} m)`, group: "corner", w: kp?.width_mm ?? 100, h: L, custom: !kp }, Math.ceil((outer * 1000) / L), kp ? Number(kp.weight_kg) : undefined);
+  }
+
+  // ---- upstands / planters on the slab: both faces, panels of the upstand height in 1200 / 900 / 600 / 300 lengths
+  for (const up of o.upstands ?? []) {
+    const h = Math.round(up.h || R?.upstandMm || 250), run = up.length * 1000;
+    const f = fillRun(run, [1200, 900, 600, 300]); const left = f.left < tol ? 0 : Math.ceil(f.left / 25) * 25;
+    for (const Lp of [...f.panels, ...(left ? [left] : [])]) add(`UP-${h}-${Lp}`, { code: `UP-${h}-${Lp}`, description: `Upstand / planter panel ${h} × ${Lp} (${up.label})`, group: "upstand", w: h, h: Lp, custom: true }, 1);
   }
 
   // ---- beams: length made up of 1200/900/600/300 panels (+ filler); 2 sides and a bottom for drawn beams; beam props
@@ -516,12 +553,19 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   }
 
   if (ends) warnings.push(`${ends} short faces (≤ ${endMax} mm) treated as wall ends (stop-ends).`);
-  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "stair", "drop", "accessory"];
+  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "upstand", "deck", "stair", "drop", "accessory"];
   const SUBS = ["Deck support", "Joints", "Ties", "Wall alignment", "Kicker & edges", "Columns & beams", "Staircase", "Safety", "Tools & consumables"];
   // weights of made-to-size pieces (and items without a catalogue weight) from the ACOFORM standard sections in Al 6061
   for (const r of byCode.values()) {
     if (r.group === "accessory" || !(r.w > 0 && r.h > 0) || !(r.custom || !(r.weight > 0))) continue;
     r.weight = fabSpec(r.code, r.description, r.w, r.h, 1).kgEach * r.qty;
+  }
+  // column sets bought for this project: a share of all column faces (the sets are re-used column after column)
+  if (R && R.columnSetPct < 100) {
+    for (const [k, row] of byCode) if (row.group === "column" && row.qty > 0) {
+      const n = Math.max(1, Math.ceil((row.qty * R.columnSetPct) / 100));
+      byCode.set(k, { ...row, qty: n, area: (row.area / row.qty) * n, weight: (row.weight / row.qty) * n, description: `${row.description} — ${R.columnSetPct} % of all columns (sets re-used)` });
+    }
   }
   // site spares learned from site reports: N extra pieces per panel family (the most-used sizes)
   for (const [grp, pct] of Object.entries(R?.sparePct ?? {})) {

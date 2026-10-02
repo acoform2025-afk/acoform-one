@@ -53,7 +53,7 @@ export type Params = {
 export type AreaItem = { code: string; group: "slab" | "deduct" | "edge" | "wall" | "opening" | "column" | "beam" | "loft" | "extra"; label: string; calc: string; area: number };
 /** Shell-plan title block and notes (stored with the take-off). */
 export type ShellMeta = { drawingNo?: string; rev?: string; drawnBy?: string; checkedBy?: string; notes?: string; scaleNote?: string };
-export type LayerRole = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams";
+export type LayerRole = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams" | "upstand";
 
 export type Takeoff = {
   v: 1;
@@ -70,6 +70,7 @@ export type Takeoff = {
   stairs?: StairRow[];
   shell?: ShellMeta;
   system?: "tierod" | "flattie" | "acoform";   // formwork system for this plan only (unset = company setting)
+  ruleOverrides?: { columnSetPct?: number };   // layout-rule values for this plan only
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null };
 };
 
@@ -100,6 +101,7 @@ export type DxfAuto = {
   stairCount?: number;                              // staircases found on stair layers
   stairBoxes?: [number, number, number, number][];  // drawing units
   beamRingDepth?: number[];                         // mm, depth of each beam ring
+  upstands?: { label: string; h: number; length: number }[];   // upstand / planter walls on the slab: h mm, face length m (both faces)
   gapSpan?: number;                                 // openings in wall lines (door / window / passage widths), m
   gapCount?: number;
   gaps?: { a: Pt; b: Pt; span: number; thk?: number }[];  // a, b in drawing units; span, thk in m
@@ -276,6 +278,12 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     if (auto.separateWall && (auto.separateWall.faces > 0 || auto.separateWall.cols > 0)) {
       const sw = auto.separateWall;
       items.push({ code: code("X"), group: "wall", label: "Separate set (core / cast separately) — not in the typical floor", calc: `${n2(sw.faces)} m wall faces${sw.cols ? ` + ${sw.cols} columns (${n2(sw.colPerimeter)} m)` : ""} left out`, area: 0 });
+    }
+    // upstands / planters on the slab: both faces (outline length) × height (layer name, else 250 mm)
+    for (const up of auto.upstands ?? []) {
+      const h = (up.h || 250) / 1000, a = up.length * h;
+      wallArea += a;
+      items.push({ code: code("U"), group: "wall", label: `Upstand / planter — ${up.label}`, calc: `${n2(up.length)} m faces × ${n3(h)} m${up.h ? "" : " (height not in the layer name: 250 mm)"}`, area: a });
     }
     for (const c of auto.columns) {
       colCount += 1; colPerimeter += c.perimeter; colFoot += c.area; colArea += c.perimeter * H; addSize(c.w, c.d, 1);

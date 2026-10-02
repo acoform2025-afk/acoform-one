@@ -35,7 +35,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
     .select("id, panel_code, panel_category, width_mm, height_mm, weight_kg, area_sqm").eq("is_active", true);
   const { data: eng } = await supabase.from("engineering_parameters").select("tie_spacing_h_mm, tie_spacing_v_mm").maybeSingle();
   const companyRules = await loadLayoutRules(supabase);
-  const layoutRules = rulesForPlan(companyRules, t.system);
+  const layoutRules = rulesForPlan(companyRules, t.system, t.ruleOverrides);
   const opt = readOptions(q, layoutRules);
   // full-height system: one panel to the clear height less the bottom strip (unless a height was typed in)
   if (layoutRules.fullHeight && !q.h) opt.stdHeight = Math.max(1200, Math.round(((t.params.floorHeight - t.params.slabMm / 1000) * 1000 - layoutRules.bottomStrip) / 5) * 5);
@@ -54,7 +54,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
     }
   }
   const inp = panelInputs(t, model, rules);
-  const o: PanelOptions = { ...opt, sunk: inp.sunk, rules: layoutRules, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns, stairSets: inp.stairSets, stairs: inp.stairs };
+  const o: PanelOptions = { ...opt, extCorners: inp.extCorners, upstands: inp.upstands, sunk: inp.sunk, rules: layoutRules, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns, stairSets: inp.stairSets, stairs: inp.stairs };
   const zones = buildZones(inp, (catalog ?? []) as unknown as CatPanel[], layoutRules);
   o.zoneDeck = zones.length ? { panels: zones.flatMap((z) => z.panels.map((p) => ({ code: p.code, w: p.w, L: p.L, custom: p.custom }))), specialArea: zones.reduce((a, z) => a + z.specialArea, 0), area: zones.reduce((a, z) => a + z.area, 0), zones: zones.length } : undefined;
   const result = layoutFloor(inp.faces, inp.decks, inp.beams, inp.corners, (catalog ?? []).map((c) => ({ ...c, width_mm: Number(c.width_mm), height_mm: Number(c.height_mm), weight_kg: Number(c.weight_kg), area_sqm: Number(c.area_sqm) })) as CatPanel[], o);

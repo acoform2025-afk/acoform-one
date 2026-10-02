@@ -26,7 +26,7 @@ export const doorWindowKind = (name: string): "door" | "window" | null => {
   return null;
 };
 
-export type Role = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams";
+export type Role = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams" | "upstand";
 
 /** First guess of what a layer is, from its name (the user can change every layer on the measuring screen). */
 export function suggestLayerRole(name: string): Role {
@@ -38,8 +38,10 @@ export function suggestLayerRole(name: string): Role {
   if (/砌块|砖/.test(n) && !/现浇/.test(n)) return "ignore";
   if (/shaft|cut-?out|opening|(^|-)duct|(^|-)lift|stair-?open|洞|管井|风井|电梯井/.test(n)) return "opening";
   if (/(^|[^a-z])(col|cols|clm|column|columns)([^a-z]|$)|column|柱/.test(n)) return "columns";
-  // inverted / drop pardi (down-stand walls under the slab) and upstands are formed like beams
-  if (/inverted|drop-?pardi|upstand|down-?stand|吊挂/.test(n)) return "beams";
+  // upstands / planters / kerbs on top of the slab: both faces × their height
+  if (/upstand|up-stand|planter|kerb|反坎|翻边/.test(n)) return "upstand";
+  // inverted / drop pardi (down-stand walls under the slab) are formed like beams
+  if (/inverted|drop-?pardi|down-?stand|吊挂/.test(n)) return "beams";
   if (/beam|(^|[^a-z])bm([^a-z]|$)|梁/.test(n)) return "beams";
   if (/wall|shear|pardi|brick|masonry|(^|[^a-z])rcc([^a-z]|$)|-rcc$|(^|[^a-z])wl([^a-z]|$)|墙/.test(n)) return "walls";
   if (/^[a-z]-flor$|^a-flor-mcut$/.test(n)) return "slab";          // Revit floor edges

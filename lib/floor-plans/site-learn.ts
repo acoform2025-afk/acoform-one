@@ -9,7 +9,7 @@ import type { BomRow } from "@/lib/design-engine/floor-panels";
 export const FAMILY_LABEL: Record<string, string> = {
   wall: "Wall panels", "wall-top": "Wall top panels", filler: "Fillers / specials", end: "Stop-ends",
   corner: "Corners, soffit corners, kickers", column: "Column panels", deck: "Deck panels", beam: "Beam panels",
-  stair: "Staircase", drop: "Drop (sunk slab) formwork",
+  upstand: "Upstand / planter panels", stair: "Staircase", drop: "Drop (sunk slab) formwork",
 };
 export const ACCESSORIES: { key: string; label: string; re: RegExp }[] = [
   { key: "pins", label: "Pins", re: /^L?PIN$/ },

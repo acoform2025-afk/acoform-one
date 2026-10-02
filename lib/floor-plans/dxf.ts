@@ -289,11 +289,11 @@ export function dxfFrame(model: DxfModel, maxSide = 2400) {
   };
 }
 
-export const ROLE_COLOR: Record<LayerRole, string> = { ignore: "#b9bcc2", walls: "#1f2937", columns: "#dc2626", slab: "#2563eb", opening: "#9333ea", beams: "#db2777" };
+export const ROLE_COLOR: Record<LayerRole, string> = { ignore: "#b9bcc2", walls: "#1f2937", columns: "#dc2626", slab: "#2563eb", opening: "#9333ea", beams: "#db2777", upstand: "#0d9488" };
 
 export function drawDxf(ctx: CanvasRenderingContext2D, model: DxfModel, roles: Record<string, LayerRole>, frame: ReturnType<typeof dxfFrame>) {
   ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, frame.width, frame.height);
-  const order: LayerRole[] = ["ignore", "slab", "opening", "beams", "walls", "columns"];
+  const order: LayerRole[] = ["ignore", "slab", "opening", "upstand", "beams", "walls", "columns"];
   for (const role of order) {
     ctx.strokeStyle = ROLE_COLOR[role]; ctx.lineWidth = role === "ignore" ? 0.8 : role === "walls" ? 1.6 : 1.4;
     ctx.fillStyle = role === "columns" ? "rgba(220,38,38,0.35)" : role === "opening" ? "rgba(147,51,234,0.12)" : "transparent";
@@ -631,11 +631,34 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     openingPerimeter: openL.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
     wallLineLength: (U.perimeter + looseLen) * u - sepFaces,
     // outlines on column layers too big / not rectangular for a column (lift cores, L-shaped shear walls)
-    columnWallEdges: colWalls.length ? U.rings.flatMap((r, i) => r.map((a, e) => { const b = r[(e + 1) % r.length]; const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; return nearRings(mid, colWalls, 0.01 / u) ? `${i}:${e}` : ""; })).filter(Boolean) : [],
+    // outer faces of lift cores / L-walls on the column layer (cast with the column set); the shaft faces inside a core
+    // (holes of the merged outline) stay with the walls — as in the Cosmos column-set list (LIFT-1 = outer perimeter)
+    columnWallEdges: colWalls.length ? U.rings.flatMap((r, i) => U.isHole?.[i] ? [] : r.map((a, e) => {
+      const b = r[(e + 1) % r.length]; const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      if (!nearRings(mid, colWalls, 0.01 / u)) return "";
+      // the side of this face that is not concrete: a lift shaft / duct (an opening, no slab) → shaft face, stays with the walls
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L, o = 0.06 / u;
+      const p1: Pt = [mid[0] + nx * o, mid[1] + ny * o], p2: Pt = [mid[0] - nx * o, mid[1] - ny * o];
+      const out = nearRings(p1, U.rings, 0) ? p2 : p1;
+      if (openL.some((x) => inside(out, x.p.pts))) return "";
+      return `${i}:${e}`;
+    })).filter(Boolean) : [],
     wallSeparate, separateWall: { faces: sepFaces, cols: sepCols.length, colPerimeter: sepCols.reduce((s2, c) => s2 + c.perimeter, 0) },
     wallTopArea: U.area * u2,
     beamLineLength: unsizedLen,
     beamSized, beamRings, beamRingDepth,
+    // upstands / planters: closed outlines → perimeter = both faces; height from the layer name ("UPSTAND 250", "PLANTER 1050H")
+    upstands: (() => {
+      const out: { label: string; h: number; length: number }[] = [];
+      const byL = new Map<string, DxfPath[]>(); for (const p of of("upstand")) (byL.get(p.layer) ?? byL.set(p.layer, []).get(p.layer)!).push(p);
+      for (const [layer, ps] of byL) {
+        const lp = closedLoops(ps, tol).filter((r) => r.length >= 3);
+        const len = (lp.length ? lp.reduce((s2, r) => s2 + polyLength(r, true), 0) : ps.reduce((s2, p) => s2 + polyLength(p.pts, p.closed) * 2, 0)) * u;
+        const m = layer.match(/(\d{3,4})\s*(mm|h)?/i); const h = m ? Number(m[1]) : 0;
+        if (len > 0.2) out.push({ label: layer.includes("$0$") ? layer.slice(layer.lastIndexOf("$0$") + 3) : layer, h: h >= 100 && h <= 2000 ? h : 0, length: len });
+      }
+      return out;
+    })(),
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,

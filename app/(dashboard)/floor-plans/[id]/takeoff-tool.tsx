@@ -233,7 +233,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
       const { k: kk, x: vx, y: vy } = view;
       const ix0 = -vx / kk, iy0 = -vy / kk, ix1 = (r.width - vx) / kk, iy1 = (r.height - vy) / kk;
       const roles = t.dxf!.layerRoles;
-      const order: LayerRole[] = ["ignore", "slab", "opening", "beams", "walls", "columns"];
+      const order: LayerRole[] = ["ignore", "slab", "opening", "upstand", "beams", "walls", "columns"];
       for (const role of order) {
         ctx.beginPath();
         let any = false;
@@ -894,7 +894,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
                     <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({l.count})</span></span>
                     <select value={role} disabled={!canEdit} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-0.5 text-xs text-graphite-100"
                       onChange={(e) => { const r = e.target.value as LayerRole; update((p) => ({ ...p, dxf: { ...p.dxf!, layerRoles: { ...p.dxf!.layerRoles, [l.name]: r } } })); setLayerVersion((v) => v + 1); }}>
-                      <option value="ignore">Ignore</option><option value="slab">Slab outline</option><option value="opening">Openings / ducts</option><option value="walls">Walls</option><option value="columns">Columns</option><option value="beams">Beams</option>
+                      <option value="ignore">Ignore</option><option value="slab">Slab outline</option><option value="opening">Openings / ducts</option><option value="walls">Walls</option><option value="columns">Columns</option><option value="beams">Beams</option><option value="upstand">Upstands / planters</option>
                     </select>
                   </div>
                 );

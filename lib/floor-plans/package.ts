@@ -54,7 +54,7 @@ export function faceZones(zones: Zone[], faces: FaceLayout[], mpp: number, walls
 
 const FAMILY: Record<string, string> = {
   deck: "Deck panels", wall: "Wall panels", "wall-top": "Wall top panels / column tops", filler: "Fillers & specials", end: "Wall ends & reveals",
-  corner: "Corners, soffit corners & kickers", column: "Column panels (column set)", beam: "Beam side & bottom panels", stair: "Staircase", drop: "Drop formwork (sunk slabs)",
+  corner: "Corners, soffit corners & kickers", column: "Column panels (column set)", beam: "Beam side & bottom panels", upstand: "Upstand / planter panels", stair: "Staircase", drop: "Drop formwork (sunk slabs)",
 };
 
 /** Main panel list, one column per area (+ "whole floor" for pieces not tied to a room). */

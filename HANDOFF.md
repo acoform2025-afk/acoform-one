@@ -216,3 +216,11 @@ returns and repairs.
 - Storage bucket floor-plans now accepts image/vnd.dxf (Mac) etc.; upload form wraps the file with the app's own MIME type.
 - Royce One test project: lead ACOFORM/LEAD/26-27/003; drawing = `Royce One - typical floor.dxf` (sheet 1 cut from r5, 355 KB, same results); takeoff prepared (layer roles, 3.65 m / 150 mm, lift cores = separate sets).
 - Per-plan formwork system: `takeoff.system` ("tierod" | "flattie" | "acoform", unset = company setting) → `rulesForPlan()` in run-panels (that system's preset values). Selector next to "Formwork system" on the Panel layout page. Royce One test plan = tierod.
+
+## Royce check fixes (general rules, `layout-rules.ts`)
+- Lift cores / L-walls on the column layer: outer faces → column set (coresWithColumns, on for tie-rod); faces looking into a shaft / duct opening stay with the walls (`columnWallEdges` in dxf.ts).
+- Corners split: internal (IC, `internalCorner × internalCornerLeg`) and external (EC angles only if `wallEcAngles`; never at wall ends ≤ 250 mm). `bothLegs`: corner / soffit-corner area on both legs (Indian BOM practice).
+- Soffit corners: SC `soffitCornerW × soffitCornerLeg` along wall tops + column faces; beam caps SCB `× beamCapLeg` along inner beam sides; kicker corners KCE / KIC at slab-edge corners (`kickerCornerLen`). Tie-rod kicker 150.
+- New layer role `upstand` (upstand / planter / kerb): outline length × height (from the layer name, else `upstandMm`) → take-off item U + BOM group "upstand" (UP-h-L).
+- `columnSetPct` (company rule) and per-plan `takeoff.ruleOverrides.columnSetPct` (Panel layout page: "Column sets bought … %") scale the column-set rows.
+- Royce One plan: tie-rod, no separate shapes, UPSTAND layer = upstand, column sets 64 %. Check file: Alu. Formwork/"Royce One - app check vs real files.xlsx" — app 3,573 vs real 3,509 m² (+1.8 %). Open: beam sides +21 %, IC −25 %, column tops above 1st pour (283 m²) not found in the real files, planters not on R5.

@@ -7,12 +7,13 @@ import { fmtArea } from "@/lib/floor-plans/calc";
 import { hasPermission } from "@/lib/auth/permissions";
 import { CreateBom } from "./create-bom";
 import { SystemSelect } from "./system-select";
+import { ColumnSetsInput } from "./column-sets-input";
 import { PRESETS, describeLayoutRules } from "@/lib/design-engine/layout-rules";
 
 export const metadata = { title: "Panel layout & BOM" };
 export const dynamic = "force-dynamic";
 
-const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", column: "Column panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", stair: "Staircase panels", drop: "Drop (suspended) formwork — sunk slabs", accessory: "Props & accessories (elaborated)" };
+const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", column: "Column panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", upstand: "Upstand / planter panels", stair: "Staircase panels", drop: "Drop (suspended) formwork — sunk slabs", accessory: "Props & accessories (elaborated)" };
 const n0 = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -52,6 +53,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
             <p className="mt-1 text-xs text-graphite-400" title={describeLayoutRules(r.layoutRules).join("\n")}>
               Formwork system: <b className="text-graphite-200">{PRESETS[r.layoutRules.system].label}</b>{r.t.system && r.t.system !== r.companySystem ? <span className="ml-1 rounded bg-signal-amber/15 px-1.5 py-0.5 text-signal-amber">this plan only</span> : null} · <Link href="/settings#layout-rules" className="text-aluminium-300 hover:underline">company layout rules</Link>
               <span className="ml-2"><SystemSelect planId={id} value={r.t.system && r.t.system !== r.companySystem ? r.t.system : ""} companyLabel={PRESETS[r.companySystem ?? "acoform"].label} options={(Object.keys(PRESETS) as (keyof typeof PRESETS)[]).filter((k) => k !== r.companySystem).map((k) => ({ key: k, label: PRESETS[k].label }))} canEdit={canEditPlan} /></span>
+              {r.layoutRules.columnsSeparate ? <span className="ml-3"><ColumnSetsInput planId={id} value={r.layoutRules.columnSetPct} canEdit={canEditPlan} /></span> : null}
             </p>
           ) : null}
         </div>

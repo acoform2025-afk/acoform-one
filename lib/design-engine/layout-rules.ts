@@ -19,6 +19,9 @@ export type LayoutRules = {
   bottomStrip: number;           // mm strip under full-height panels (flat-tie R40 / R50), 0 = none
   minFiller: number;             // fillers narrower than this are solid strips
   internalCorner: number;        // mm leg of the internal corner (IC 100 × 100)
+  internalCornerLeg: number;     // second leg of the internal corner, mm (Cosmos IC 100 × 125)
+  wallEcAngles: boolean;         // external corner angles on outside wall corners (off: outside corners formed by external wall panels WE)
+  columnSetPct: number;          // column sets bought, % of all column / core faces (sets are re-used; Cosmos Royce One ≈ 64 %)
   externalCorner: number;        // mm leg of the external corner angle (63.5 / 65)
   kickerMm: number;              // external kicker height on the outer slab edge (0 = none)
   tie: "rod" | "flat";
@@ -30,6 +33,11 @@ export type LayoutRules = {
   propHead: [number, number];    // prop head size, mm
   soffitCornerLen: number;       // standard soffit-corner length, mm
   soffitCornerW: number;         // soffit-corner width on the deck side, mm (the deck starts inside it; 0 = deck to the wall face)
+  soffitCornerLeg: number;       // soffit-corner leg down the wall / column face, mm (Cosmos SCU 100 × 125)
+  beamCapLeg: number;            // soffit-corner (beam cap) leg down the beam sides, mm (Cosmos SET / SER 175 … 250)
+  bothLegs: boolean;             // corner / soffit-corner area counted on both legs (Indian BOM practice) — else one leg
+  kickerCornerLen: number;       // kicker corner piece at every slab-edge corner, length mm (0 = none)
+  upstandMm: number;             // upstand / planter wall height when the layer name gives none, mm
   propSpacing: number;           // max prop spacing, m
   supportSets: number;           // sets of prop heads / props in use (props stay up for this many floors)
   // beams, columns, stairs
@@ -50,9 +58,9 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
     note: "Indian practice (e.g. Royce One / Cosmos): 2400 wall panels with a top panel, widths in 25 mm steps, tie rods, 150 mm mid beam and prop heads, deck lengths sized to each room.",
     rules: {
       system: "tierod", wallWidths: range(125, 600, 25), stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100,
-      internalCorner: 100, externalCorner: 63.5, kickerMm: 100, tie: "rod", tieH: 800, tieV: 600,
+      internalCorner: 100, internalCornerLeg: 125, wallEcAngles: false, columnSetPct: 100, externalCorner: 63.5, kickerMm: 150, tie: "rod", tieH: 800, tieV: 600,
       deckWidths: range(200, 600, 25), deckLengths: [1200, 1050, 900, 850, 800], midBeam: 150, propHead: [150, 300],
-      soffitCornerLen: 1800, soffitCornerW: 100, propSpacing: 1.2, supportSets: 1, beamLenStep: 25, columnsSeparate: true, columnFirstCast: 2400, coresWithColumns: false, lossPct: 5, sparePct: {},
+      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 125, beamCapLeg: 175, bothLegs: true, kickerCornerLen: 330, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 25, columnsSeparate: true, columnFirstCast: 2400, coresWithColumns: true, lossPct: 5, sparePct: {},
     },
   },
   flattie: {
@@ -60,9 +68,9 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
     note: "Chinese practice (e.g. Guangzhou Motian): one full-height wall panel on a 40–50 mm bottom strip, widths in 50 mm steps up to 500, flat ties, 100 mm mid beam, 100 × 200 support heads, 200 mm external kicker, props kept for 3 floors, 10 % loss on small parts.",
     rules: {
       system: "flattie", wallWidths: range(100, 500, 50), stdHeight: 2700, fullHeight: true, bottomStrip: 40, minFiller: 100,
-      internalCorner: 100, externalCorner: 65, kickerMm: 200, tie: "flat", tieH: 450, tieV: 600,
+      internalCorner: 100, internalCornerLeg: 100, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 200, tie: "flat", tieH: 450, tieV: 600,
       deckWidths: range(100, 600, 50), deckLengths: [1200, 1100, 900, 800], midBeam: 100, propHead: [100, 200],
-      soffitCornerLen: 1800, soffitCornerW: 100, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, lossPct: 10, sparePct: {},
+      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 100, beamCapLeg: 100, bothLegs: true, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, lossPct: 10, sparePct: {},
     },
   },
   acoform: {
@@ -70,9 +78,9 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
     note: "ACOFORM STD FAB drawings: catalogue wall panels (600 … 100) at 2400 with top panels / RK panels, 1200 deck panels, 100 mm mid beam and prop heads, tie rods.",
     rules: {
       system: "acoform", wallWidths: [], stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100,
-      internalCorner: 100, externalCorner: 65, kickerMm: 100, tie: "rod", tieH: 800, tieV: 800,
+      internalCorner: 100, internalCornerLeg: 100, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 100, tie: "rod", tieH: 800, tieV: 800,
       deckWidths: [], deckLengths: [1200], midBeam: 100, propHead: [100, 230],
-      soffitCornerLen: 1200, soffitCornerW: 0, propSpacing: 1.2, supportSets: 1, beamLenStep: 5, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, lossPct: 5, sparePct: {},
+      soffitCornerLen: 1200, soffitCornerW: 0, soffitCornerLeg: 0, beamCapLeg: 0, bothLegs: false, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 5, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, lossPct: 5, sparePct: {},
     },
   },
 };
@@ -81,9 +89,10 @@ export const DEFAULT_LAYOUT_RULES = PRESETS.acoform.rules;
 
 /** Rules for one floor plan: the company's own rules, or — when the plan has its own system (e.g. a test project in
  *  another system) — that system's ready-made values. */
-export function rulesForPlan(company: LayoutRules, system?: string | null): LayoutRules {
-  if (!system || system === company.system || !(system in PRESETS)) return company;
-  return normaliseLayoutRules({ ...PRESETS[system as FormworkSystem].rules, sparePct: {} });
+export function rulesForPlan(company: LayoutRules, system?: string | null, overrides?: Partial<LayoutRules> | null): LayoutRules {
+  const base = !system || system === company.system || !(system in PRESETS) ? company : normaliseLayoutRules({ ...PRESETS[system as FormworkSystem].rules, sparePct: {} });
+  // values set for this plan only (e.g. the number of column sets bought for this project)
+  return overrides && Object.keys(overrides).length ? normaliseLayoutRules({ ...base, ...overrides, system: base.system }) : base;
 }
 
 const num = (v: unknown, d: number, lo: number, hi: number) => { const n = Number(v); return v === null || v === undefined || v === "" || !Number.isFinite(n) ? d : Math.min(hi, Math.max(lo, n)); };
@@ -108,6 +117,9 @@ export function normaliseLayoutRules(raw: unknown): LayoutRules {
     bottomStrip: num(r.bottomStrip, d.bottomStrip, 0, 150),
     minFiller: num(r.minFiller, d.minFiller, 0, 300),
     internalCorner: num(r.internalCorner, d.internalCorner, 50, 300),
+    internalCornerLeg: num(r.internalCornerLeg, d.internalCornerLeg, 50, 300),
+    wallEcAngles: typeof r.wallEcAngles === "boolean" ? r.wallEcAngles : d.wallEcAngles,
+    columnSetPct: num(r.columnSetPct, d.columnSetPct, 10, 100),
     externalCorner: num(r.externalCorner, d.externalCorner, 40, 150),
     kickerMm: num(r.kickerMm, d.kickerMm, 0, 500),
     tie: r.tie === "flat" || r.tie === "rod" ? r.tie : d.tie,
@@ -118,6 +130,11 @@ export function normaliseLayoutRules(raw: unknown): LayoutRules {
     propHead: [num(ph[0], d.propHead[0], 50, 300), num(ph[1], d.propHead[1], 100, 600)],
     soffitCornerLen: num(r.soffitCornerLen, d.soffitCornerLen, 300, 3000),
     soffitCornerW: num(r.soffitCornerW, d.soffitCornerW, 0, 300),
+    soffitCornerLeg: num(r.soffitCornerLeg, d.soffitCornerLeg, 0, 400),
+    beamCapLeg: num(r.beamCapLeg, d.beamCapLeg, 0, 400),
+    bothLegs: typeof r.bothLegs === "boolean" ? r.bothLegs : d.bothLegs,
+    kickerCornerLen: num(r.kickerCornerLen, d.kickerCornerLen, 0, 1200),
+    upstandMm: num(r.upstandMm, d.upstandMm, 50, 2000),
     propSpacing: num(r.propSpacing, d.propSpacing, 0.6, 2.4),
     supportSets: Math.round(num(r.supportSets, d.supportSets, 1, 5)),
     beamLenStep: num(r.beamLenStep, d.beamLenStep, 5, 300),

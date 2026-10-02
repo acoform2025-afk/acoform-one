@@ -5,7 +5,7 @@
 import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
 import { closedLoops, dxfAuto, dxfFrame, separateAreas, type DxfModel } from "./dxf";
-import { wallUnion } from "./geom";
+import { nearRings, wallUnion } from "./geom";
 import { buildShell } from "./shell";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
 
@@ -29,7 +29,8 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f));
   }
-  let corners = 0;
+  let corners = 0, extCorners = 0;          // internal (room) corners → IC, external (outside) corners → EC
+  let solidPx: Pt[][] = [];
 
   // drawn walls: both faces of every segment
   for (const s of g.shapes.filter((x) => x.kind === "wall")) {
@@ -94,11 +95,23 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
       faces.push({ code: `F${n}`, length: L, height: H, geo: { a, b, off: side }, ...(ring != null && colEdges.has(`${ring}:${i}`) ? { set: "column" as const } : {}) });
       if (twoSided) faces.push({ code: `F${n}B`, length: L, height: H, geo: { a, b, off: -side } });
     }
-    for (let i = 1; i < pts.length - (closed ? 0 : 1); i++) if (Math.abs(angleAt(pts[i - 1], pts[i], pts[(i + 1) % pts.length]) - 90) < 30) corners++;
-    if (closed && pts.length > 2 && Math.abs(angleAt(pts[pts.length - 1], pts[0], pts[1]) - 90) < 30) corners++;
+    // a corner of a wall outline is internal (concrete on 3 of 4 sides → internal corner IC) or external (1 of 4 → external corner EC)
+    const kind = (a: Pt, v: Pt, c: Pt): "int" | "ext" => {
+      if (ring == null || !solidPx.length || !(mpp > 0)) return "int";
+      const d = 0.04 / mpp, l1 = Math.hypot(a[0] - v[0], a[1] - v[1]) || 1, l2 = Math.hypot(c[0] - v[0], c[1] - v[1]) || 1;
+      const u1: Pt = [(a[0] - v[0]) / l1, (a[1] - v[1]) / l1], u2: Pt = [(c[0] - v[0]) / l2, (c[1] - v[1]) / l2];
+      let n = 0; for (const s1 of [1, -1]) for (const s2 of [1, -1]) if (nearRings([v[0] + (u1[0] * s1 + u2[0] * s2) * d, v[1] + (u1[1] * s1 + u2[1] * s2) * d], solidPx, 0)) n++;
+      return n >= 3 ? "int" : "ext";
+    };
+    // a corner next to a wall end (face ≤ 250 mm) is closed by the stop-end, not by an external corner angle
+    const isEnd = (p: Pt, q: Pt) => mm(Math.hypot(q[0] - p[0], q[1] - p[1])) <= 250;
+    const count = (a: Pt, v: Pt, c: Pt) => { if (Math.abs(angleAt(a, v, c) - 90) < 30) { if (kind(a, v, c) === "int") corners++; else if (!isEnd(a, v) && !isEnd(v, c)) extCorners++; } };
+    for (let i = 1; i < pts.length - (closed ? 0 : 1); i++) count(pts[i - 1], pts[i], pts[(i + 1) % pts.length]);
+    if (closed && pts.length > 2) count(pts[pts.length - 1], pts[0], pts[1]);
   };
   if (auto && (auto.wallRings?.length || auto.wallLoose?.length)) {
     const sep = new Set(auto.wallSeparate ?? []);
+    solidPx = (auto.wallRings ?? []).map((r) => r.map(px));
     (auto.wallRings ?? []).forEach((r, ri) => { if (!sep.has(ri)) addRun(r.map(px), true, false, ri); });
     for (const l of auto.wallLoose ?? []) addRun(l.map(px), false, both);
   } else {
@@ -257,5 +270,5 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   ];
   const zoneBeam3: { ring: Pt[]; d: number }[] = frame ? (auto?.beamRings ?? []).map((r, i) => ({ ring: r.map((q) => toM(frame!.toPx(q))), d: auto?.beamRingDepth?.[i] ?? (t.params.beamDepthMm ?? 600) })) : [];
   const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : [];
-  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, sunk: auto?.sunk ?? [] };
+  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, sunk: auto?.sunk ?? [] };
 }

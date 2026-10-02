@@ -57,6 +57,10 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
         {n("internalCorner", "Internal corner leg", "(mm)")}
         {n("externalCorner", "External corner leg", "(mm)", 0.5)}
         {n("kickerMm", "External kicker", "(mm, 0 = none)")}
+        {n("kickerCornerLen", "Kicker corner piece length", "(mm, 0 = none)")}
+        {n("internalCornerLeg", "Internal corner 2nd leg", "(mm, e.g. 125)")}
+        {n("columnSetPct", "Column sets bought", "(% of all columns, 100 = one set per column)")}
+        {n("upstandMm", "Upstand / planter height", "(mm, if the layer name gives none)")}
         <label className="flex flex-col gap-1.5"><span className={lbl}>Wall ties</span>
           <select value={v.tie} disabled={!canEdit} onChange={(e) => set("tie", e.target.value as LayoutRules["tie"])} className={input}><option value="rod">Tie rods</option><option value="flat">Flat ties</option></select></label>
         {n("tieH", "Tie spacing along wall", "(mm)")}
@@ -79,6 +83,8 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
         {n("propSpacing", "Max prop spacing", "(m)", 0.05)}
         {n("soffitCornerLen", "Soffit corner length", "(mm)")}
         {n("soffitCornerW", "Soffit corner width", "(mm, deck starts inside it)")}
+        {n("soffitCornerLeg", "Soffit corner leg down the wall", "(mm, e.g. 125)")}
+        {n("beamCapLeg", "Beam cap leg down the beam side", "(mm, e.g. 175)")}
         {n("supportSets", "Sets of props / support heads", "(floors kept up)")}
       </div>
 
@@ -89,7 +95,9 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
         {n("lossPct", "Loss on small parts", "(%)")}
       </div>
       <div className="mt-3">{chk("columnsSeparate", "Columns cast first with their own formwork", "They are listed as a separate column set, panels up to the first pour height.")}</div>
-      <div className="mt-2">{chk("coresWithColumns", "Lift cores and L-shaped shear walls (drawn on the column layer) go with the column set", "Off: they are formed with the walls, as in the Royce One BOM.")}</div>
+      <div className="mt-2">{chk("coresWithColumns", "Lift cores and L-shaped shear walls (drawn on the column layer): outer faces cast first with the column set", "Shaft faces inside a lift core always stay with the walls (Cosmos / Royce One practice).")}</div>
+      <div className="mt-2">{chk("wallEcAngles", "External corner angles on outside wall corners", "Off: outside corners are formed by external wall panels (WE), as Cosmos does.")}</div>
+      <div className="mt-2">{chk("bothLegs", "Count corner and soffit-corner area on both legs", "Indian BOM practice (e.g. 100 × 125 soffit corner = 0.225 m² per metre). Off = one leg only.")}</div>
 
       <ul className="mt-4 space-y-0.5 rounded-md border border-graphite-800 bg-graphite-950 px-3 py-2 text-[11px] text-graphite-400">
         {describeLayoutRules(out).map((l) => <li key={l}>• {l}</li>)}
