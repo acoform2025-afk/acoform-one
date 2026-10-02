@@ -9,7 +9,9 @@ const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xe0605a, deck: 0x9fd3c7, ds
 
 export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: "3d" | "top" | "front") => void } | null>(null);
+  type View = "3d" | "top" | "front" | "back" | "left" | "right";
+  const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; spin: (on: boolean) => void; turn: (deg: number) => void } | null>(null);
+  const [spinning, setSpinning] = useState(false);
   const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, wallPanels: true, deck: true, slab: false, beams: true, issues: true });
   const [pick, setPick] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -32,6 +34,9 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         const [x0, y0, x1, y1] = scene.box; const cx = (x0 + x1) / 2, cz = (y0 + y1) / 2, span = Math.max(x1 - x0, y1 - y0, 5);
         const cam = new THREE.PerspectiveCamera(40, W / Hh, 0.05, span * 20);
         const ctr = new OrbitControls(cam, renderer.domElement); ctr.target.set(cx, scene.H / 2, cz); ctr.enableDamping = true;
+        ctr.minPolarAngle = 0; ctr.maxPolarAngle = Math.PI;   // all the way round: over the top and from underneath
+        ctr.autoRotateSpeed = 4;                              // one full turn ≈ 15 s
+        ctr.minDistance = 0.5; ctr.maxDistance = span * 6;
         sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
         const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, span * 1.5, cz + span * 0.7); sc.add(sun);
         const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), wallPanels: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), issues: new THREE.Group() };
@@ -90,9 +95,13 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           pole.position.set(is.at[0], is.y + rBall * 1.25, is.at[1]);
           groups.issues.add(ball, pole); marks.push({ mesh: ball, text: `${is.id} · ${is.text}` });
         }
-        const view = (v: "3d" | "top" | "front") => {
+        const view = (v: View) => {
+          const d = span * 1.3;
           if (v === "top") cam.position.set(cx, span * 1.6, cz + 0.001);
-          else if (v === "front") cam.position.set(cx, scene.H / 2, cz + span * 1.3);
+          else if (v === "front") cam.position.set(cx, scene.H / 2, cz + d);
+          else if (v === "back") cam.position.set(cx, scene.H / 2, cz - d);
+          else if (v === "left") cam.position.set(cx - d, scene.H / 2, cz);
+          else if (v === "right") cam.position.set(cx + d, scene.H / 2, cz);
           else cam.position.set(cx + span * 0.55, span * 0.6, cz + span * 0.7);
           ctr.target.set(cx, v === "top" ? 0 : scene.H / 2, cz); ctr.update();
         };
@@ -103,7 +112,14 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           cam.position.set(f.at[0] + d * 0.6, f.y + d * 0.8, f.at[1] + d * 0.8); ctr.target.set(f.at[0], f.y, f.at[1]); ctr.update();
           setPick(`${f.id} · ${f.text}`);
         }
-        api.current = { set: (l, v) => { groups[l].visible = v; }, view };
+        // turn the camera round the vertical axis through the target (step buttons)
+        const turn = (deg: number) => {
+          const a = (deg * Math.PI) / 180, t = ctr.target, ox = cam.position.x - t.x, oz = cam.position.z - t.z;
+          cam.position.x = t.x + ox * Math.cos(a) - oz * Math.sin(a); cam.position.z = t.z + ox * Math.sin(a) + oz * Math.cos(a); ctr.update();
+        };
+        const stopSpin = () => { if (ctr.autoRotate) { ctr.autoRotate = false; setSpinning(false); } };
+        renderer.domElement.addEventListener("pointerdown", stopSpin);
+        api.current = { set: (l, v) => { groups[l].visible = v; }, view, spin: (v) => { ctr.autoRotate = v; }, turn };
         (Object.keys(groups) as Layer[]).forEach((l) => { groups[l].visible = on[l]; });
 
         const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
@@ -123,11 +139,11 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         };
         renderer.domElement.addEventListener("click", onClick);
         const onResize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); };
-        window.addEventListener("resize", onResize);
+        window.addEventListener("resize", onResize); document.addEventListener("fullscreenchange", onResize);
         const loop = () => { ctr.update(); renderer.render(sc, cam); raf = requestAnimationFrame(loop); };
         loop();
         cleanup = () => {
-          cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); renderer.domElement.removeEventListener("click", onClick);
+          cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("fullscreenchange", onResize); renderer.domElement.removeEventListener("click", onClick); renderer.domElement.removeEventListener("pointerdown", stopSpin);
           ctr.dispose(); renderer.dispose(); sc.traverse((o) => { const m = o as { geometry?: { dispose: () => void } }; m.geometry?.dispose(); });
           renderer.domElement.remove();
         };
@@ -148,9 +164,16 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
             className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : "border border-graphite-700 text-graphite-300 hover:bg-graphite-800"}`}>{LABEL[l]}</button>
         ))}
         <span className="mx-1 h-5 w-px bg-graphite-700" />
-        {(["3d", "top", "front"] as const).map((v) => (
-          <button key={v} type="button" onClick={() => api.current?.view(v)} className="rounded-md border border-graphite-700 px-2.5 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">{v === "3d" ? "3D view" : v === "top" ? "Top view" : "Front view"}</button>
+        <button type="button" onClick={() => { const v = !spinning; setSpinning(v); api.current?.spin(v); }}
+          className={`rounded-md px-2.5 py-1.5 text-xs ${spinning ? "bg-brand-orange text-white" : "border border-brand-orange text-brand-orange hover:bg-graphite-800"}`}>{spinning ? "■ Stop spin" : "⟳ Spin 360°"}</button>
+        <button type="button" title="Turn left 45°" onClick={() => api.current?.turn(-45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↺ 45°</button>
+        <button type="button" title="Turn right 45°" onClick={() => api.current?.turn(45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↻ 45°</button>
+        <span className="mx-1 h-5 w-px bg-graphite-700" />
+        {(["3d", "top", "front", "back", "left", "right"] as const).map((v) => (
+          <button key={v} type="button" onClick={() => api.current?.view(v)} className="rounded-md border border-graphite-700 px-2.5 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">{v === "3d" ? "3D view" : `${v[0].toUpperCase()}${v.slice(1)}`}</button>
         ))}
+        <button type="button" onClick={() => { const el = host.current; if (!el) return; if (document.fullscreenElement) void document.exitFullscreen(); else void el.requestFullscreen?.(); }}
+          className="rounded-md border border-graphite-700 px-2.5 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">⛶ Full screen (Esc to leave)</button>
       </div>
       <div ref={host} className="relative h-[70vh] min-h-[420px] overflow-hidden rounded-lg border border-graphite-800">
         {err ? <p className="p-4 text-sm text-signal-red">{err}</p> : null}
@@ -163,7 +186,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#e0605a" }} />special / filler</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-full" style={{ background: "#ef4444" }} />design-check error</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-full" style={{ background: "#f59e0b" }} />warning</span>
-        <span>· drag to rotate · right-drag to move · scroll to zoom · click a panel or a ball to see its number / problem</span>
+        <span>· Spin 360° turns the model on its own (click it to stop) · drag to rotate any way, also from underneath · right-drag to move · scroll to zoom · click a panel or a ball to see its number / problem</span>
       </p>
     </div>
   );
