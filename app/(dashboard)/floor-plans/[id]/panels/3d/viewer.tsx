@@ -181,7 +181,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
       </div>
       <div ref={host} className="relative h-[70vh] min-h-[420px] overflow-hidden rounded-lg border border-graphite-800">
         {err ? <p className="p-4 text-sm text-signal-red">{err}</p> : null}
-        {pick ? <div className="absolute left-2 top-2 max-w-[90%] rounded bg-white/90 px-2 py-1 text-xs font-medium text-graphite-900">{pick}</div> : null}
+        {pick ? <div className="absolute left-2 top-2 z-10 flex max-w-[90%] items-start gap-2 rounded-md px-3 py-2 text-sm font-medium shadow-lg" style={{ background: "#111827", color: "#ffffff", border: "1px solid #f59e0b" }}><span>{pick}</span><button type="button" onClick={() => setPick(null)} className="ml-1 shrink-0 text-base leading-none" style={{ color: "#fbbf24" }} aria-label="Close">×</button></div> : null}
       </div>
       <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-graphite-400">
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#7aa7e0" }} />standard wall panel</span>
