@@ -28,7 +28,7 @@ export async function middleware(request: NextRequest) {
   if (!user && !isPublic) {
     const to = request.nextUrl.clone();
     to.pathname = "/login";
-    to.searchParams.set("next", path);
+    to.searchParams.set("next", path + request.nextUrl.search);   // a scanned panel QR keeps its details through the login
     return NextResponse.redirect(to);
   }
   if (user && path === "/login") {

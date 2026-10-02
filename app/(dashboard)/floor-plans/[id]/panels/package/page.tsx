@@ -34,6 +34,7 @@ export default async function PackagePage({ params, searchParams }: { params: Pr
     { no: "08", title: "Accessories & support-head sets", what: "Pins, wedges, ties, sleeves, walers, props, prop heads (sets 2 and 3 when props stay up), with the loss % of the layout rules.", links: [{ label: "Accessories list", href: L("accessories"), kind: "xls" }] },
     { no: "09", title: "Packing list by zone", what: "One bundle per room: its deck panels and the wall panels around it.", links: [{ label: "Packing list", href: L("packing"), kind: "xls" }] },
     { no: "10", title: "Design check", what: "Clashes, narrow gaps, panels on walls / beams, uncovered slab, pin-hole problems.", links: [{ label: "Check page", href: `${P}/panels/check?${qs}`, kind: "page" }, { label: "Check list", href: L("check"), kind: "xls" }] },
+    { no: "11", title: "Panel QR labels", what: "One label per panel for a thermal label printer: code, size, panel number and bundle; scanning the QR opens the panel in the app. Print by family, bundle or range.", links: [] },
   ];
   return (
     <div className="fade-in max-w-5xl">
@@ -59,6 +60,21 @@ export default async function PackagePage({ params, searchParams }: { params: Pr
                 <p className="text-sm font-medium text-graphite-100"><span className="mr-2 font-mono text-brand-orange">{it.no}</span>{it.title}</p>
                 <p className="mt-0.5 text-xs text-graphite-400">{it.what}</p>
               </div>
+              {it.no === "11" ? (
+                <form action={`${P}/panels/labels`} method="get" target="_blank" className="flex flex-wrap items-end gap-1.5 text-xs">
+                  {opt ? <><input type="hidden" name="h" value={opt.stdHeight} /><input type="hidden" name="kg" value={opt.kgPerM2} /><input type="hidden" name="prop" value={opt.propSpacing} /></> : null}
+                  <label className="flex flex-col gap-0.5"><span className="text-graphite-500">Label</span>
+                    <select name="size" defaultValue="100x50" className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100"><option value="100x50">100 × 50 mm</option><option value="100x75">100 × 75 mm</option><option value="75x50">75 × 50 mm</option></select></label>
+                  <label className="flex flex-col gap-0.5"><span className="text-graphite-500">Panels</span>
+                    <select name="family" defaultValue="" className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100">
+                      <option value="">All</option><option value="wall">Wall panels</option><option value="wall-top">Wall tops</option><option value="deck">Deck panels</option><option value="column">Column panels</option><option value="beam">Beam panels</option><option value="corner">Corners</option><option value="end">Wall ends</option><option value="stair">Staircase</option><option value="filler,drop,upstand">Specials / drop / upstand</option>
+                    </select></label>
+                  <label className="flex flex-col gap-0.5"><span className="text-graphite-500">Bundle</span><input name="bundle" placeholder="e.g. M4" className="w-16 rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100" /></label>
+                  <label className="flex flex-col gap-0.5"><span className="text-graphite-500">From no.</span><input name="from" type="number" min={1} className="w-16 rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100" /></label>
+                  <label className="flex flex-col gap-0.5"><span className="text-graphite-500">To no.</span><input name="to" type="number" min={1} className="w-16 rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100" /></label>
+                  <button className="inline-flex items-center gap-1 rounded-md bg-brand-orange px-2.5 py-1.5 font-medium text-white hover:opacity-90"><FileText className="size-3.5" />Print labels PDF</button>
+                </form>
+              ) : null}
               <div className="flex flex-wrap gap-1.5">
                 {it.links.map((l) => (
                   <a key={l.label + l.href} href={l.href} target={l.kind === "pdf" ? "_blank" : undefined} rel="noreferrer"
