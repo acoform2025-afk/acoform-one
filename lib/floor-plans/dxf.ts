@@ -581,12 +581,37 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     // the label of this beam: inside its box, and its width matches the drawn width
     const hits = sizeTexts.filter((x) => x.t.x >= b[0] && x.t.x <= b[2] && x.t.y >= b[1] && x.t.y <= b[3] && Math.abs(x.sz!.b - wMm) <= 0.5 * x.sz!.b);
     hits.sort((p1, p2) => Math.hypot(p1.t.x - cx, p1.t.y - cy) - Math.hypot(p2.t.x - cx, p2.t.y - cy));
-    return hits[0]?.sz ?? null;
+    if (hits[0]) return hits[0].sz;
+    // no label at this piece: a long beam is cut into pieces at every crossing and labelled once — look along its axis (≤ 8 m)
+    const w = b[2] - b[0], h = b[3] - b[1], along = w >= h, reach = 8 / u, across = 0.8 / u;
+    const b2 = along ? [b[0] - reach, Math.min(...ys) - across, b[2] + reach, Math.max(...ys) + across] : [Math.min(...xs) - across, b[1] - reach, Math.max(...xs) + across, b[3] + reach];
+    const far = sizeTexts.filter((x) => x.t.x >= b2[0] && x.t.x <= b2[2] && x.t.y >= b2[1] && x.t.y <= b2[3] && Math.abs(x.sz!.b - wMm) <= 0.5 * x.sz!.b);
+    far.sort((p1, p2) => Math.hypot(p1.t.x - cx, p1.t.y - cy) - Math.hypot(p2.t.x - cx, p2.t.y - cy));
+    return far[0]?.sz ?? null;
   };
+  // beam layers drawn as loose lines (structural beam plans: the two edges of every beam as separate lines, often on
+  // two layers — hidden / visible edge): paired into strips at beam width, so each beam gets its own size from the
+  // label next to it ("200x500", "200x1050 (H+0.5)"); lines with no partner keep the old rule
+  const looseBeam: DxfPath[] = [];
+  const beamLoops = new Map<string, Pt[][]>();
   for (const [layer, ps] of byLayer) {
-    const lsz = beamSizeFromLayer(layer);
     const L = closedLoops(ps, tol).filter((r) => r.length >= 3 && Math.abs(polyArea(r)) * u2 > 0.01);
-    if (!L.length) { unsizedLen += ps.reduce((s2, p) => s2 + polyLength(p.pts, p.closed), 0) * u; continue; }
+    // real beam outlines are narrow strips; chained beam edge lines closing round a room are not outlines → pair the lines instead
+    const narrow = L.filter((r) => (2 * Math.abs(polyArea(r))) / Math.max(1e-9, polyLength(r, true)) * u * 1000 <= 600);
+    if (narrow.length && narrow.length * 2 >= L.length) beamLoops.set(layer, narrow);
+    else if (!beamSizeFromLayer(layer)) looseBeam.push(...ps.filter((p) => !p.closed));
+    else unsizedLen += ps.reduce((s2, p) => s2 + polyLength(p.pts, p.closed), 0) * u;
+  }
+  if (looseBeam.length) {
+    const st = pairedWallStrips(looseBeam.map((p) => p.pts), u, 75, 500);
+    // one strip per pair of edges (not merged: a chain of beams round a room would otherwise become one big outline)
+    const rings = st.strips.filter((r) => r.length >= 3 && Math.abs(polyArea(r)) * u2 > 0.01);
+    if (rings.length) beamLoops.set("(beam lines)", rings);
+    // lines that found no partner
+    for (const p of looseBeam) { const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2]; if (!rings.length || !nearRings(mid, rings, 0.02 / u)) unsizedLen += polyLength(p.pts, false) * u; }
+  }
+  for (const [layer, L] of beamLoops) {
+    const lsz = beamSizeFromLayer(layer);
     for (const r of L) {
       // a beam outline is a narrow strip about as wide as the beam (not a room enclosed by chained beam lines)
       const wEst = (2 * Math.abs(polyArea(r)) * u2) / Math.max(1e-9, polyLength(r, true) * u) * 1000;
