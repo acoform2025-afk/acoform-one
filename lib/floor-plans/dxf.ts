@@ -6,7 +6,7 @@ import DxfParser from "dxf-parser";
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
 import { nearRings, outlineFromWalls, pairedWallStrips, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
-import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, suggestLayerRole } from "./layer-rules";
+import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, isRailLayer, suggestLayerRole } from "./layer-rules";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
@@ -14,7 +14,7 @@ export type DxfLayerInfo = { name: string; count: number; closed: number; sugges
 export type DxfText = { text: string; x: number; y: number; h: number };
 /** A named drawing inside the file (Revit view / AutoCAD block), box in drawing units. */
 export type DxfView = { name: string; box: [number, number, number, number] };
-export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -184,6 +184,8 @@ export function readDxf(raw: string): DxfModel {
   const extentPts: number[] = [];
   const dwCache = new Map<string, "door" | "window" | null>();
   const dw: (DxfPath & { kind: "door" | "window" })[] = [];
+  const rails: DxfPath[] = []; const railCache = new Map<string, boolean>();
+  let marksNoExtent = false;
 
   const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number) => {
     for (const e of ents) {
@@ -198,8 +200,10 @@ export function readDxf(raw: string): DxfModel {
         // door / window lines are kept apart: where they sit inside a wall they mark an opening in it
         const dk = dwCache.get(layer) ?? (dwCache.set(layer, doorWindowKind(layer)), dwCache.get(layer)!);
         if (dk && dw.length < 80_000) dw.push({ layer, kind: dk, pts: pts.map(([x, y]) => ap(m, x, y)), closed });
+        // railings: a wall line under a railing is a balcony parapet (upstand), not a full-height wall
+        else if (!dk && rails.length < 40_000 && (railCache.get(layer) ?? (railCache.set(layer, isRailLayer(layer)), railCache.get(layer)!))) rails.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed });
         // skipped lines still count for the drawing extents, so saved plan regions (in picture pixels) stay put
-        if (extentPts.length < 4_000_000) for (const [x, y] of pts) { const q = ap(m, x, y); extentPts.push(q[0], q[1]); }
+        if (!marksNoExtent && extentPts.length < 4_000_000) for (const [x, y] of pts) { const q = ap(m, x, y); extentPts.push(q[0], q[1]); }
       };
       switch (e.type) {
         case "LINE": if (e.vertices?.length >= 2) push([[e.vertices[0].x, e.vertices[0].y], [e.vertices[1].x, e.vertices[1].y]], false); break;
@@ -237,6 +241,7 @@ export function readDxf(raw: string): DxfModel {
           if (texts.length >= 20000 || depth > 2) break;
           const raw = String(e.text ?? "");
           if (layer === SECTION_LAYER) { const sl = parseSectionMarker(raw); if (sl) sections.push(sl); break; }
+          if (layer === VIEW_LAYER && raw === "ACOFORM|marks-not-extents") { marksNoExtent = true; break; }
           if (layer === VIEW_LAYER && raw.startsWith("VIEW|")) {
             const [, a, b2, c, d2, ...name] = raw.split("|");
             const box = [a, b2, c, d2].map(Number) as [number, number, number, number];
@@ -292,7 +297,7 @@ export function readDxf(raw: string): DxfModel {
     }
   }
 
-  return { texts, views, sections, dw, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  return { texts, views, sections, dw, rails, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */
@@ -501,12 +506,42 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   let openWallLen = 0, closedWallLen = 0;
   for (const p of wallPaths) { const L = polyLength(p.pts, p.closed); if (p.closed) closedWallLen += L; else openWallLen += L; }
   const paired = openWallLen * u > 20 && openWallLen > 1.5 * closedWallLen ? pairedWallStrips(wallPaths.filter((p) => !p.closed).map((p) => p.pts), u, Math.max(75, Number(opts.minWallMm) || 0)) : null;
-  const U = wallUnion([...wallPaths.filter((p) => p.closed).map((p) => p.pts), ...colWalls, ...(paired?.strips ?? [])]);
+  // balcony parapets: a wall with a railing drawn along it is a low wall (upstand) on the slab edge, not a
+  // full-height wall — measured as an upstand (both faces × parapet height), and the slab edge under it gets an edge beam
+  const railSegs: [Pt, Pt][] = [];
+  for (const p of [...(model.rails ?? []), ...model.paths.filter((q) => isRailLayer(q.layer))]) {
+    if (keep && !keep(p)) continue;
+    for (let i = 1; i < p.pts.length; i++) if (Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]) * u >= 0.2) railSegs.push([p.pts[i - 1], p.pts[i]]);
+  }
+  const isParapet = (poly: Pt[]) => {
+    if (!railSegs.length || poly.length < 4) return false;
+    // long axis of the wall piece and its thickness
+    let ai = 0, al = 0; for (let i = 0; i < poly.length; i++) { const q = poly[(i + 1) % poly.length], p = poly[i]; const L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (L > al) { al = L; ai = i; } }
+    const A = poly[ai], B = poly[(ai + 1) % poly.length], ux = (B[0] - A[0]) / al, uy = (B[1] - A[1]) / al;
+    let thk = 0; for (const q of poly) thk = Math.max(thk, Math.abs((q[0] - A[0]) * -uy + (q[1] - A[1]) * ux));
+    if (thk * u > 0.35 || al * u < 0.3) return false;
+    const reach = thk / 2 + 0.35 / u, cA = -uy * (thk / 2), cB = ux * (thk / 2);
+    const side = Math.sign(poly.reduce((acc, q) => acc + ((q[0] - A[0]) * -uy + (q[1] - A[1]) * ux), 0)) || 1;
+    const mx = A[0] + cA * side, my = A[1] + cB * side;      // centre line start
+    let cover = 0;
+    for (const [r0, r1] of railSegs) {
+      const rl = Math.hypot(r1[0] - r0[0], r1[1] - r0[1]); if (!rl) continue;
+      if (Math.abs(ux * (r1[1] - r0[1]) / rl - uy * (r1[0] - r0[0]) / rl) > 0.05) continue;
+      const off = Math.abs((r0[0] - mx) * -uy + (r0[1] - my) * ux); if (off > reach) continue;
+      const p0 = (r0[0] - mx) * ux + (r0[1] - my) * uy, p1 = (r1[0] - mx) * ux + (r1[1] - my) * uy;
+      cover += Math.max(0, Math.min(al, Math.max(p0, p1)) - Math.max(0, Math.min(p0, p1)));
+    }
+    return cover >= 0.5 * al;
+  };
+  const wallPolys: Pt[][] = [], parapetPolys: Pt[][] = [];
+  for (const poly of [...wallPaths.filter((p) => p.closed).map((p) => p.pts), ...(paired?.strips ?? [])]) (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
+  const U = wallUnion([...wallPolys, ...colWalls]);
+  const UP = parapetPolys.length ? wallUnion(parapetPolys) : null;
   let looseLen = 0, unpairedLen = 0; const loose: Pt[][] = [];
   for (const p of wallPaths) {
     if (p.closed) continue;
     // paired mode: a line with no partner is not a wall face (door ticks, window / sill lines, hatch ends)
-    if (paired) { const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2]; if (!nearRings(mid, U.rings, 0.02 / u)) unpairedLen += polyLength(p.pts, false) * u; continue; }
+    if (paired) { const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2]; if (!nearRings(mid, U.rings, 0.02 / u) && !(UP && nearRings(mid, UP.rings, 0.02 / u))) unpairedLen += polyLength(p.pts, false) * u; continue; }
     const L = polyLength(p.pts, false);
     const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2];
     if (U.rings.length && nearRings(mid, U.rings, 0.02 / u) && nearRings(p.pts[0], U.rings, 0.02 / u)) continue;   // lies on a wall already counted
@@ -680,7 +715,8 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     beamSized, beamRings, beamRingDepth,
     // upstands / planters: closed outlines → perimeter = both faces; height from the layer name ("UPSTAND 250", "PLANTER 1050H")
     upstands: (() => {
-      const out: { label: string; h: number; length: number }[] = [];
+      const out: { label: string; h: number; length: number; parapet?: boolean }[] = [];
+      if (UP && UP.perimeter * u > 0.2) out.push({ label: "Balcony parapets (railing on the drawing)", h: 0, length: UP.perimeter * u, parapet: true });
       const byL = new Map<string, DxfPath[]>(); for (const p of of("upstand")) (byL.get(p.layer) ?? byL.set(p.layer, []).get(p.layer)!).push(p);
       for (const [layer, ps] of byL) {
         const lp = closedLoops(ps, tol).filter((r) => r.length >= 3);
@@ -706,7 +742,36 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
     ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
-    ...(() => { const g = wallGaps(U.rings, u, paired ? 1.2 : 0); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })) }; })(),
+    ...(() => {
+      const g = wallGaps(U.rings, u, paired ? 1.2 : 0);
+      // a window in the gap (window / glazing lines between the two wall ends) has a sill wall under it
+      const dwIn = (model.dw ?? []).filter((p) => p.kind === "window" && (!keep || keep(p)));
+      const isWin = (a: Pt, b: Pt, thk: number) => {
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (!L) return false;
+        const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, w = (thk / u) / 2 + 0.05 / u;
+        let hit = 0;
+        for (const p of dwIn) for (const q of p.pts) { const t2 = (q[0] - a[0]) * ux + (q[1] - a[1]) * uy, d2 = Math.abs((q[0] - a[0]) * -uy + (q[1] - a[1]) * ux); if (t2 > 0.05 * L && t2 < 0.95 * L && d2 <= w) { hit++; if (hit >= 2) return true; } }
+        return false;
+      };
+      const win = g.filter((x) => isWin(x.a, x.b, x.thk));
+      // slab edges with no full-height wall under them (balcony fronts under a parapet, open slab edges): edge beam.
+      // Door / window gaps in the outer walls are left out (their beam is the lintel above).
+      let edgeLen = 0;
+      const nearGap = (q: Pt) => g.some((x) => { const L = Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) || 1; const t2 = ((q[0] - x.a[0]) * (x.b[0] - x.a[0]) + (q[1] - x.a[1]) * (x.b[1] - x.a[1])) / (L * L); const px = x.a[0] + (x.b[0] - x.a[0]) * Math.max(0, Math.min(1, t2)), py = x.a[1] + (x.b[1] - x.a[1]) * Math.max(0, Math.min(1, t2)); return Math.hypot(q[0] - px, q[1] - py) <= (x.thk / u) / 2 + 0.25 / u; });
+      if (U.rings.length) for (const sl of slab) {
+        const r = sl.p.pts;
+        for (let i = 0; i < r.length; i++) {
+          const a = r[i], b = r[(i + 1) % r.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.round((L * u) / 0.1));
+          for (let k = 0; k < n; k++) { const q: Pt = [a[0] + ((b[0] - a[0]) * (k + 0.5)) / n, a[1] + ((b[1] - a[1]) * (k + 0.5)) / n]; if (!nearRings(q, U.rings, 0.03 / u) && !nearGap(q)) edgeLen += (L * u) / n; }
+        }
+      }
+      return {
+        gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })),
+        gapSoffit: g.reduce((s, x) => s + x.span * x.thk, 0),
+        windowGaps: { count: win.length, span: win.reduce((s, x) => s + x.span, 0), top: win.reduce((s, x) => s + x.span * x.thk, 0) },
+        edgeBeamLength: edgeLen,
+      };
+    })(),
   };
 }
 

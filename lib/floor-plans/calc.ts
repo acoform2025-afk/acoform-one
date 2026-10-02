@@ -47,7 +47,10 @@ export type Params = {
   beamWidthMm?: number;     // default width of drawn beams
   scope?: Scope;            // what is formed with this formwork (unset = full)
   minWallMm?: number;      // thinnest wall that is concrete (walls read from paired lines); thinner pairs are blockwork / finishes
-  autoLintels?: boolean;    // beams / lintels over wall openings found on the drawing (default on)
+  autoLintels?: boolean;
+  autoEdgeBeams?: boolean;  // edge beams under slab edges without a wall (balcony fronts) — default on when the drawing has no beam layers
+  parapetMm?: number;       // balcony parapet height (walls with a railing on them), default 900
+  sillMm?: number;          // window sill height (sill wall under windows found in wall openings), default 900    // beams / lintels over wall openings found on the drawing (default on)
   wallThkMm?: number;       // default thickness of drawn walls (3D view, wall tops)
 };
 
@@ -114,9 +117,12 @@ export type DxfAuto = {
   stairCount?: number;                              // staircases found on stair layers
   stairBoxes?: [number, number, number, number][];  // drawing units
   beamRingDepth?: number[];                         // mm, depth of each beam ring
-  upstands?: { label: string; h: number; length: number }[];   // upstand / planter walls on the slab: h mm, face length m (both faces)
+  upstands?: { label: string; h: number; length: number; parapet?: boolean }[];   // upstand / planter walls on the slab: h mm, face length m (both faces)
   gapSpan?: number;                                 // openings in wall lines (door / window / passage widths), m
   gapCount?: number;
+  gapSoffit?: number;                               // underside of the beams over wall openings (span × wall thickness), m²
+  windowGaps?: { count: number; span: number; top: number };   // openings with a window: sill wall under it (span m, sill top m²)
+  edgeBeamLength?: number;                          // slab edges with no full-height wall under them (balcony fronts, open edges), m
   gaps?: { a: Pt; b: Pt; span: number; thk?: number }[];  // a, b in drawing units; span, thk in m
 };
 
@@ -295,9 +301,10 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     }
     // upstands / planters on the slab: both faces (outline length) × height (layer name, else 250 mm)
     for (const up of auto.upstands ?? []) {
-      const h = (up.h || 250) / 1000, a = up.length * h;
+      const pMm = Number(t.params.parapetMm) || 900;
+      const h = (up.parapet ? pMm : up.h || 250) / 1000, a = up.length * h;
       wallArea += a;
-      items.push({ code: code("U"), group: "wall", label: `Upstand / planter — ${up.label}`, calc: `${n2(up.length)} m faces × ${n3(h)} m${up.h ? "" : " (height not in the layer name: 250 mm)"}`, area: a });
+      items.push({ code: code("U"), group: "wall", label: up.parapet ? up.label : `Upstand / planter — ${up.label}`, calc: `${n2(up.length)} m faces × ${n3(h)} m${up.parapet ? " (parapet height)" : up.h ? "" : " (height not in the layer name: 250 mm)"}`, area: a });
     }
     for (const c of auto.columns) {
       colCount += 1; colPerimeter += c.perimeter; colFoot += c.area; colArea += c.perimeter * H; addSize(c.w, c.d, 1);
@@ -312,6 +319,23 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
       const a = L2 * side;
       beamArea += a; lintelAuto += a;
       items.push({ code: code("B"), group: "beam", label: `Beams over ${auto.gapCount ?? ""} wall openings (auto)`, calc: `2 × ${n2(auto.gapSpan)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
+      if (rules.reveals && auto.gapSoffit) {
+        beamArea += auto.gapSoffit; lintelAuto += auto.gapSoffit;
+        items.push({ code: code("B"), group: "beam", label: "Underside of the beams over openings", calc: `${n2(auto.gapSpan)} m × wall thickness`, area: auto.gapSoffit });
+      }
+    }
+    // windows found in wall openings: the sill wall under them is cast too (both faces × sill height, + sill top)
+    if (auto.windowGaps?.count && t.params.autoLintels !== false) {
+      const sh = (Number(t.params.sillMm) || OPENING_DEFAULTS.windowSill) / 1000, wg = auto.windowGaps;
+      const a = 2 * wg.span * sh + (rules.reveals ? wg.top : 0);
+      wallArea += a;
+      items.push({ code: code("W"), group: "wall", label: `Sill walls under ${wg.count} windows (auto)`, calc: `2 × ${n2(wg.span)} m × ${n3(sh)} m${rules.reveals ? ` + sill top ${n2(wg.top)} m²` : ""}`, area: a });
+    }
+    // slab edges with no full-height wall under them (balcony fronts under a parapet, open edges): edge beam
+    if (auto.edgeBeamLength && auto.edgeBeamLength >= 0.5 && t.params.autoEdgeBeams !== false && !(auto.beamSized ?? []).length && !auto.beamLineLength && !(t.beams ?? []).some((b) => b.qty > 0 && b.length_m > 0)) {
+      const dMm = Number(t.params.beamDepthMm) || 600, L = auto.edgeBeamLength, a = L * Math.max(0, dMm / 1000 - slab) + L * (dMm / 1000);
+      beamArea += a;
+      items.push({ code: code("B"), group: "beam", label: "Edge beams at slab edges without a wall (auto)", calc: `${n2(L)} m × ((${n3(dMm / 1000)} − ${n3(slab)}) inside + ${n3(dMm / 1000)} outside)`, area: a });
     }
     for (const g of auto.beamSized ?? []) {
       const h = Math.max(0, g.d / 1000 - slab);

@@ -6,6 +6,7 @@ import { loadRules } from "@/lib/floor-plans/rules";
 import { getCurrentProfile, hasPermission } from "@/lib/auth/permissions";
 import { TakeoffTool } from "./takeoff-tool";
 import { DeletePlanButton } from "./delete-plan-button";
+import { ReReadDwgButton } from "./reread-button";
 import type { QuoteOption } from "./use-in-quotation";
 import type { Takeoff } from "@/lib/floor-plans/calc";
 
@@ -32,6 +33,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
   const { data: fileUrl } = await bucket.createSignedUrl(plan.file_path, 60 * 60);
   const origPath = plan.original_path ?? plan.file_path;
   const { data: dl } = await bucket.createSignedUrl(origPath, 60 * 60, { download: plan.file_name ?? true });
+  const { data: orig } = plan.original_path ? await bucket.createSignedUrl(plan.original_path, 60 * 60) : { data: null };
 
   const lead = Array.isArray(plan.leads) ? plan.leads[0] : plan.leads;
   // quotations this plan can feed: the lead's open ones + the one we came from
@@ -75,6 +77,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
           {dl?.signedUrl ? (
             <a href={dl.signedUrl} className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Original file</a>
           ) : null}
+          {canEdit && orig?.signedUrl && /\.dwg$/i.test(plan.original_path ?? "") ? <ReReadDwgButton id={plan.id} originalUrl={orig.signedUrl} filePath={plan.file_path} /> : null}
           {canEdit ? <DeletePlanButton id={plan.id} leadId={lead?.id ?? null} /> : null}
         </div>
       </div>

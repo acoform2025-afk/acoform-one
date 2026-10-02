@@ -273,7 +273,7 @@ export function labelledSpaces(rings: Pt[][], loose: Pt[][], points: Pt[], unitT
  * openings between wall ends (beams over doors / windows) are measured as for closed outlines. Door ticks,
  * window lines and other single lines without a partner are left out. Returns rectangles + length by thickness.
  */
-export function pairedWallStrips(lines: Pt[][], unitToM: number, minMm = 75, maxMm = 400): { strips: Pt[][]; byThk: Record<number, number> } {
+export function pairedWallStrips(lines: Pt[][], unitToM: number, minMm = 75, maxMm = 300): { strips: Pt[][]; byThk: Record<number, number>; glazing: number } {
   type S = { a: Pt; b: Pt; L: number; ux: number; uy: number; bb: number[] };
   const u = unitToM, segs: S[] = [];
   for (const l of lines) for (let i = 1; i < l.length; i++) {
@@ -281,8 +281,8 @@ export function pairedWallStrips(lines: Pt[][], unitToM: number, minMm = 75, max
     if (L * u < 0.1) continue;
     segs.push({ a, b, L, ux: (b[0] - a[0]) / L, uy: (b[1] - a[1]) / L, bb: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] });
   }
-  const strips: Pt[][] = []; const byThk: Record<number, number> = {};
-  if (!segs.length) return { strips, byThk };
+  const strips: Pt[][] = []; const byThk: Record<number, number> = {}; let glazing = 0;
+  if (!segs.length) return { strips, byThk, glazing };
   // 1 m grid on the segment boxes (grown by the largest thickness) → candidate partners
   const C = 1 / u, pad = maxMm / 1000 / u, grid = new Map<string, number[]>();
   segs.forEach((s, i) => {
@@ -307,6 +307,53 @@ export function pairedWallStrips(lines: Pt[][], unitToM: number, minMm = 75, max
     const p0 = (s.a[0] - t.a[0]) * t.ux + (s.a[1] - t.a[1]) * t.uy, p1 = (s.b[0] - t.a[0]) * t.ux + (s.b[1] - t.a[1]) * t.uy;
     if (Math.min(t.L, Math.max(p0, p1)) - Math.max(0, Math.min(p0, p1)) >= 0.7 * s.L) drop[i] = 1;
   }));
+  // window walls / glazed façades drawn on the wall layer: a run of pieces whose two lines both stop at the same
+  // place with a small gap (a mullion, 40–300 mm) and no wall crossing there. Real walls only break where another
+  // wall crosses or at an opening. These pieces are not concrete.
+  const tolL = 0.01 / u;
+  const collinearNext = (s: S, at: number, dir: 1 | -1) => {      // a piece on the same line starting 40–300 mm on
+    let best = Infinity;
+    near(s, (j) => {
+      const c = segs[j]; if (c === s || drop[j] || Math.abs(s.ux * c.uy - s.uy * c.ux) > 0.02) return;
+      if (Math.abs((c.a[0] - s.a[0]) * -s.uy + (c.a[1] - s.a[1]) * s.ux) > tolL) return;
+      const q0 = (c.a[0] - s.a[0]) * s.ux + (c.a[1] - s.a[1]) * s.uy, q1 = (c.b[0] - s.a[0]) * s.ux + (c.b[1] - s.a[1]) * s.uy;
+      const g = dir > 0 ? Math.min(q0, q1) - at : at - Math.max(q0, q1);
+      if (g >= 0.04 / u && g <= 0.3 / u) best = Math.min(best, g);
+    });
+    return best;
+  };
+  const crossed = (s: S, at: number, dir: 1 | -1, g: number, d: number) => {   // a wall line crossing the gap
+    const ad = Math.abs(d); let hit = false;
+    near(s, (j) => {
+      if (hit) return;
+      const c = segs[j]; if (Math.abs(s.ux * c.uy - s.uy * c.ux) <= 0.02 || c.L < 1.5 * ad) return;
+      for (let k = 0; k <= 8 && !hit; k++) {
+        const x = c.a[0] + ((c.b[0] - c.a[0]) * k) / 8, y = c.a[1] + ((c.b[1] - c.a[1]) * k) / 8;
+        const al = (x - s.a[0]) * s.ux + (y - s.a[1]) * s.uy, ac = ((x - s.a[0]) * -s.uy + (y - s.a[1]) * s.ux) * Math.sign(d);
+        const a0 = dir > 0 ? at - tolL : at - g - tolL, a1 = dir > 0 ? at + g + tolL : at + tolL;
+        if (al >= a0 && al <= a1 && ac >= -tolL && ac <= ad + tolL) hit = true;
+      }
+      // a long line crossing the band between two sample points
+      if (!hit) {
+        const p0 = (c.a[0] - s.a[0]) * s.ux + (c.a[1] - s.a[1]) * s.uy, p1 = (c.b[0] - s.a[0]) * s.ux + (c.b[1] - s.a[1]) * s.uy;
+        const n0 = ((c.a[0] - s.a[0]) * -s.uy + (c.a[1] - s.a[1]) * s.ux) * Math.sign(d), n1 = ((c.b[0] - s.a[0]) * -s.uy + (c.b[1] - s.a[1]) * s.ux) * Math.sign(d);
+        if ((n0 - ad / 2) * (n1 - ad / 2) < 0) { const tt = (ad / 2 - n0) / (n1 - n0), al = p0 + (p1 - p0) * tt; const a0 = dir > 0 ? at : at - g, a1 = dir > 0 ? at + g : at; if (al >= a0 - tolL && al <= a1 + tolL) hit = true; }
+      }
+    });
+    return hit;
+  };
+  const mullionEnd = (s: S, t: S, at: number, dir: 1 | -1, d: number) => {
+    // both lines stop here
+    const sEnd = dir > 0 ? Math.abs(at - s.L) <= tolL : Math.abs(at) <= tolL;
+    const tp0 = (t.a[0] - s.a[0]) * s.ux + (t.a[1] - s.a[1]) * s.uy, tp1 = (t.b[0] - s.a[0]) * s.ux + (t.b[1] - s.a[1]) * s.uy;
+    const tEnd = Math.abs((dir > 0 ? Math.max(tp0, tp1) : Math.min(tp0, tp1)) - at) <= tolL * 2;
+    if (!sEnd || !tEnd) return false;
+    const g = collinearNext(s, at, dir); if (!Number.isFinite(g)) return false;
+    const gt = collinearNext(t, dir > 0 ? Math.max(tp0, tp1) : Math.min(tp0, tp1), (Math.sign(t.ux * s.ux + t.uy * s.uy) * dir) as 1 | -1);
+    if (!Number.isFinite(gt)) { /* partner continues differently: not a mullion */ }
+    if (!Number.isFinite(gt) || Math.abs(gt - g) > 0.03 / u) return false;
+    return !crossed(s, at, dir, g, d);
+  };
   segs.forEach((s, i) => {
     if (drop[i] || s.L * u < 0.2) return;
     const seen = new Set<number>();
@@ -320,6 +367,7 @@ export function pairedWallStrips(lines: Pt[][], unitToM: number, minMm = 75, max
         const p0 = (t.a[0] - s.a[0]) * s.ux + (t.a[1] - s.a[1]) * s.uy, p1 = (t.b[0] - s.a[0]) * s.ux + (t.b[1] - s.a[1]) * s.uy;
         let o0 = Math.max(0, Math.min(p0, p1)), o1 = Math.min(s.L, Math.max(p0, p1));
         if (o1 - o0 < minOv) continue;
+        if (mullionEnd(s, t, o0, -1, d) || mullionEnd(s, t, o1, 1, d)) { glazing += (o1 - o0) * u; continue; }
         // at an L / T corner the outer face runs on past the inner one by about the thickness: the strip runs on too,
         // so the corner square is filled (at a door / window jamb both lines stop together: nothing changes)
         o0 = Math.max(Math.min(0, p0, p1), o0 - ad * 1.05); o1 = Math.min(Math.max(s.L, p0, p1), o1 + ad * 1.05);
@@ -330,5 +378,5 @@ export function pairedWallStrips(lines: Pt[][], unitToM: number, minMm = 75, max
       }
     }
   });
-  return { strips, byThk };
+  return { strips, byThk, glazing };
 }

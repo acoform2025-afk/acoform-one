@@ -45,7 +45,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   if (hit) return { ...(hit as Computed), plan, lead: Array.isArray(plan.leads) ? plan.leads[0] : plan.leads };
   let model: DxfModel | null = null;
   if (plan.source_kind === "dxf") {
-    const mk = `${plan.tenant_id}/${plan.file_path}`;
+    const mk = `${plan.tenant_id}/${plan.file_path}/${plan.updated_at}`;   // a re-read drawing (same path) is read again
     if (modelCache.has(mk)) model = modelCache.get(mk)!;
     else {
       const { data: blob } = await supabase.storage.from("floor-plans").download(plan.file_path);

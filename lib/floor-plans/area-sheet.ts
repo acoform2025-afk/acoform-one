@@ -30,17 +30,27 @@ export function sheetSections(t: Takeoff, totals: Totals, auto: DxfAuto | null):
     value: totals.slab_soffit + edge, figure: f2(slab), panes: ["slab", "duct", "walltop"],
   });
 
-  // 2 walls
+  // 2 walls (upstands / balcony parapets are listed on their own below)
+  const ups = it.filter((i) => i.group === "wall" && /^U\d/.test(i.code));
+  const upA = ups.reduce((s, i) => s + i.area, 0);
+  const wallA = totals.wall_area - upA;
   const faces = totals.wall_length * 2;
   const plain = faces * (H - tS) / 1000;
   const wl = [`FLOOR HEIGHT = ${H}`, `SLAB THICKNESS = ${tS}`, `WALL LENGTH = ${f2(faces)}`];
-  const doors = totals.wall_area - plain;
-  if (Math.abs(doors) > 0.01) wl.push(`DOORS / WINDOWS (net) = ${f2(doors)}`);
+  const doors = wallA - plain;
+  if (Math.abs(doors) > 0.01) wl.push(`OPENINGS (net: doors / windows, reveals, sills) = ${f2(doors)}`);
   out.push({
     no: ++no, key: "wall", title: "CONCRETE AREA FOR WALL", heading: "WALL LENGTH", lines: wl,
-    total: `TOTAL WALL AREA =${f2(faces)} X (${m3(H)} - ${m3(tS)})${Math.abs(doors) > 0.01 ? ` ${doors > 0 ? "+" : "-"} ${f2(Math.abs(doors))}` : ""} = ${f3(totals.wall_area)}Sqm`,
-    value: totals.wall_area, figure: f2(faces), panes: ["walls"],
+    total: `TOTAL WALL AREA =${f2(faces)} X (${m3(H)} - ${m3(tS)})${Math.abs(doors) > 0.01 ? ` ${doors > 0 ? "+" : "-"} ${f2(Math.abs(doors))}` : ""} = ${f3(wallA)}Sqm`,
+    value: wallA, figure: f2(faces), panes: ["walls"],
   });
+  if (ups.length) {
+    out.push({
+      no: ++no, key: "upstand", title: "CONCRETE AREA FOR UPSTAND", heading: "UPSTAND / PARAPET",
+      lines: ups.slice(0, 6).map((u) => `${u.label.replace(/ \(railing on the drawing\)/, "")}: ${u.calc.replace(/ \(parapet height\)/, "")}`),
+      total: `TOTAL UPSTAND AREA = ${f2(upA)}Sqm`, value: upA, figure: f2(upA), panes: ["none"],
+    });
+  }
 
   // 3 beams
   if (totals.beam_area > 0) {

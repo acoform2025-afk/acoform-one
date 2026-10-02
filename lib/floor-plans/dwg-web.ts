@@ -5,7 +5,7 @@
  * arcs and circles, with blocks (INSERT) exploded and layer names kept.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { isNoiseLayer } from "./layer-rules";
+import { doorWindowKind, isNoiseLayer, isRailLayer } from "./layer-rules";
 import { SECTION_LAYER, sectionLevels, sectionMarker, type SectionLevels } from "./section-read";
 type Xf = [number, number, number, number, number, number]; // a b c d e f  → x' = a x + c y + e ; y' = b x + d y + f
 const ID: Xf = [1, 0, 0, 1, 0, 0];
@@ -65,6 +65,7 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
   const views: { name: string; box: [number, number, number, number] }[] = [];
   const sections: SectionLevels[] = [];
   const secLines = new Map<string, { x0: number; x1: number; y: number }[]>();
+  const dwKeep = new Map<string, boolean>(); let keptMarks = 0;
   // metres per drawing unit (sections are read in mm); unknown units: mm, as most building drawings
   const unitToM = ({ 1: 0.0254, 2: 0.3048, 4: 0.001, 5: 0.01, 6: 1 } as Record<number, number>)[Number(db?.header?.INSUNITS)] ?? 0.001;
   const grow = (x: number, y: number) => { if (track) { if (x < track[0]) track[0] = x; if (y < track[1]) track[1] = y; if (x > track[2]) track[2] = x; if (y > track[3]) track[3] = y; } };
@@ -95,8 +96,21 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
         }
         if (SKIP_BLOCK.test(String(e.name))) continue;
       }
-      if ((SKIP_LAYER.test(layer) || isNoiseLayer(layer)) && e.type !== "TEXT" && e.type !== "MTEXT") continue;
       const T = (pts: [number, number][]) => pts.map(([x, y]) => ap(m, x, y));
+      if ((SKIP_LAYER.test(layer) || isNoiseLayer(layer)) && e.type !== "TEXT" && e.type !== "MTEXT" && e.type !== "INSERT") {
+        // door / window / glazing and railing lines are kept (straight lines only, ≥ 150 mm): they mark openings in
+        // walls (windows get a sill wall) and balcony parapets. Everything else on these layers is left out.
+        const keepKind = (dwKeep.get(layer) ?? (dwKeep.set(layer, !!doorWindowKind(layer) || isRailLayer(layer)), dwKeep.get(layer)!));
+        if (!keepKind || keptMarks >= 60_000) continue;
+        let P: [number, number][] = [];
+        if (e.type === "LINE" && e.startPoint && e.endPoint) P = [[e.startPoint.x, e.startPoint.y], [e.endPoint.x, e.endPoint.y]];
+        else if (e.type === "LWPOLYLINE" || e.type === "POLYLINE2D") P = (e.vertices ?? []).filter((v: any) => ok(v?.x) && ok(v?.y)).map((v: any) => [v.x, v.y]);
+        const Q = T(P);
+        for (let i = 1; i < Q.length; i++) if (Math.hypot(Q[i][0] - Q[i - 1][0], Q[i][1] - Q[i - 1][1]) * unitToM >= 0.15) { poly(layer, [Q[i - 1], Q[i]], false); keptMarks++; }
+        continue;
+      }
+      // door / window blocks: walked, so their lines (on the block's layer) are kept as above
+      if ((SKIP_LAYER.test(layer) || isNoiseLayer(layer)) && e.type !== "TEXT" && e.type !== "MTEXT" && !(e.type === "INSERT" && (dwKeep.get(layer) ?? (dwKeep.set(layer, !!doorWindowKind(layer) || isRailLayer(layer)), dwKeep.get(layer)!)))) continue;
       switch (e.type) {
         case "LINE": if (e.startPoint && e.endPoint) poly(layer, T([[e.startPoint.x, e.startPoint.y], [e.endPoint.x, e.endPoint.y]]), false); break;
         case "LWPOLYLINE": case "POLYLINE2D": case "POLYLINE3D": {
@@ -164,7 +178,10 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
   for (const s of sections) out.push("0", "TEXT", "8", SECTION_LAYER, "10", "0", "20", "0", "30", "0", "40", "0", "1", sectionMarker(s));
   for (const v of views) out.push("0", "TEXT", "8", VIEW_LAYER, "10", f(v.box[0]), "20", f(v.box[3]), "30", "0", "40", "0", "1", ["VIEW", ...v.box.map(f), v.name].join("|"));
   const units = Number(db?.header?.INSUNITS);
-  const head = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9", "$INSUNITS", "70", String(Number.isFinite(units) ? units : 0), "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"];
+  const head = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9", "$INSUNITS", "70", String(Number.isFinite(units) ? units : 0), "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES",
+    // first entity: tells the reader that door / window / railing lines are only marks (not part of the drawing extents,
+    // so plan regions saved before these lines were kept stay in place)
+    "0", "TEXT", "8", VIEW_LAYER, "10", "0", "20", "0", "30", "0", "40", "0", "1", "ACOFORM|marks-not-extents"];
   return { dxf: [...head, ...out, "0", "ENDSEC", "0", "EOF"].join("\r\n"), count };
 }
 

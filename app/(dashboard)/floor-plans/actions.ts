@@ -107,7 +107,7 @@ const totalsSchema = z.object({
   wall_top_drawn: num.default(0),
   items: z.array(z.object({
     code: z.string().max(20), group: z.enum(["slab", "deduct", "edge", "wall", "opening", "column", "beam", "loft", "extra"]),
-    label: z.string().max(80), calc: z.string().max(120), area: z.number().finite().min(-1e7).max(1e7),
+    label: z.string().transform((v) => v.slice(0, 120)), calc: z.string().transform((v) => v.slice(0, 160)), area: z.number().finite().min(-1e7).max(1e7),
   })).max(400).default([]),
   floors: z.number().int().min(1).max(500),
   params: z.object({
@@ -164,7 +164,9 @@ export async function deleteFloorPlan(id: string): Promise<Result> {
   if (!row) return { error: "Floor plan not found." };
   const { error } = await supabase.from("floor_plans").delete().eq("id", id);
   if (error) return { error: dbError(error.message) };
-  await supabase.storage.from(FLOOR_PLAN_BUCKET_NAME).remove([row.file_path, ...(row.preview_path ? [row.preview_path] : []), ...(row.original_path ? [row.original_path] : [])]);
+  // the files can be shared by several plans of one drawing (e.g. one per block): removed only with the last one
+  const { count } = await supabase.from("floor_plans").select("id", { count: "exact", head: true }).eq("file_path", row.file_path);
+  if (!count) await supabase.storage.from(FLOOR_PLAN_BUCKET_NAME).remove([row.file_path, ...(row.preview_path ? [row.preview_path] : []), ...(row.original_path ? [row.original_path] : [])]);
   revalidatePath("/floor-plans");
   if (row.lead_id) revalidatePath(`/leads/${row.lead_id}`);
   return { ok: true };
@@ -277,4 +279,19 @@ export async function createBomFromFloorPlan(planId: string, designId: string, q
   if (error || !data) return { error: dbError(error?.message ?? "Could not create the BOM.") };
   revalidatePath("/boms"); revalidatePath(`/designs/${designId}`);
   return { ok: true, data: { bomId: data as string } };
+}
+
+/** After the drawing was read again from its original DWG (by the browser): every plan using this file is marked
+ *  updated, so the take-off, panels and 3D read the new file. */
+export async function touchPlanFile(id: string): Promise<Result> {
+  const denied = await guard(); if (denied) return { error: denied };
+  if (!uuid.safeParse(id).success) return { error: "Invalid floor plan." };
+  const supabase = await createClient();
+  const { data: row } = await supabase.from("floor_plans").select("file_path, lead_id").eq("id", id).maybeSingle();
+  if (!row) return { error: "Floor plan not found." };
+  const { error } = await supabase.from("floor_plans").update({ updated_at: new Date().toISOString() }).eq("file_path", row.file_path);
+  if (error) return { error: dbError(error.message) };
+  revalidatePath("/floor-plans"); revalidatePath(`/floor-plans/${id}`);
+  if (row.lead_id) revalidatePath(`/leads/${row.lead_id}`);
+  return { ok: true };
 }

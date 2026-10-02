@@ -870,6 +870,16 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
               {(Object.keys(SCOPES) as Scope[]).map((k) => <option key={k} value={k}>{SCOPES[k].label} — {SCOPES[k].what}</option>)}
             </select>
           </label>
+          {auto && ((auto.upstands ?? []).some((x) => x.parapet) || auto.windowGaps?.count || auto.edgeBeamLength) ? (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Field label="Balcony parapet height (mm)"><NumInput value={t.params.parapetMm ?? 900} step={50} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, parapetMm: v } }))} /></Field>
+              <Field label="Window sill height (mm)"><NumInput value={t.params.sillMm ?? 900} step={50} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, sillMm: v } }))} /></Field>
+              <label className="col-span-2 flex items-center gap-2 text-xs text-graphite-300">
+                <input type="checkbox" disabled={!canEdit} checked={t.params.autoEdgeBeams !== false} onChange={(e) => update((p) => ({ ...p, params: { ...p.params, autoEdgeBeams: e.target.checked } }))} />
+                Edge beams at slab edges without a wall (balcony fronts) — depth = beam depth
+              </label>
+            </div>
+          ) : null}
           <div className="mt-2 grid grid-cols-3 gap-2">
             <Field label="Wall thk (mm)"><NumInput value={t.params.wallThkMm ?? 150} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallThkMm: v } }))} /></Field>
             <Field label="Beam width (mm)"><NumInput value={t.params.beamWidthMm ?? 200} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamWidthMm: v } }))} /></Field>

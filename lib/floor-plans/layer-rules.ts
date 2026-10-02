@@ -26,6 +26,9 @@ export const doorWindowKind = (name: string): "door" | "window" | null => {
   return null;
 };
 
+/** Balcony railings / handrails: not formwork, but a wall line with a railing on it is a parapet (low wall). */
+export const isRailLayer = (name: string) => /hral|railing|handrail|(^|-)rails?(-|$)|balustrade|栏杆|扶手/.test(normLayer(name));
+
 export type Role = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams" | "upstand";
 
 /** First guess of what a layer is, from its name (the user can change every layer on the measuring screen). */
