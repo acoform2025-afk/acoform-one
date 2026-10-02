@@ -490,18 +490,26 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
 
   // 2 · wall ties through both faces at the engineering spacing (Settings → Engineering), ≤ 800 mm practice
   const tH = R && R.system !== "acoform" ? R.tieH : o.tieH && o.tieH > 0 ? o.tieH : 800, tV = R && R.system !== "acoform" ? R.tieV : o.tieV && o.tieV > 0 ? o.tieV : 800;
+  // ties sit at the panel joints (one per tH along the face; the corners are held by corner pins, so no extra tie at
+  // the ends) in rows tV apart; the top of the panel is held by the soffit corner / deck, so a part row at the top is
+  // not tied (rows = height ÷ tV rounded down). One tie serves the two faces of a wall → the face count halved.
+  // Checked against the Guangzhou Motian package: 2,688 vs their 2,660 flat ties (+1 %).
+  const rowsOf = (h: number) => Math.max(1, Math.floor(h / tV));
   let ties = 0;
-  for (const f of layouts) ties += (Math.ceil(f.length / tH) + 1) * Math.max(1, Math.ceil(f.height / tV));
-  ties = Math.ceil(ties / 2);                                    // one tie serves the two faces of a wall
+  for (const f of layouts) ties += Math.max(1, Math.ceil(f.length / tH)) * rowsOf(f.height);
+  ties = Math.ceil(ties / 2);
+  // beams formed on both sides are tied through the beam too
+  let beamTies = 0;
+  for (const bl of beamLayouts) if (bl.sides === 2 && bl.side > 0) beamTies += Math.max(1, Math.ceil(bl.length / tH)) * Math.max(1, Math.ceil(bl.side / tV));
   let colTies = 0;
   for (const c of colLayouts) if (!c.round) for (const X of [c.w, c.d]) if (X > 600) colTies += (Math.ceil(X / tH) - 0) * Math.max(1, Math.ceil(c.h / tV)) * c.qty;
-  const allTies = ties + colTies;
+  const allTies = ties + beamTies + colTies;
   const ft = accW(/^FTIE|^TR/, 0.15);
   if (R?.tie === "flat") {
-    acc("TIE", "Ties", "FLAT-TIE", `Flat tie, one-use (@ ${tH} h × ${tV} v mm)`, Math.ceil(allTies * loss), 0.12, `walls: (face ÷ ${tH} + 1) × rows, two faces per tie + ${Math.round((loss - 1) * 100)}% loss · consumable, order by wall thickness`);
+    acc("TIE", "Ties", "FLAT-TIE", `Flat tie, one-use (@ ${tH} h × ${tV} v mm)`, Math.ceil(allTies * loss), 0.12, `walls: joints (face ÷ ${tH}) × rows ÷ 2 (one tie holds both faces) = ${ties}${beamTies ? ` · beams ${beamTies}` : ""}${colTies ? ` · columns wider than 600: ${colTies}` : ""} + ${Math.round((loss - 1) * 100)}% loss · consumable, order by wall thickness`);
     acc("FTW", "Ties", "FT-WEDGE", "Flat-tie wedge pin", 2 * allTies, 0.05, "two per flat tie (re-used)");
   } else {
-    acc("TIE", "Ties", ft.code ?? "TIE", `Tie rod (@ ${tH} h × ${tV} v mm)`, allTies, ft.kg, `walls: (face ÷ ${tH} + 1) × rows, two faces per tie${colTies ? ` · columns wider than 600: ${colTies}` : ""}`);
+    acc("TIE", "Ties", ft.code ?? "TIE", `Tie rod (@ ${tH} h × ${tV} v mm)`, allTies, ft.kg, `walls: joints (face ÷ ${tH}) × rows ÷ 2 (one tie holds both faces) = ${ties}${beamTies ? ` · beams ${beamTies}` : ""}${colTies ? ` · columns wider than 600: ${colTies}` : ""}`);
     acc("SLEEVE", "Ties", accW(/^SLV|^PVC/, 0.02).code ?? "PVC-SL", "PVC sleeve for tie (lost each pour)", Math.ceil(allTies * loss), accW(/^SLV|^PVC/, 0.02).kg, `one per tie + ${Math.round((loss - 1) * 100)}% loss · consumable`);
     acc("CONE", "Ties", accW(/^CONE/, 0.03).code ?? "CONE", "Tie cone", 2 * allTies, accW(/^CONE/, 0.03).kg, "two per tie");
     acc("WNUT", "Ties", accW(/^WN|^NUT/, 0.35).code ?? "WNUT", "Wing nut with plate washer", 2 * allTies, accW(/^WN|^NUT/, 0.35).kg, "two per tie rod");
