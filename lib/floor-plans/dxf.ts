@@ -6,14 +6,14 @@ import DxfParser from "dxf-parser";
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
 import { nearRings, outlineFromWalls, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
-import { beamSizeFromLayer, isNoiseLayer, suggestLayerRole } from "./layer-rules";
+import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, suggestLayerRole } from "./layer-rules";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
 export type DxfText = { text: string; x: number; y: number; h: number };
 /** A named drawing inside the file (Revit view / AutoCAD block), box in drawing units. */
 export type DxfView = { name: string; box: [number, number, number, number] };
-export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -174,6 +174,8 @@ export function readDxf(raw: string): DxfModel {
   const views: DxfView[] = [];
   const noiseCache = new Map<string, boolean>();
   const extentPts: number[] = [];
+  const dwCache = new Map<string, "door" | "window" | null>();
+  const dw: (DxfPath & { kind: "door" | "window" })[] = [];
 
   const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number) => {
     for (const e of ents) {
@@ -185,6 +187,9 @@ export function readDxf(raw: string): DxfModel {
       const push = (pts: Pt[], closed: boolean) => {
         if (pts.length < 2) return;
         if (!noise) { paths.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed }); return; }
+        // door / window lines are kept apart: where they sit inside a wall they mark an opening in it
+        const dk = dwCache.get(layer) ?? (dwCache.set(layer, doorWindowKind(layer)), dwCache.get(layer)!);
+        if (dk && dw.length < 80_000) dw.push({ layer, kind: dk, pts: pts.map(([x, y]) => ap(m, x, y)), closed });
         // skipped lines still count for the drawing extents, so saved plan regions (in picture pixels) stay put
         if (extentPts.length < 4_000_000) for (const [x, y] of pts) { const q = ap(m, x, y); extentPts.push(q[0], q[1]); }
       };
@@ -263,10 +268,15 @@ export function readDxf(raw: string): DxfModel {
   const unitsGuessed = !units;
   if (!units) { const span = Math.max(x1 - x0, y1 - y0); units = span > 2000 ? "mm" : span > 300 ? "cm" : "m"; }
 
-  return { texts, views, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  return { texts, views, dw, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */
+/** "Separate set" areas the user drew on the plan (picture px) → drawing units, for dxfAuto. */
+export function separateAreas(shapes: { kind: string; pts: Pt[] }[] | undefined, frame: { fromPx: (p: Pt) => Pt }): Pt[][] {
+  return (shapes ?? []).filter((s) => s.kind === "separate" && s.pts.length >= 3).map((s) => s.pts.map((q) => frame.fromPx(q)));
+}
+
 export function dxfFrame(model: DxfModel, maxSide = 2400) {
   const [x0, y0, x1, y1] = model.bbox;
   const pad = Math.max(x1 - x0, y1 - y0) * 0.03 || 1;
@@ -386,10 +396,66 @@ function stairClusters(paths: DxfPath[], u: number): [number, number, number, nu
 }
 
 const closeRing = (r: Pt[]): [number, number][] => { const o = r.map((q) => [q[0], q[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
+
+/**
+ * Openings inside walls: door / window lines that lie inside a wall outline, projected on each wall face (outline
+ * edge) → the stretch of that face that is an opening. Walls drawn straight through windows / doors (common on
+ * shell plans) would otherwise be measured and panelled full height. Units: drawing units; t0 / t1 along the edge.
+ */
+function wallOpeningsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], u: number) {
+  const out: { ring: number; edge: number; t0: number; t1: number; door: boolean; thk: number }[] = [];
+  if (!dw.length || !rings.length) return out;
+  const C = 1 / u;                                                      // 1 m grid
+  const grid = new Map<string, { x: number; y: number; door: boolean }[]>();
+  const put = (x: number, y: number, door: boolean) => { const k = `${Math.floor(x / C)},${Math.floor(y / C)}`; (grid.get(k) ?? grid.set(k, []).get(k)!).push({ x, y, door }); };
+  for (const p of dw) {
+    for (let i = 0; i < p.pts.length; i++) {
+      put(p.pts[i][0], p.pts[i][1], p.kind === "door");
+      const q = p.pts[i + 1]; if (!q) continue;
+      const L = Math.hypot(q[0] - p.pts[i][0], q[1] - p.pts[i][1]), n = Math.min(40, Math.floor((L * u) / 0.1));
+      for (let k = 1; k < n; k++) put(p.pts[i][0] + ((q[0] - p.pts[i][0]) * k) / n, p.pts[i][1] + ((q[1] - p.pts[i][1]) * k) / n, p.kind === "door");
+    }
+  }
+  const inWall = (x: number, y: number) => { let c = false; for (const r of rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const [xi, yi] = r[i], [xj, yj] = r[j]; if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
+  rings.forEach((r, ri) => r.forEach((a, ei) => {
+    const b = r[(ei + 1) % r.length];
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (L * u < 0.5) return;
+    const ux = dx / L, uy = dy / L; let nx = -uy, ny = ux;
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, e = 0.02 / u;
+    if (!inWall(mx + nx * e, my + ny * e)) { nx = -nx; ny = -ny; }             // n points into the wall
+    if (!inWall(mx + nx * e, my + ny * e)) return;
+    let thk = 0; for (let s2 = 0.02; s2 <= 1.0; s2 += 0.02) { if (!inWall(mx + nx * (s2 / u), my + ny * (s2 / u))) break; thk = s2; }
+    const band = Math.max(0.08, thk) / u;
+    const x0 = Math.min(a[0], b[0]) - band, x1 = Math.max(a[0], b[0]) + band, y0 = Math.min(a[1], b[1]) - band, y1 = Math.max(a[1], b[1]) + band;
+    const hits: { t: number; door: boolean }[] = [];
+    for (let gx = Math.floor(x0 / C); gx <= Math.floor(x1 / C); gx++) for (let gy = Math.floor(y0 / C); gy <= Math.floor(y1 / C); gy++) {
+      for (const pt of grid.get(`${gx},${gy}`) ?? []) {
+        const vx = pt.x - a[0], vy = pt.y - a[1], t = vx * ux + vy * uy, d = vx * nx + vy * ny;
+        if (t < 0 || t > L || d < -0.005 / u || d > band) continue;
+        if (d > 0.005 / u && !inWall(pt.x, pt.y)) continue;
+        hits.push({ t, door: pt.door });
+      }
+    }
+    if (hits.length < 3) return;
+    hits.sort((p1, p2) => p1.t - p2.t);
+    let s0 = hits[0], prev = hits[0], doors = 0, n = 0;
+    const flush = (endT: number) => {
+      const w = (endT - s0.t) * u;
+      if (w >= 0.4 && w <= 6 && w < L * u - 0.05) out.push({ ring: ri, edge: ei, t0: s0.t, t1: endT, door: doors * 2 >= n, thk: Math.round(thk * 1000) });
+    };
+    for (const h of hits) {
+      if ((h.t - prev.t) * u > 0.3) { flush(prev.t); s0 = h; doors = 0; n = 0; }
+      if (h.door) doors++; n++; prev = h;
+    }
+    flush(prev.t);
+  }));
+  return out;
+}
+
 const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
-export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4): DxfAuto {
+export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = []): DxfAuto {
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)));
   const u = unitToM, u2 = unitToM * unitToM;
   const tol = 0.005 / u;                                      // 5 mm in drawing units
@@ -484,19 +550,28 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
   }
 
-  const cols = colAll.filter((c) => c.isCol).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
+  // "separate set" areas drawn by the user (a core cast with its own formwork): their walls and columns are left out
+  const inSep = (q: Pt) => separate.some((poly) => poly.length >= 3 && inside(q, poly));
+  const wallSeparate = separate.length ? U.rings.map((r, i) => (r.filter((q) => inSep(q)).length * 2 > r.length ? i : -1)).filter((i) => i >= 0) : [];
+  const sepFaces = wallSeparate.reduce((s2, i) => s2 + polyLength(U.rings[i], true), 0) * u;
+  const sepCols = colAll.filter((c) => c.isCol && inSep(c.p.pts[0]));
+  const cols = colAll.filter((c) => c.isCol && !sepCols.includes(c)).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
   return {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
     openingArea: openL.reduce((s, x) => s + x.a, 0) * u2,
     openingPerimeter: openL.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
-    wallLineLength: (U.perimeter + looseLen) * u,
+    wallLineLength: (U.perimeter + looseLen) * u - sepFaces,
+    // outlines on column layers too big / not rectangular for a column (lift cores, L-shaped shear walls)
+    columnWallEdges: colWalls.length ? U.rings.flatMap((r, i) => r.map((a, e) => { const b = r[(e + 1) % r.length]; const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; return nearRings(mid, colWalls, 0.01 / u) ? `${i}:${e}` : ""; })).filter(Boolean) : [],
+    wallSeparate, separateWall: { faces: sepFaces, cols: sepCols.length, colPerimeter: sepCols.reduce((s2, c) => s2 + c.perimeter, 0) },
     wallTopArea: U.area * u2,
     beamLineLength: unsizedLen,
     beamSized, beamRings,
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,
+    wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
     ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
     ...(() => { const g = wallGaps(U.rings, u); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })) }; })(),
   };

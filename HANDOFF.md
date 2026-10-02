@@ -182,3 +182,9 @@ returns and repairs.
 - Columns: only rectangles or real circles are columns; L / T shapes are walls (were read as round forms).
 - Royce One, tie-rod system: 1,288 deck panels / 725 m² vs their 1,292 / 731 m². Motian, flat-tie: 2,723 flat ties vs 2,660, 24,622 pins vs 26,070, 813 props (3 sets) vs 921.
 - Still open: wall faces under beams / low walls (walls ~ +25–28 % in both test projects), beam sides on sunk slabs.
+
+## Wall area fix (why walls read ~25 % high)
+- Measured on both test projects: wall heights under beams were NOT the cause (beams are drawn between walls, not over them). The extra wall area was scope: walls formed with a separate set — the lift / stair core (Motian: central core has no wall panels in their package) and, on Royce One, lift cores / shear walls cast first with the columns.
+- New "Separate set" tool on the measuring screen (ShapeKind `separate`, DXF plans): draw round a core; `dxfAuto(..., separate)` leaves its wall rings (`wallSeparate`) and columns out of the typical floor; the area list shows what was left out (`separateWall`). Motian with the core marked: wall panels 689 m² vs their 720 (−4 %).
+- Column-layer outlines that are not columns (lift cores, L-shaped shear walls) are flagged edge by edge (`columnWallEdges` → `Face.set = "column"`); with the rule "columns cast first" they become column-set panels to the first pour + CT tops with the slab.
+- Doors / windows drawn inside walls (door / window layers, kept apart in `model.dw`): `wallOpeningsOf` finds the stretch of each wall face they cover → faces are cut (pieces over / under the opening, reveals) and the area take-off deducts them (`auto.wallOpenings`).

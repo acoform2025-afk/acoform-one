@@ -10,7 +10,7 @@
 import { DEFAULT_RULES, normaliseRules, type MeasureRules } from "./rules";
 
 export type Pt = [number, number];
-export type ShapeKind = "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft";
+export type ShapeKind = "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft" | "separate";
 /**
  * A drawn element. Optional sizes (mm) override the plan defaults:
  * wall: t = thickness, h = height · beam: b = width, d = depth · column: h = height · slab/opening: t = thickness.
@@ -91,6 +91,10 @@ export type DxfAuto = {
   openingLoops?: Pt[][];                            // duct / lift cut-outs used (drawing units)
   wallRings?: Pt[][];                               // merged wall outlines (drawing units) — every edge is a wall face
   wallLoose?: Pt[][];                               // wall lines not part of an outline (drawing units)
+  columnWallEdges?: string[];                       // "ring:edge" of wall faces drawn on column layers (lift cores, shear walls)
+  wallSeparate?: number[];                          // wall outline rings inside a "separate set" area (core cast separately)
+  separateWall?: { faces: number; cols: number; colPerimeter: number };   // what was left out of the typical set, m
+  wallOpenings?: { ring: number; edge: number; t0: number; t1: number; door: boolean; thk: number }[];   // door / window stretches of wall faces (drawing units along wallRings[ring] edge `edge`)
   stairCount?: number;                              // staircases found on stair layers
   stairBoxes?: [number, number, number, number][];  // drawing units
   gapSpan?: number;                                 // openings in wall lines (door / window / passage widths), m
@@ -250,6 +254,25 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
       const faces = t.dxf?.wallsDrawn === "centre" ? 2 * auto.wallLineLength : auto.wallLineLength;
       wallCentre += faces / 2; wallFaces += faces; wallArea += faces * H;
       items.push({ code: code("W"), group: "wall", label: "Walls (DXF layers)", calc: `${n2(faces)} m faces × ${n3(H)} m`, area: faces * H });
+    }
+    // doors / windows found inside the walls (each face listed once; reveals shared by the two faces of a wall)
+    const uM = UNIT_TO_M[t.dxf?.units ?? "mm"] ?? 0.001;
+    let dN = 0, dLen = 0, dFace = 0, dRev = 0, wN = 0, wLen = 0, wFace = 0, wRev = 0;
+    for (const o of auto.wallOpenings ?? []) {
+      const w = (o.t1 - o.t0) * uM, h = (o.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH) / 1000, thk = (o.thk || Number(t.params.wallThkMm) || 150) / 1000;
+      if (w * h < minOpen) continue;
+      const rev = rules.reveals ? 0.5 * (2 * h + w * (o.door ? 1 : 2)) * thk : 0;
+      if (o.door) { dN++; dLen += w; dFace += w * h; dRev += rev; } else { wN++; wLen += w; wFace += w * h; wRev += rev; }
+    }
+    for (const [door, n, len, face, rev] of [[true, dN, dLen, dFace, dRev], [false, wN, wLen, wFace, wRev]] as const) {
+      if (!n) continue;
+      wallArea -= face;
+      items.push({ code: code(door ? "DR" : "WN"), group: "opening", label: `${door ? "Doors" : "Windows"} in walls (drawing, ${Math.round(n / 2)}) − faces`, calc: `− ${n2(len)} m of faces × ${n3((door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH) / 1000)} m`, area: -face });
+      if (rev > 0) { wallArea += rev; items.push({ code: code(door ? "DR" : "WN"), group: "opening", label: `${door ? "Door" : "Window"} reveals`, calc: "sides, head" + (door ? "" : ", sill") + " × wall thickness", area: rev }); }
+    }
+    if (auto.separateWall && (auto.separateWall.faces > 0 || auto.separateWall.cols > 0)) {
+      const sw = auto.separateWall;
+      items.push({ code: code("X"), group: "wall", label: "Separate set (core / cast separately) — not in the typical floor", calc: `${n2(sw.faces)} m wall faces${sw.cols ? ` + ${sw.cols} columns (${n2(sw.colPerimeter)} m)` : ""} left out`, area: 0 });
     }
     for (const c of auto.columns) {
       colCount += 1; colPerimeter += c.perimeter; colFoot += c.area; colArea += c.perimeter * H; addSize(c.w, c.d, 1);

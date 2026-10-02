@@ -17,6 +17,14 @@ const NOISE = new RegExp([
   "门", "窗", "家具", "填充", "标注", "洁具", "卫浴", "索引",
 ].join("|"), "i");
 export const isNoiseLayer = (name: string) => NOISE.test(normLayer(name));
+/** Door / window layers: not drawn, but their lines inside a wall mark an opening in that wall. */
+export const doorWindowKind = (name: string): "door" | "window" | null => {
+  const n = normLayer(name);
+  if (/elev|elv|section|sec-|立面|剖面|tag|text|txt/.test(n)) return null;
+  if (/(^|-)doors?(-|$)|^a-door|门/.test(n)) return "door";
+  if (/(^|-)windows?(-|$)|^a-window|^a-win($|-)|^a-glaz|glazing|窗/.test(n)) return "window";
+  return null;
+};
 
 export type Role = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams";
 

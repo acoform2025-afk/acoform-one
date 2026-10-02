@@ -16,7 +16,7 @@ import type { LayoutRules } from "./layout-rules";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
 export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
-export type Face = { code: string; length: number; height: number; geo?: FaceGeo; part?: "above" | "below" };   // part: short piece over a door/window or below a window sill
+export type Face = { code: string; length: number; height: number; geo?: FaceGeo; part?: "above" | "below"; set?: "column" };   // part: short piece over a door/window or below a window sill
 export type OpeningCut = { kind: "door" | "window"; w: number; h: number; t: number };                        // mm, one per opening (for reveals)                 // mm
 export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };                     // metres
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean }; // mm
@@ -138,6 +138,21 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     }
     const fit = wallW.length ? fillRun(f.length, wallW) : { panels: [], left: Math.round(f.length) };
     const panels = fit.panels;
+    // lift cores / shear walls drawn on column layers, cast first with the columns: column set to the first pour,
+    // the rest formed with the slab
+    if (f.set === "column" && R?.columnsSeparate && R.columnFirstCast > 0 && f.height > R.columnFirstCast) {
+      const first = R.columnFirstCast, rest = Math.round(f.height - first);
+      const leftC = fit.left < tol ? 0 : Math.round(fit.left / 5) * 5;
+      for (const w of panels) {
+        const p = wallPanel(w);
+        add(`col:${p.panel_code}`, { code: p.panel_code, description: `Column panel (column set, first pour ${first})`, group: "column", w, h: o.stdHeight, custom: false }, 1, Number(p.weight_kg));
+        if (first > o.stdHeight) add(`col:WT-${w}-${first - o.stdHeight}`, { code: `WT-${w}-${first - o.stdHeight}`, description: "Column top panel (custom height)", group: "column", w, h: first - o.stdHeight, custom: !sysStd }, 1);
+        if (rest >= 50) add(`col:CT-${w}-${rest}`, { code: `CT-${w}-${rest}`, description: `Column top above the first pour (${rest} mm, cast with the slab)`, group: "wall-top", w, h: rest, custom: !sysStd }, 1);
+      }
+      if (leftC > 0) add(`col:CF-${leftC}-${first}`, { code: `CF-${leftC}-${first}`, description: "Column filler (custom width)", group: "column", w: leftC, h: first, custom: true }, 1);
+      layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: leftC, top: rest, geo: f.geo });
+      continue;
+    }
     const left = fit.left < tol ? 0 : Math.round(fit.left / 5) * 5;   // small gaps are taken up in the joints
     const top = Math.max(0, Math.round(f.height - o.stdHeight));
     layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo });

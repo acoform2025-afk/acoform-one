@@ -23,7 +23,7 @@ export type ShellGeometry = {
   };
 };
 
-const PREFIX: Record<Shape["kind"], string> = { slab: "S", opening: "D", wall: "W", column: "C", beam: "B", door: "DR", window: "WN", loft: "L" };
+const PREFIX: Record<Shape["kind"], string> = { slab: "S", opening: "D", wall: "W", column: "C", beam: "B", door: "DR", window: "WN", loft: "L", separate: "X" };
 
 export function buildShell(t: Takeoff, model: DxfModel | null): ShellGeometry {
   const mpp = t.metersPerPx ?? 0;

@@ -3,7 +3,7 @@ import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { createClient } from "@/lib/supabase/server";
 import { computeTotals, UNIT_TO_M, type DxfAuto, type Takeoff } from "@/lib/floor-plans/calc";
 import { loadRules } from "@/lib/floor-plans/rules";
-import { dxfAuto, dxfFrame, readDxf, type DxfModel } from "@/lib/floor-plans/dxf";
+import { dxfAuto, dxfFrame, readDxf, separateAreas, type DxfModel } from "@/lib/floor-plans/dxf";
 import { sheetGeo, sheetSections } from "@/lib/floor-plans/area-sheet";
 import { AreaSheetDocument } from "@/lib/pdf/area-sheet-document";
 
@@ -35,7 +35,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const reg = t.dxf.region;
     const f = dxfFrame(model, 2400);
     const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
-    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2);
+    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f));
   }
   model = null;
   const totals = computeTotals(t, auto, rules);

@@ -4,7 +4,7 @@
  */
 import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals } from "./calc";
-import { closedLoops, dxfAuto, dxfFrame, type DxfModel } from "./dxf";
+import { closedLoops, dxfAuto, dxfFrame, separateAreas, type DxfModel } from "./dxf";
 import { wallUnion } from "./geom";
 import { buildShell } from "./shell";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
@@ -27,7 +27,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   if (model && t.dxf) {
     const f = dxfFrame(model, 2400); frame = f; const reg = t.dxf.region;
     const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
-    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2);
+    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f));
   }
   let corners = 0;
 
@@ -47,7 +47,19 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   let n = 0;
   const both = t.dxf?.wallsDrawn === "centre";
   const px = (q: Pt): Pt => (frame ? frame.toPx(q) : q);
-  const addRun = (pts: Pt[], closed: boolean, twoSided: boolean) => {
+  const openings: OpeningCut[] = [];
+  // doors / windows found inside the walls of the drawing, per outline edge
+  const cutsOf = new Map<string, { f0: number; f1: number; door: boolean; thk: number; mid: Pt }[]>();
+  const dwSeen: { mid: Pt; thk: number }[] = [];
+  const uM = t.dxf ? UNIT_TO_M[t.dxf.units] : 0.001;
+  for (const o of auto?.wallOpenings ?? []) {
+    const r = auto!.wallRings![o.ring]; const a = r[o.edge], b = r[(o.edge + 1) % r.length];
+    const Ld = Math.hypot(b[0] - a[0], b[1] - a[1]); if (!Ld) continue;
+    const tm = (o.t0 + o.t1) / 2, mid: Pt = [a[0] + ((b[0] - a[0]) * tm) / Ld, a[1] + ((b[1] - a[1]) * tm) / Ld];
+    const k = `${o.ring}:${o.edge}`; (cutsOf.get(k) ?? cutsOf.set(k, []).get(k)!).push({ f0: o.t0 / Ld, f1: o.t1 / Ld, door: o.door, thk: o.thk, mid });
+  }
+  const colEdges = new Set(auto?.columnWallEdges ?? []);
+  const addRun = (pts: Pt[], closed: boolean, twoSided: boolean, ring?: number) => {
     const seg = pts.length - (closed ? 0 : 1);
     for (let i = 0; i < seg; i++) {
       const a = pts[i], b = pts[(i + 1) % pts.length];
@@ -55,21 +67,45 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
       if (L < 100) continue;
       n++;
       const side = twoSided && mpp > 0 ? ((t.params.wallThkMm ?? 150) / 2000) / mpp : 0;
-      faces.push({ code: `F${n}`, length: L, height: H, geo: { a, b, off: side } });
+      const cuts = ring != null ? (cutsOf.get(`${ring}:${i}`) ?? []).sort((x, y) => x.f0 - y.f0) : [];
+      if (cuts.length) {
+        // the face is broken by doors / windows: full-height pieces between them, a piece over each opening
+        // (and under each window) — the same pieces as an opening drawn by hand
+        const at = (f: number): Pt => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+        let pos = 0, k = 0;
+        const piece = (f0: number, f1: number) => { const len = (f1 - f0) * L; if (len >= 60) faces.push({ code: `F${n}.${++k}`, length: len, height: H, geo: { a: at(f0), b: at(f1), off: side } }); };
+        cuts.forEach((c, ci) => {
+          piece(pos, c.f0);
+          const w = (c.f1 - Math.max(pos, c.f0)) * L;
+          const head = c.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, sill = c.door ? 0 : OPENING_DEFAULTS.windowSill;
+          if (w > 0) {
+            if (H - head >= 50) faces.push({ code: `F${n}-O${ci + 1}H`, length: w, height: H - head, part: "above" });
+            if (sill >= 50) faces.push({ code: `F${n}-O${ci + 1}S`, length: w, height: sill, part: "below" });
+          }
+          if (!dwSeen.some((d) => Math.hypot(d.mid[0] - c.mid[0], d.mid[1] - c.mid[1]) * uM * 1000 <= Math.max(d.thk, c.thk) + 100)) {
+            dwSeen.push({ mid: c.mid, thk: c.thk });
+            openings.push({ kind: c.door ? "door" : "window", w: (c.f1 - c.f0) * L, h: c.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH, t: c.thk || (t.params.wallThkMm ?? 150) });
+          }
+          pos = Math.max(pos, c.f1);
+        });
+        piece(pos, 1);
+        continue;
+      }
+      faces.push({ code: `F${n}`, length: L, height: H, geo: { a, b, off: side }, ...(ring != null && colEdges.has(`${ring}:${i}`) ? { set: "column" as const } : {}) });
       if (twoSided) faces.push({ code: `F${n}B`, length: L, height: H, geo: { a, b, off: -side } });
     }
     for (let i = 1; i < pts.length - (closed ? 0 : 1); i++) if (Math.abs(angleAt(pts[i - 1], pts[i], pts[(i + 1) % pts.length]) - 90) < 30) corners++;
     if (closed && pts.length > 2 && Math.abs(angleAt(pts[pts.length - 1], pts[0], pts[1]) - 90) < 30) corners++;
   };
   if (auto && (auto.wallRings?.length || auto.wallLoose?.length)) {
-    for (const r of auto.wallRings ?? []) addRun(r.map(px), true, false);
+    const sep = new Set(auto.wallSeparate ?? []);
+    (auto.wallRings ?? []).forEach((r, ri) => { if (!sep.has(ri)) addRun(r.map(px), true, false, ri); });
     for (const l of auto.wallLoose ?? []) addRun(l.map(px), false, both);
   } else {
     for (const l of g.dxf.walls ?? []) addRun(l.pts, l.closed, both);
   }
 
   // doors / windows: cut them out of the faces they sit on
-  const openings: OpeningCut[] = [];
   const ops = g.shapes.filter((s) => (s.kind === "door" || s.kind === "window") && s.pts.length >= 2).map((s) => {
     const isDoor = s.kind === "door";
     const h = s.h ?? (isDoor ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH);

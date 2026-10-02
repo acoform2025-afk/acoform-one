@@ -11,13 +11,13 @@ import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
-import { drawingParts, dxfAuto, dxfFrame, drawDxf, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
+import { drawingParts, dxfAuto, dxfFrame, drawDxf, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { saveTakeoff } from "../actions";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
 
-type Tool = "pan" | "zoom" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft";
+type Tool = "pan" | "zoom" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft" | "separate";
 type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
 
 const MAX_SIDE = 2400;
@@ -30,8 +30,9 @@ const SHAPE_STYLE: Record<ShapeKind, { stroke: string; fill: string; label: stri
   door: { stroke: "#0d9488", fill: "none", label: "Door" },
   window: { stroke: "#0284c7", fill: "none", label: "Window" },
   loft: { stroke: "#65a30d", fill: "rgba(101,163,13,0.18)", label: "Loft / ledge" },
+  separate: { stroke: "#64748b", fill: "rgba(100,116,139,0.18)", label: "Separate set (core)" },
 };
-const PREFIX: Record<ShapeKind, string> = { slab: "S", opening: "D", wall: "W", column: "C", beam: "B", door: "DR", window: "WN", loft: "L" };
+const PREFIX: Record<ShapeKind, string> = { slab: "S", opening: "D", wall: "W", column: "C", beam: "B", door: "DR", window: "WN", loft: "L", separate: "X" };
 const isOpen = (k: ShapeKind) => k === "wall" || k === "beam" || k === "door" || k === "window";
 const isTwoPoint = (k: string) => k === "door" || k === "window";
 /** Same numbering as the area list: own label, else S1, W1, B1 … in drawing order. */
@@ -54,6 +55,7 @@ const TOOL_HINT: Record<Tool, string> = {
   door: "Click the two sides of the door opening along the wall. Set its height in the element box (default 2100).",
   window: "Click the two sides of the window along the wall. Set height and sill in the element box (default 1200, sill 900).",
   loft: "Click the corners of the loft / ledge slab. Click the first point again to close.",
+  separate: "Draw round a part cast with its own formwork (lift / stair core, columns cast first). Its walls and columns leave the typical-floor set. Click the first point again to close.",
   beam: "Click along the beam centre line. Double-click or press Enter to finish. Set its width × depth in the list on the right (Select it).",
 };
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -280,9 +282,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo);
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDxf, t.dxf, size, t.params.minOpeningM2, rules.minOpeningM2]);
+  }, [isDxf, t.dxf, size, t.params.minOpeningM2, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|")]);
   const totals: Totals = useMemo(() => computeTotals(t, auto, rules), [t, auto, rules]);
   // the same figures read from the drawing only (without the estimator's typed-in figures) — shown next to them
   const drawnTotals: Totals = useMemo(() => computeTotals({ ...t, params: { ...t.params, slabM2: undefined, ductM2: undefined, wallLenM: undefined, beamLenM: undefined } }, auto, rules), [t, auto, rules]);
@@ -393,7 +395,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const tol = 10 / view.k;
     let best: Pt | null = null, bd = tol;
     const consider = (c: Pt) => { const d = Math.hypot(c[0] - q[0], c[1] - q[1]); if (d < bd) { bd = d; best = c; } };
-    if (draft.length >= 3 && (tool === "slab" || tool === "opening" || tool === "loft")) consider(draft[0]);
+    if (draft.length >= 3 && (tool === "slab" || tool === "opening" || tool === "loft" || tool === "separate")) consider(draft[0]);
     for (const s of t.shapes) for (const c of s.pts) consider(c);
     for (const c of snapRef.current) consider(c);
     if (best && !(shift && last)) return { pt: best, snapped: true };
@@ -442,7 +444,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
       if (draft.length === 0) { setDraft([p]); return; }
       finishShape(tool, [draft[0], p]); return;
     }
-    if (tool === "slab" || tool === "opening" || tool === "loft") {
+    if (tool === "slab" || tool === "opening" || tool === "loft" || tool === "separate") {
       if (draft.length >= 3 && Math.hypot(p[0] - draft[0][0], p[1] - draft[0][1]) < 10 / view.k) { finishShape(tool, draft); return; }
       setDraft((d) => [...d, p]); return;
     }
@@ -450,7 +452,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   }
 
   function finishDraft() {
-    if (tool === "slab" || tool === "opening" || tool === "loft" || tool === "wall" || tool === "beam") finishShape(tool, draft);
+    if (tool === "slab" || tool === "opening" || tool === "loft" || tool === "separate" || tool === "wall" || tool === "beam") finishShape(tool, draft);
   }
 
   /* ---------- mouse / touch ---------- */
@@ -568,6 +570,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     { id: "door", label: "Door", icon: <DoorOpen className="size-4" />, show: canEdit },
     { id: "window", label: "Window", icon: <AppWindow className="size-4" />, show: canEdit },
     { id: "loft", label: "Loft", icon: <Layers className="size-4" />, show: canEdit },
+    { id: "separate", label: "Separate set", icon: <SquareDashed className="size-4" />, show: canEdit && isDxf },
     { id: "select", label: "Select", icon: <MousePointer2 className="size-4" />, show: canEdit },
   ];
   const draftPreview: Pt[] = hover && draft.length && tool !== "select" && tool !== "pan"
@@ -638,7 +641,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           className={cls("relative touch-none", full ? "min-h-0 flex-1" : "h-[62vh] min-h-[380px]", " select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
             tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-pointer" : "cursor-crosshair")}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-          onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "beam" || tool === "slab" || tool === "opening" || tool === "loft") finishDraft(); }}
+          onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "beam" || tool === "slab" || tool === "opening" || tool === "loft" || tool === "separate") finishDraft(); }}
           onContextMenu={(e) => e.preventDefault()}
         >
           {!size && !loadErr ? <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-graphite-600"><Loader2 className="size-5 animate-spin" />Opening floor plan…</div> : null}
