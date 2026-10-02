@@ -155,3 +155,7 @@ returns and repairs.
 - ACOFORM RK panels: clear height = 2400 + 25…175 (25 steps) → one W(RK) panel WRA…WRG (2425…2575) per width instead of a panel + WT.
 - Weights calibrated to ACOFORM STD 2400 production weight sheet: catalogue = actual sheet (W 100…600 incl. new 125/225/230, IC 100+100 11.4, EC 65+65 3.7); specials: wall kg = H/2400 × (4.93 + 0.03542 W), others = section weight × 0.915 (ACTUAL in fabrication.ts).
 - Supplier sections (6061-T6): U-stiff sec. 8054 0.935 kg/m, Y-stiff NP-406 1.2076 kg/m (447.27 mm²), 230/225 panels = one-piece extrusion NP-193 4.3298 kg/m. Wall pieces use ACTUAL_2400 table (shop weights) scaled by height; others = section weight × 1.01.
+
+## 3D model (three.js 0.169)
+- `lib/floor-plans/scene3d.ts` builds the scene (metres): walls = even-odd of zone wall rings extruded to clear height; wall panels as quads on every face (std / top / filler); deck panels from zones at the soffit; mid-beam lines; beams over openings; slab.
+- Page `/floor-plans/[id]/panels/3d` (server builds scene, client `viewer.tsx` renders with OrbitControls): layer toggles, 3D / top / front views, click a panel to see its number. Button on the Panels page.
