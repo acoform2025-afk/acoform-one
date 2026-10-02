@@ -6,7 +6,7 @@ import { loadRules } from "./rules";
 import type { Takeoff } from "./calc";
 import { layoutFloor, type CatPanel, type PanelOptions } from "@/lib/design-engine/floor-panels";
 import { deckZones, layoutZone, type Zone } from "./zones";
-import { loadLayoutRules, DEFAULT_LAYOUT_RULES, type LayoutRules } from "@/lib/design-engine/layout-rules";
+import { loadLayoutRules, rulesForPlan, DEFAULT_LAYOUT_RULES, type LayoutRules } from "@/lib/design-engine/layout-rules";
 
 type Supa = Awaited<ReturnType<typeof createClient>>;
 export type PanelQuery = { h?: string; kg?: string; prop?: string };
@@ -32,7 +32,8 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   const { data: catalog } = await supabase.from("panel_master")
     .select("id, panel_code, panel_category, width_mm, height_mm, weight_kg, area_sqm").eq("is_active", true);
   const { data: eng } = await supabase.from("engineering_parameters").select("tie_spacing_h_mm, tie_spacing_v_mm").maybeSingle();
-  const layoutRules = await loadLayoutRules(supabase);
+  const companyRules = await loadLayoutRules(supabase);
+  const layoutRules = rulesForPlan(companyRules, t.system);
   const opt = readOptions(q, layoutRules);
   // full-height system: one panel to the clear height less the bottom strip (unless a height was typed in)
   if (layoutRules.fullHeight && !q.h) opt.stdHeight = Math.max(1200, Math.round(((t.params.floorHeight - t.params.slabMm / 1000) * 1000 - layoutRules.bottomStrip) / 5) * 5);
@@ -43,7 +44,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   o.zoneDeck = zones.length ? { panels: zones.flatMap((z) => z.panels.map((p) => ({ code: p.code, w: p.w, L: p.L, custom: p.custom }))), specialArea: zones.reduce((a, z) => a + z.specialArea, 0), area: zones.reduce((a, z) => a + z.area, 0), zones: zones.length } : undefined;
   const result = layoutFloor(inp.faces, inp.decks, inp.beams, inp.corners, (catalog ?? []).map((c) => ({ ...c, width_mm: Number(c.width_mm), height_mm: Number(c.height_mm), weight_kg: Number(c.weight_kg), area_sqm: Number(c.area_sqm) })) as CatPanel[], o);
   const lead = Array.isArray(plan.leads) ? plan.leads[0] : plan.leads;
-  return { plan, lead, t, opt, totals: inp.totals, result, shell: inp.shell, error: null, inp, catalog: (catalog ?? []) as unknown as CatPanel[], layoutRules };
+  return { plan, lead, t, opt, totals: inp.totals, result, shell: inp.shell, error: null, inp, catalog: (catalog ?? []) as unknown as CatPanel[], layoutRules, companySystem: companyRules.system };
 }
 
 /** Numbered deck zones (M1, M2 …) with every deck panel placed — for the installation drawing and numbering list. */

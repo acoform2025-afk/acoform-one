@@ -215,3 +215,4 @@ returns and repairs.
 - Settings → "Learned from the site": totals for the current system + buttons: use the site loss %, add site spares (rule `sparePct` → BOM rows `SPARE-<most used code>`), remove spares.
 - Storage bucket floor-plans now accepts image/vnd.dxf (Mac) etc.; upload form wraps the file with the app's own MIME type.
 - Royce One test project: lead ACOFORM/LEAD/26-27/003; drawing = `Royce One - typical floor.dxf` (sheet 1 cut from r5, 355 KB, same results); takeoff prepared (layer roles, 3.65 m / 150 mm, lift cores = separate sets).
+- Per-plan formwork system: `takeoff.system` ("tierod" | "flattie" | "acoform", unset = company setting) → `rulesForPlan()` in run-panels (that system's preset values). Selector next to "Formwork system" on the Panel layout page. Royce One test plan = tierod.

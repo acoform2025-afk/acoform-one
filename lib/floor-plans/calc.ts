@@ -69,6 +69,7 @@ export type Takeoff = {
   auto?: { done: boolean; note?: string };   // automatic first reading of the drawing — runs once per plan, never again             // additional formwork for non-typical floors (added once to the set, not per floor)
   stairs?: StairRow[];
   shell?: ShellMeta;
+  system?: "tierod" | "flattie" | "acoform";   // formwork system for this plan only (unset = company setting)
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null };
 };
 

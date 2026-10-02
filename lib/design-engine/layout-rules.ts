@@ -79,6 +79,13 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
 
 export const DEFAULT_LAYOUT_RULES = PRESETS.acoform.rules;
 
+/** Rules for one floor plan: the company's own rules, or — when the plan has its own system (e.g. a test project in
+ *  another system) — that system's ready-made values. */
+export function rulesForPlan(company: LayoutRules, system?: string | null): LayoutRules {
+  if (!system || system === company.system || !(system in PRESETS)) return company;
+  return normaliseLayoutRules({ ...PRESETS[system as FormworkSystem].rules, sparePct: {} });
+}
+
 const num = (v: unknown, d: number, lo: number, hi: number) => { const n = Number(v); return v === null || v === undefined || v === "" || !Number.isFinite(n) ? d : Math.min(hi, Math.max(lo, n)); };
 const list = (v: unknown, d: number[], lo: number, hi: number) => {
   const a = Array.isArray(v) ? v : typeof v === "string" ? v.split(/[\s,;]+/) : null;

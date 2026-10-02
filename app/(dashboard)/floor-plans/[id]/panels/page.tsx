@@ -6,6 +6,7 @@ import { runPanels, type PanelQuery } from "@/lib/floor-plans/run-panels";
 import { fmtArea } from "@/lib/floor-plans/calc";
 import { hasPermission } from "@/lib/auth/permissions";
 import { CreateBom } from "./create-bom";
+import { SystemSelect } from "./system-select";
 import { PRESETS, describeLayoutRules } from "@/lib/design-engine/layout-rules";
 
 export const metadata = { title: "Panel layout & BOM" };
@@ -29,6 +30,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
   const qs = new URLSearchParams({ h: String(opt.stdHeight), kg: String(opt.kgPerM2), prop: String(opt.propSpacing) }).toString();
   const groups = [...new Set(result.bom.map((b) => b.group))];
   const canBom = await hasPermission("bom", "generate");
+  const canEditPlan = await hasPermission("quotations", "create");
   const { data: designRows } = canBom
     ? await supabase.from("designs").select("id, design_code, projects ( project_code, customer_name )").order("created_at", { ascending: false }).limit(100)
     : { data: null };
@@ -48,7 +50,8 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
           </p>
           {r.layoutRules ? (
             <p className="mt-1 text-xs text-graphite-400" title={describeLayoutRules(r.layoutRules).join("\n")}>
-              Formwork system: <b className="text-graphite-200">{PRESETS[r.layoutRules.system].label}</b> · <Link href="/settings#layout-rules" className="text-aluminium-300 hover:underline">change the layout rules</Link>
+              Formwork system: <b className="text-graphite-200">{PRESETS[r.layoutRules.system].label}</b>{r.t.system && r.t.system !== r.companySystem ? <span className="ml-1 rounded bg-signal-amber/15 px-1.5 py-0.5 text-signal-amber">this plan only</span> : null} · <Link href="/settings#layout-rules" className="text-aluminium-300 hover:underline">company layout rules</Link>
+              <span className="ml-2"><SystemSelect planId={id} value={r.t.system && r.t.system !== r.companySystem ? r.t.system : ""} companyLabel={PRESETS[r.companySystem ?? "acoform"].label} options={(Object.keys(PRESETS) as (keyof typeof PRESETS)[]).filter((k) => k !== r.companySystem).map((k) => ({ key: k, label: PRESETS[k].label }))} canEdit={canEditPlan} /></span>
             </p>
           ) : null}
         </div>
