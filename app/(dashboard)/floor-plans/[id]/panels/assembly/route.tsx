@@ -32,7 +32,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const r = await runPanels(supabase, id, q);
   if (!r) return new Response("Floor plan not found", { status: 404 });
   if (r.error || !r.inp || !r.shell || !r.result) return new Response(r.error ?? "Measure and save this plan first.", { status: 400 });
-  const zones = buildZones(r.inp, r.catalog, r.layoutRules);
+  const zones = (r.zones ?? buildZones(r.inp, r.catalog, r.layoutRules));
   const rules = r.layoutRules;
   const frames = faceFrames(r.result.faces, r.shell.mpp, r.inp.zoneWalls);
   // beam types: identical size + make-up counted together

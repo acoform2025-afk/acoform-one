@@ -18,7 +18,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const r = await runPanels(supabase, id, q);
   if (!r) return new Response("Floor plan not found", { status: 404 });
   if (r.error || !r.inp) return new Response(r.error ?? "Measure and save this plan first.", { status: 400 });
-  const zones = buildZones(r.inp, r.catalog, r.layoutRules);
+  const zones = (r.zones ?? buildZones(r.inp, r.catalog, r.layoutRules));
   if (!zones.length) return new Response("No slab outline found — mark the slab (Slab area tool or a slab layer) and save the plan first.", { status: 400 });
   const wallCode = (w: number) => r.catalog.find((c) => c.panel_category === "wall_panel" && Number(c.width_mm) === w && Number(c.height_mm) === r.opt.stdHeight)?.panel_code ?? `WP-${w}-${r.opt.stdHeight}`;
   const wallPanels = wallPanelNumbers(r.result.faces, r.opt.stdHeight, wallCode);

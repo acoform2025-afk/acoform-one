@@ -12,7 +12,7 @@ export type PackageFile = { key: string; name: string; title: string; csv: strin
 export function buildPackage(r: Ran, areasK: number): PackageFile[] | null {
   if (r.error || !r.inp || !r.shell || !r.result) return null;
   const title = r.plan.name;
-  const zones = buildZones(r.inp, r.catalog, r.layoutRules);
+  const zones = (r.zones ?? buildZones(r.inp, r.catalog, r.layoutRules));
   const wallCode = (w: number) => r.catalog.find((c) => c.panel_category === "wall_panel" && Number(c.width_mm) === w && Number(c.height_mm) === r.opt.stdHeight)?.panel_code ?? `WP-${w}-${r.opt.stdHeight}`;
   const wallPanels = wallPanelNumbers(r.result.faces, r.opt.stdHeight, wallCode);
   const areaOf = zoneAreas(zones, areasK);

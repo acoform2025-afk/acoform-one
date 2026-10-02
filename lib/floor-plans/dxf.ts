@@ -559,10 +559,17 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   //   • against a wall / another beam — no panel.
   // A beam no wider than the wall it sits in, running from wall to wall in the wall's line, is a lintel: its sides are
   // the wall's own panels above the opening (top panels), not beam side panels (Indian practice, e.g. Royce One BOM).
-  const inMP = (q: Pt, mp: MultiPolygon) => mp.some((poly) => inside(q, poly[0].slice(0, -1) as Pt[]) && !poly.slice(1).some((h) => inside(q, h.slice(0, -1) as Pt[])));
-  const slabPolys = slab.map((x) => x.p.pts);
-  const inSlab = (q: Pt) => !slabPolys.length || slabPolys.some((poly) => inside(q, poly));
-  const inOpening = (q: Pt) => openL.some((o) => inside(q, o.p.pts));
+  // point-in-shape tests with a bounding-box check first (this runs for every 10 cm of every beam side)
+  type BoxPoly = { b: number[]; pts: Pt[]; holes: Pt[][] };
+  const boxOf = (pts: Pt[]) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return [x0, y0, x1, y1]; };
+  const prep = (outer: Pt[], holes: Pt[][] = []): BoxPoly => ({ b: boxOf(outer), pts: outer, holes });
+  const inBP = (q: Pt, list: BoxPoly[]) => list.some((p) => q[0] >= p.b[0] && q[0] <= p.b[2] && q[1] >= p.b[1] && q[1] <= p.b[3] && inside(q, p.pts) && !p.holes.some((h) => inside(q, h)));
+  const solidBP = solidU.map((poly) => prep(poly[0].slice(0, -1) as Pt[], poly.slice(1).map((h) => h.slice(0, -1) as Pt[])));
+  const inMP = (q: Pt, _mp: MultiPolygon) => inBP(q, solidBP);
+  const slabBP = slab.map((x) => prep(x.p.pts));
+  const inSlab = (q: Pt) => !slabBP.length || inBP(q, slabBP);
+  const openBP = openL.map((o) => prep(o.p.pts));
+  const inOpening = (q: Pt) => inBP(q, openBP);
   for (const bp of beamParts) {
     const g = sized.get(bp.k)!;
     const off = 0.05 / u, bw = bp.b / 1000 / u;
@@ -589,8 +596,8 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
           }
           continue;
         }
-        // walk the face in 5 cm steps: parts against a wall / column / crossing beam need no panel
-        const steps = Math.max(1, Math.ceil((L * u) / 0.05)), stepL = (L * u) / steps;
+        // walk the face in 10 cm steps: parts against a wall / column / crossing beam need no panel
+        const steps = Math.max(1, Math.ceil((L * u) / 0.1)), stepL = (L * u) / steps;
         for (let k = 0; k < steps; k++) {
           const f = (k + 0.5) / steps; const q: Pt = [a[0] + (c[0] - a[0]) * f + n[0] * off, a[1] + (c[1] - a[1]) * f + n[1] * off];
           if (solidU.length && inMP(q, solidU)) continue;
