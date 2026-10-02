@@ -534,7 +534,11 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     return cover >= 0.5 * al;
   };
   const wallPolys: Pt[][] = [], parapetPolys: Pt[][] = [];
-  for (const poly of [...wallPaths.filter((p) => p.closed).map((p) => p.pts), ...(paired?.strips ?? [])]) (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
+  // thin walls built in block (option "walls under N mm in block"): closed wall outlines thinner than that are left out
+  const minWall = Number(opts.minWallMm) || 0;
+  const thinClosed = (poly: Pt[]) => { if (minWall <= 75) return false; const per = polyLength(poly, true); return per > 0 && ((2 * Math.abs(polyArea(poly))) / per) * u * 1000 < minWall - 5; };
+  for (const poly of wallPaths.filter((p) => p.closed).map((p) => p.pts)) { if (thinClosed(poly)) continue; (isParapet(poly) ? parapetPolys : wallPolys).push(poly); }
+  for (const poly of paired?.strips ?? []) (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
   const U = wallUnion([...wallPolys, ...colWalls]);
   const UP = parapetPolys.length ? wallUnion(parapetPolys) : null;
   let looseLen = 0, unpairedLen = 0; const loose: Pt[][] = [];
