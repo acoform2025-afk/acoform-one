@@ -45,9 +45,20 @@ export type Params = {
   extraPct?: number;        // add % on the typical-floor total (e.g. 10)
   beamDepthMm?: number;     // default beam depth (drawn beams and DXF beam layers)
   beamWidthMm?: number;     // default width of drawn beams
+  scope?: Scope;            // what is formed with this formwork (unset = full)
   minWallMm?: number;      // thinnest wall that is concrete (walls read from paired lines); thinner pairs are blockwork / finishes
   autoLintels?: boolean;    // beams / lintels over wall openings found on the drawing (default on)
   wallThkMm?: number;       // default thickness of drawn walls (3D view, wall tops)
+};
+
+/** Scope of the formwork order: full monolithic (Mivan) or a part of the structure. */
+export type Scope = "full" | "vertical" | "columns" | "framed" | "deck";
+export const SCOPES: Record<Scope, { label: string; what: string; parts: AreaItem["group"][] }> = {
+  full: { label: "Full (Mivan / monolithic)", what: "slab, walls, beams, columns, stairs, upstands", parts: ["slab", "deduct", "edge", "wall", "opening", "column", "beam", "loft", "extra"] },
+  vertical: { label: "Vertical only", what: "walls and columns (deck by others)", parts: ["wall", "opening", "column"] },
+  columns: { label: "Columns only", what: "columns", parts: ["column"] },
+  framed: { label: "Deck + beams + columns", what: "slab, beams, columns, stairs (walls in blockwork)", parts: ["slab", "deduct", "edge", "column", "beam", "loft", "extra"] },
+  deck: { label: "Deck + beams", what: "slab, beams, stairs", parts: ["slab", "deduct", "edge", "beam", "loft", "extra"] },
 };
 
 /** One line of the formwork area list (like an "estimate FM area list"). */
@@ -199,7 +210,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
   const minOpen = rules.minOpeningM2;
 
   let slabArea = 0, slabPer = 0, openArea = 0, openPer = 0, wallCentre = 0, wallFaces = 0, wallArea = 0, wallTopDrawn = 0;
-  let colCount = 0, colPerimeter = 0, colFoot = 0, colArea = 0, beamArea = 0, loftArea = 0;
+  let colCount = 0, colPerimeter = 0, colFoot = 0, colArea = 0, beamArea = 0, loftArea = 0, lintelAuto = 0;
   const sizes = new Map<string, number>();
   const addSize = (wm: number, dm: number, q: number) => {
     const a = Math.round(Math.min(wm, dm) * 1000 / 5) * 5, b = Math.round(Math.max(wm, dm) * 1000 / 5) * 5;
@@ -299,7 +310,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
       // aluminium formwork: every opening in a wall line gets a beam / lintel up to the slab — both sides measured
       const dMm = Number(t.params.beamDepthMm) || 600, side = Math.max(0, dMm / 1000 - slab), L2 = 2 * auto.gapSpan;
       const a = L2 * side;
-      beamArea += a;
+      beamArea += a; lintelAuto += a;
       items.push({ code: code("B"), group: "beam", label: `Beams over ${auto.gapCount ?? ""} wall openings (auto)`, calc: `2 × ${n2(auto.gapSpan)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
     }
     for (const g of auto.beamSized ?? []) {
@@ -369,9 +380,24 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     drop((i) => i.group === "beam"); beamArea = a;
     if (a > 0) items.push({ code: "B1", group: "beam", label: "Beam length (entered)", calc: `${n2(oBeam)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
   }
+  // scope of the order: parts not formed with this formwork are left out (walls in blockwork: no wall tops off the
+  // deck, and no auto beams over wall openings — those are lintels of the block walls)
+  const scope: Scope = t.params.scope && t.params.scope in SCOPES ? t.params.scope : "full";
+  const inc = new Set<AreaItem["group"]>(SCOPES[scope].parts);
+  if (scope !== "full") {
+    if (!inc.has("wall") && lintelAuto) { beamArea -= lintelAuto; drop((i) => i.group === "beam" && / wall openings \(auto\)/.test(i.label)); }
+    drop((i) => !inc.has(i.group));
+    if (!inc.has("wall")) { wallArea = 0; wallFaces = 0; wallCentre = 0; }
+    if (!inc.has("column")) { colArea = 0; colCount = 0; colPerimeter = 0; }
+    if (!inc.has("beam")) beamArea = 0;
+    if (!inc.has("extra")) extraArea = 0;
+    if (!inc.has("loft")) loftArea = 0;
+    if (!inc.has("slab")) { slabArea = 0; openArea = 0; slabPer = 0; openPer = 0; }
+    items.push({ code: "SC", group: inc.has("extra") ? "extra" : [...inc][0], label: `Scope: ${SCOPES[scope].label} — ${SCOPES[scope].what}`, calc: "other parts left out", area: 0 });
+  }
   // wall tops: typed in, else from the walls (drawn walls + merged DXF wall outlines)
-  const wallTop = t.params.wallTopM2 != null && String(t.params.wallTopM2) !== "" ? Math.max(0, Number(t.params.wallTopM2) || 0) : rules.deductWallTops ? wallTopDrawn + (auto?.wallTopArea ?? 0) : 0;
-  if (!rules.deductColumnTops) colFoot = 0;
+  const wallTop = !inc.has("wall") ? 0 : t.params.wallTopM2 != null && String(t.params.wallTopM2) !== "" ? Math.max(0, Number(t.params.wallTopM2) || 0) : rules.deductWallTops ? wallTopDrawn + (auto?.wallTopArea ?? 0) : 0;
+  if (!rules.deductColumnTops || !inc.has("slab")) colFoot = 0;
   if (wallTop) items.push({ code: "WT", group: "deduct", label: "Wall tops", calc: `− ${n2(wallTop)} m²`, area: -wallTop });
   if (colFoot) items.push({ code: "CT", group: "deduct", label: "Column tops", calc: `− ${n2(colFoot)} m²`, area: -colFoot });
   const extraPct = rules.extraPct;

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
+  computeTotals, emptyTakeoff, SCOPES, type Scope, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
 import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
@@ -863,6 +863,13 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
             </button>
           ) : null}
           <OverrideBox t={t} totals={drawnTotals} canEdit={canEdit} update={update} />
+          <label className="mt-2 flex flex-col gap-1 text-xs">
+            <span className="uppercase tracking-wide text-graphite-500">Scope of the order</span>
+            <select disabled={!canEdit} value={t.params.scope ?? "full"} onChange={(e) => update((p) => ({ ...p, params: { ...p.params, scope: e.target.value as Scope } }))}
+              className="rounded border border-graphite-700 bg-graphite-950 px-2 py-1.5 text-sm text-graphite-100">
+              {(Object.keys(SCOPES) as Scope[]).map((k) => <option key={k} value={k}>{SCOPES[k].label} — {SCOPES[k].what}</option>)}
+            </select>
+          </label>
           <div className="mt-2 grid grid-cols-3 gap-2">
             <Field label="Wall thk (mm)"><NumInput value={t.params.wallThkMm ?? 150} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, wallThkMm: v } }))} /></Field>
             <Field label="Beam width (mm)"><NumInput value={t.params.beamWidthMm ?? 200} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, beamWidthMm: v } }))} /></Field>
