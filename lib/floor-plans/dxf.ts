@@ -571,6 +571,17 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,
+    // sunk slabs (toilets, balconies): their edge is formed with drop (suspended) formwork
+    sunk: (() => {
+      const out: { depth: number; perimeter: number; area: number }[] = [];
+      const sl = model.paths.filter((p) => /sunk|降板|下沉|吊模/i.test(p.layer) && (!keep || keep(p)));
+      const byL = new Map<string, DxfPath[]>(); for (const p of sl) (byL.get(p.layer) ?? byL.set(p.layer, []).get(p.layer)!).push(p);
+      for (const [layer, ps] of byL) {
+        const depth = Number(layer.match(/(\d{2,3})\s*mm/i)?.[1] ?? layer.match(/(\d{2,3})/)?.[1] ?? 0);
+        for (const r of closedLoops(ps, tol)) { const a = Math.abs(polyArea(r)) * u2; if (a >= 0.5) out.push({ depth, perimeter: polyLength(r, true) * u, area: a }); }
+      }
+      return out;
+    })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
     ...(() => { const s = stairClusters(model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)/i.test(p.layer) && (!keep || keep(p))), u); return { stairCount: s.length, stairBoxes: s }; })(),
     ...(() => { const g = wallGaps(U.rings, u); return { gapSpan: g.reduce((s, x) => s + x.span, 0), gapCount: g.length, gaps: g.map((x) => ({ a: x.a, b: x.b, span: x.span, thk: x.thk })) }; })(),

@@ -28,10 +28,10 @@ export type Fit = { panels: number[]; filler: number };
 export type ColumnLayout = { code: string; w: number; d: number; h: number; qty: number; round: boolean; faceW: Fit; faceD: Fit; top: number; clamps: number };
 export type BeamLayout = { code: string; length: number; b: number; d: number; side: number; sides: number; bottom: boolean; pieces: number[]; props: number };
 export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number };
-export type PanelOptions = { rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
+export type PanelOptions = { sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
-export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "stair" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
-export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo };
+export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
+export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo; set?: "column" };
 export type PanelResult = {
   bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[]; columns: ColumnLayout[]; beams: BeamLayout[]; stairs: StairLayout[];
   summary: { specials: { types: number; pcs: number; area: number }; panelArea: number; weight: number; accessoryWeight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
@@ -150,12 +150,12 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
         if (rest >= 50) add(`col:CT-${w}-${rest}`, { code: `CT-${w}-${rest}`, description: `Column top above the first pour (${rest} mm, cast with the slab)`, group: "wall-top", w, h: rest, custom: !sysStd }, 1);
       }
       if (leftC > 0) add(`col:CF-${leftC}-${first}`, { code: `CF-${leftC}-${first}`, description: "Column filler (custom width)", group: "column", w: leftC, h: first, custom: true }, 1);
-      layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: leftC, top: rest, geo: f.geo });
+      layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: leftC, top: rest, geo: f.geo, set: f.set });
       continue;
     }
     const left = fit.left < tol ? 0 : Math.round(fit.left / 5) * 5;   // small gaps are taken up in the joints
     const top = Math.max(0, Math.round(f.height - o.stdHeight));
-    layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo });
+    layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo, set: f.set });
     // ACOFORM RK panels: a wall a little taller than the standard panel (25 … 175 mm, 25 steps) gets one W(RK) panel
     // (WRA 25, WRB 50 … WRG 175) instead of a standard panel + a wall-top piece
     const rk = !sysStd && top > 0 && top <= 175 && top % 25 === 0 ? `WR${"ABCDEFG"[top / 25 - 1]}` : null;
@@ -403,6 +403,15 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     byCode.set(`ST:${st.code}`, { code: st.code, description: `${st.label} — staircase formwork set (custom, see typical stair modulation)`, group: "stair", w: 0, h: 0, qty: 1, area: st.area, weight: st.area * o.kgPerM2, custom: true, unit: "set" });
   }
 
+  // ---- drop (suspended) formwork round sunk slabs: edge plates of the drop depth in 1200 lengths, hung on square tubes
+  let dropTube = 0;
+  for (const sk of o.sunk ?? []) {
+    if (!(sk.depth >= 25 && sk.perimeter > 0)) continue;
+    const n = Math.ceil((sk.perimeter * 1000) / 1200);
+    add(`SK-${sk.depth}-1200`, { code: `SK-${sk.depth}-1200`, description: `Drop form plate ${sk.depth} high (sunk slab edge)`, group: "drop", w: sk.depth, h: 1200, custom: false }, n);
+    dropTube += sk.perimeter;
+  }
+
   // ======== accessories (elaborated) — every line says how it was counted ========
   const accW = (re: RegExp, d: number) => { const p = item("accessory", re); return { code: p?.panel_code, kg: p ? Number(p.weight_kg) : d }; };
   const acc = (key: string, sub: string, code: string, description: string, qty: number, kg: number, basis: string, unit = "nos") => {
@@ -465,6 +474,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   acc("SPROP", "Staircase", "PROP-ST", "Stair soffit prop with swivel head", stairProps, 14, "per flight: (slope ÷ 1.2 + 1) × (width ÷ 1.2 + 1) + landing");
   acc("RBR", "Staircase", "RBR", "Riser bracket", riserBrackets, 0.8, "two per riser shutter");
 
+  if (dropTube > 0) acc("FT-DROP", "Kicker & edges", "FT-50x50", "Square tube for drop forms (hung across the sunk slab)", Math.ceil(dropTube * 1.1 * 10) / 10, 2.1, `sunk slab edges ${dropTube.toFixed(1)} m + 10 %`, "m");
+
   // 5 · safety & site
   if (outer > 0) {
     const br = Math.ceil(outer / 1.5);
@@ -490,7 +501,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   }
 
   if (ends) warnings.push(`${ends} short faces (≤ ${endMax} mm) treated as wall ends (stop-ends).`);
-  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "stair", "accessory"];
+  const order: BomRow["group"][] = ["wall", "wall-top", "filler", "end", "corner", "column", "beam", "deck", "stair", "drop", "accessory"];
   const SUBS = ["Deck support", "Joints", "Ties", "Wall alignment", "Kicker & edges", "Columns & beams", "Staircase", "Safety", "Tools & consumables"];
   // weights of made-to-size pieces (and items without a catalogue weight) from the ACOFORM standard sections in Al 6061
   for (const r of byCode.values()) {

@@ -92,6 +92,7 @@ export type DxfAuto = {
   wallRings?: Pt[][];                               // merged wall outlines (drawing units) — every edge is a wall face
   wallLoose?: Pt[][];                               // wall lines not part of an outline (drawing units)
   columnWallEdges?: string[];                       // "ring:edge" of wall faces drawn on column layers (lift cores, shear walls)
+  sunk?: { depth: number; perimeter: number; area: number }[];   // sunk slab outlines: drop depth mm, edge m, area m²
   wallSeparate?: number[];                          // wall outline rings inside a "separate set" area (core cast separately)
   separateWall?: { faces: number; cols: number; colPerimeter: number };   // what was left out of the typical set, m
   wallOpenings?: { ring: number; edge: number; t0: number; t1: number; door: boolean; thk: number }[];   // door / window stretches of wall faces (drawing units along wallRings[ring] edge `edge`)

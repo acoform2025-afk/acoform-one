@@ -11,7 +11,7 @@ import { PRESETS, describeLayoutRules } from "@/lib/design-engine/layout-rules";
 export const metadata = { title: "Panel layout & BOM" };
 export const dynamic = "force-dynamic";
 
-const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", column: "Column panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", stair: "Staircase panels", accessory: "Props & accessories (elaborated)" };
+const GROUP: Record<string, string> = { wall: "Wall panels", "wall-top": "Wall top panels", column: "Column panels", filler: "Fillers / specials", end: "Wall ends", corner: "Corners", deck: "Deck panels", beam: "Beam panels", stair: "Staircase panels", drop: "Drop (suspended) formwork — sunk slabs", accessory: "Props & accessories (elaborated)" };
 const n0 = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -55,6 +55,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
         <div className="flex flex-wrap gap-2">
           <a href={`/floor-plans/${id}/panels/drawing?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:bg-graphite-800"><Download className="size-3.5" />Layout drawing PDF</a>
           <a href={`/floor-plans/${id}/panels/modulation?${qs}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />Modulation drawings PDF (walls, columns, beams, stairs)</a>
+          <Link href={`/floor-plans/${id}/panels/package?${qs}`} className="inline-flex items-center gap-1.5 rounded-md bg-graphite-100 px-3 py-2 text-xs font-semibold text-graphite-950 hover:opacity-90">Design package (all drawings &amp; lists)</Link>
           <Link href={`/floor-plans/${id}/panels/3d?${qs}`} className="inline-flex items-center gap-1.5 rounded-md bg-signal-green px-3 py-2 text-xs font-medium text-white hover:opacity-90">3D model</Link>
           <Link href={`/floor-plans/${id}/panels/check?${qs}`} className="inline-flex items-center gap-1.5 rounded-md bg-signal-red px-3 py-2 text-xs font-medium text-white hover:opacity-90">Design check (clashes)</Link>
           <Link href={`/floor-plans/${id}/panels/stock?${qs}`} className="inline-flex items-center gap-1.5 rounded-md border border-graphite-700 px-3 py-2 text-xs font-medium text-graphite-200 hover:border-brand-orange">Stock check (stock first)</Link>

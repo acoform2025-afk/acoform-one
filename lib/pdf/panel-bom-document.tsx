@@ -13,7 +13,7 @@ Font.register({
 Font.registerHyphenationCallback((w) => [w]);
 const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 const ORANGE = "#ef9d2f", GRAY = "#6b6d68";
-const GROUP: Record<string, string> = { wall: "WALL PANELS", "wall-top": "WALL TOP PANELS", column: "COLUMN PANELS", filler: "FILLERS / SPECIALS", end: "WALL ENDS", corner: "CORNERS", deck: "DECK PANELS", beam: "BEAM PANELS", stair: "STAIRCASE PANELS", accessory: "PROPS & ACCESSORIES" };
+const GROUP: Record<string, string> = { wall: "WALL PANELS", "wall-top": "WALL TOP PANELS", column: "COLUMN PANELS", filler: "FILLERS / SPECIALS", end: "WALL ENDS", corner: "CORNERS", deck: "DECK PANELS", beam: "BEAM PANELS", stair: "STAIRCASE PANELS", drop: "DROP FORMWORK (SUNK SLABS)", accessory: "PROPS & ACCESSORIES" };
 const n0 = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const n2 = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 

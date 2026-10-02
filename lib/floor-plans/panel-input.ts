@@ -250,5 +250,5 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   // beams and columns in the slab (framed buildings): the deck stops at them (beam bottoms are their own panels)
   const zoneBeams: Pt[][] = frame ? [...(auto?.beamRings ?? []), ...(auto?.columnRings ?? [])].map((r) => r.map((q) => toM(frame!.toPx(q)))) : [];
   const zoneGaps = frame && auto?.beamSized?.length ? [] : frame && auto?.gaps ? auto.gaps.map((gp) => ({ a: toM(frame!.toPx(gp.a)), b: toM(frame!.toPx(gp.b)), thk: gp.thk ?? (t.params.wallThkMm ?? 150) / 1000 })) : [];
-  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams };
+  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, sunk: auto?.sunk ?? [] };
 }

@@ -188,3 +188,13 @@ returns and repairs.
 - New "Separate set" tool on the measuring screen (ShapeKind `separate`, DXF plans): draw round a core; `dxfAuto(..., separate)` leaves its wall rings (`wallSeparate`) and columns out of the typical floor; the area list shows what was left out (`separateWall`). Motian with the core marked: wall panels 689 m² vs their 720 (−4 %).
 - Column-layer outlines that are not columns (lift cores, L-shaped shear walls) are flagged edge by edge (`columnWallEdges` → `Face.set = "column"`); with the rule "columns cast first" they become column-set panels to the first pour + CT tops with the slab.
 - Doors / windows drawn inside walls (door / window layers, kept apart in `model.dw`): `wallOpeningsOf` finds the stretch of each wall face they cover → faces are cut (pieces over / under the opening, reveals) and the area take-off deducts them (`auto.wallOpenings`).
+
+## Step 3 — design package (Motian-style output)
+- Panels page → **Design package (all drawings & lists)** → `/floor-plans/[id]/panels/package`: the 10 package items in Motian order, an "areas" box (floor split into A1…Ak by k-means of the zones) and one ZIP button.
+- Excel/CSV lists: `lib/floor-plans/package.ts` + `package-build.ts`, served by `panels/package-files/route.ts?file=main|numbering|production|walers|accessories|packing|check|all&areas=4`.
+  - 03 main list by area (area columns + whole floor), 02 numbering, 04 special-panel production order, 05 walers (rows = floor(h / tieV), max 6 m; flat-tie both faces, tie-rod one face), 08 accessories (loss % + support-head sets), 09 packing by zone, 10 design check.
+- Assembly plans PDF (A3, 6 sheets): `lib/pdf/assembly-document.tsx`, route `panels/assembly/route.tsx` (wall panels, corners/soffit corners/kickers, beams + type table, deck, mid beams + prop heads, notes).
+- Sunk / drop slabs: layers matching sunk|降板|下沉|吊模 → `auto.sunk` → BOM group "drop" (SK-{depth}-1200 + FT-DROP tube).
+- FaceLayout now carries `set: "column"`.
+- Tested: Royce (tierod) 7 lists + PDF 208 KB; Motian (flattie + core separate) OK; Gorwa regression unchanged (deck 589).
+- Not done yet: odd/even floor lists (needs two plans).
