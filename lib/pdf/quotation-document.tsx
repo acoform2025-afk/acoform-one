@@ -181,7 +181,48 @@ function GstAndTotal({ q }: { q: PdfQuotation }) {
   );
 }
 
+/** "Title; Block A: 4675 Sqm; Block C: 8810 Sqm" → title + one line per block (only when the blocks add up to the total area). */
+export function quickBlocks(desc: string | null, total: number | null): { title: string; blocks: { name: string; area: number }[] } {
+  const parts = (desc ?? "").split(/\n|;/).map((x) => x.trim()).filter(Boolean);
+  const blocks: { name: string; area: number }[] = []; const rest: string[] = [];
+  for (const p of parts) {
+    const m = p.match(/^(.{1,60}?)\s*[:=–-]\s*([\d,]+(?:\.\d+)?)\s*(sq\.?\s*m(?:tr)?s?|sqm|m2|m²)?$/i);
+    if (m) blocks.push({ name: m[1].trim(), area: Number(m[2].replace(/,/g, "")) }); else rest.push(p);
+  }
+  const sum = blocks.reduce((a, b) => a + b.area, 0);
+  if (blocks.length < 2 || !total || Math.abs(sum - Number(total)) > 0.5) return { title: desc ?? "", blocks: [] };
+  return { title: rest.join(" · "), blocks };
+}
+
 function QuickSchedule({ q }: { q: PdfQuotation }) {
+  const qb = quickBlocks(q.schedule_description, q.total_area_sqm);
+  if (qb.blocks.length) {
+    const rate = Number(q.quick_rate_per_sqm) || 0;
+    return (
+      <View style={s.table} wrap={false}>
+        <View style={s.thead}>
+          <Text style={[s.cell, { width: "8%" }, s.center]}>Sr.</Text>
+          <Text style={[s.cell, { width: "44%" }]}>Description</Text>
+          <Text style={[s.cell, { width: "13%" }, s.right]}>Qty (Sqm)</Text>
+          <Text style={[s.cell, { width: "13%" }, s.right]}>Rate (₹/Sqm)</Text>
+          <Text style={[s.cell, { width: "22%" }, s.right]}>Amount</Text>
+        </View>
+        {qb.blocks.map((b, i) => (
+          <View key={i} style={s.tr}>
+            <Text style={[s.cell, { width: "8%" }, s.center]}>{i + 1}</Text>
+            <View style={[s.cell, { width: "44%" }]}>
+              <Text style={s.bold}>{qb.title || "Acoform Aluminium Formwork"} — {b.name}</Text>
+              <Text style={s.small}>{SET_LABEL[formworkKind(q.formwork_type)]} · measured on {q.formwork_type === "vertical" ? "vertical face" : "floor plate"} area</Text>
+            </View>
+            <Text style={[s.cell, { width: "13%" }, s.right]}>{num(b.area)}</Text>
+            <Text style={[s.cell, { width: "13%" }, s.right]}>{num(rate, 0)}</Text>
+            <Text style={[s.cell, { width: "22%" }, s.right]}>{rupee(b.area * rate)}</Text>
+          </View>
+        ))}
+        <GstAndTotal q={q} />
+      </View>
+    );
+  }
   return (
     <View style={s.table} wrap={false}>
       <View style={s.thead}>

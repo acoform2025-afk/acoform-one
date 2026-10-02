@@ -51,7 +51,7 @@ export function DocumentDetails({ q, editable, defaultOpen = false }: { q: Q; ed
             <L label="Project / site name"><input name="projectName" defaultValue={q.project_name ?? ""} disabled={d} className={input} /></L>
             <L label="City / address" wide><input name="customerAddress" defaultValue={q.customer_address ?? ""} placeholder="Ahmedabad, Gujarat" disabled={d} className={input} /></L>
             <L label="Price schedule description" wide>
-              <input name="scheduleDescription" defaultValue={q.schedule_description ?? ""} placeholder="Acoform Aluminium Formwork – A Wing" disabled={d} className={input} />
+              <input name="scheduleDescription" defaultValue={q.schedule_description ?? ""} placeholder="Acoform Aluminium Formwork – A Wing   (several blocks: Title; Block A: 4675 Sqm; Block C: 8810 Sqm)" disabled={d} className={input} />
             </L>
             {q.quotation_type === "quick" && (
               <L label="Quantity (Sqm)"><input name="areaSqm" type="number" step="0.01" min="0" defaultValue={q.total_area_sqm ?? ""} disabled={d} className={input} /></L>
