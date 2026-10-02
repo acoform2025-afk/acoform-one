@@ -81,7 +81,7 @@ export type DxfAuto = {
   openingArea: number; openingPerimeter: number;
   wallLineLength: number;                           // total length of lines on wall layers
   beamLineLength?: number;                          // total length of lines on beam layers without a size (= beam side length)
-  beamSized?: { b: number; d: number; len: number; bottom: number; count: number }[];   // beams sized by their layer name: b, d mm; len m (clear of walls / columns); bottom m²
+  beamSized?: { b: number; d: number; len: number; bottom: number; count: number; inner?: number; outer?: number; lintel?: number }[];   // inner / outer: side-face length (m) with / without slab beyond; lintel: length of beams that are wall lintels   // beams sized by their layer name: b, d mm; len m (clear of walls / columns); bottom m²
   beamRings?: Pt[][];                               // outlines of the sized beams (drawing units) — deck zones stop at them
   columnRings?: Pt[][];                             // outlines of the columns (drawing units)
   columns: { w: number; d: number; perimeter: number; area: number; round?: boolean }[];
@@ -98,6 +98,7 @@ export type DxfAuto = {
   wallOpenings?: { ring: number; edge: number; t0: number; t1: number; door: boolean; thk: number }[];   // door / window stretches of wall faces (drawing units along wallRings[ring] edge `edge`)
   stairCount?: number;                              // staircases found on stair layers
   stairBoxes?: [number, number, number, number][];  // drawing units
+  beamRingDepth?: number[];                         // mm, depth of each beam ring
   gapSpan?: number;                                 // openings in wall lines (door / window / passage widths), m
   gapCount?: number;
   gaps?: { a: Pt; b: Pt; span: number; thk?: number }[];  // a, b in drawing units; span, thk in m
@@ -290,9 +291,14 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
       items.push({ code: code("B"), group: "beam", label: `Beams over ${auto.gapCount ?? ""} wall openings (auto)`, calc: `2 × ${n2(auto.gapSpan)} m × (${n3(dMm / 1000)} − ${n3(slab)}) m`, area: a });
     }
     for (const g of auto.beamSized ?? []) {
-      const a = 2 * g.len * Math.max(0, g.d / 1000 - slab);
+      const h = Math.max(0, g.d / 1000 - slab);
+      const faces = g.inner != null;
+      const a = faces ? (g.inner ?? 0) * h + (g.outer ?? 0) * (g.d / 1000) + 2 * (g.lintel ?? 0) * h : 2 * g.len * h;
       beamArea += a;
-      items.push({ code: code("B"), group: "beam", label: `Beams ${g.b}×${g.d} (${g.count} on the drawing)`, calc: `2 × ${n2(g.len)} m × (${n3(g.d / 1000)} − ${n3(slab)}) m · bottom ${n2(g.bottom)} m² in the slab`, area: a });
+      const calc = faces
+        ? `${n2(g.inner ?? 0)} m inner faces × ${n3(h)}${g.outer ? ` + ${n2(g.outer)} m outer faces × ${n3(g.d / 1000)}` : ""}${g.lintel ? ` + 2 × ${n2(g.lintel)} m lintels × ${n3(h)}` : ""} m · bottom ${n2(g.bottom)} m² in the slab`
+        : `2 × ${n2(g.len)} m × (${n3(g.d / 1000)} − ${n3(slab)}) m · bottom ${n2(g.bottom)} m² in the slab`;
+      items.push({ code: code("B"), group: "beam", label: `Beams ${g.b}×${g.d} (${g.count} on the drawing)`, calc, area: a });
     }
     if (auto.beamLineLength) {
       const dMm = Number(t.params.beamDepthMm) || 600, a = auto.beamLineLength * Math.max(0, dMm / 1000 - slab);

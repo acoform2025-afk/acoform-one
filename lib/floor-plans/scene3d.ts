@@ -13,6 +13,8 @@ export type Panel3 = { p: [number, number, number][]; k: "std" | "top" | "fill" 
 export type Scene3 = {
   H: number; slab: number; box: [number, number, number, number];
   walls: Poly2[]; slabPoly: Poly2[]; beams: { a: Pt; b: Pt; w: number; d: number }[];
+  cols: Pt[][]; beamSolids: { ring: Pt[]; d: number }[];
+  steps: { c: [number, number, number]; s: [number, number, number]; rot: number }[];   // stair treads / landings as boxes (centre, size x·y·z, rotation about y)
   panels: Panel3[]; mb: [Pt, Pt][]; zones: { code: string; at: Pt }[]; stats: { wall: number; deck: number; special: number };
   issues?: { id: string; sev: "error" | "warn"; text: string; at: Pt; y: number }[];
 };
@@ -23,6 +25,7 @@ const strip = (m: MultiPolygon): Poly2[] => m.map((poly) => poly.map((r) => r.sl
 export function buildScene3(o: {
   zoneWalls: Pt[][]; zoneGaps: { a: Pt; b: Pt; thk: number }[]; decks: { pts: Pt[]; holes: Pt[][] }[];
   zones: Zone[]; faces: FaceLayout[]; mpp: number; floorHeight: number; slabMm: number; stdHeight: number; beamDepthMm: number;
+  cols?: Pt[][]; beams3?: { ring: Pt[]; d: number }[]; stairs?: [number, number, number, number][];
 }): Scene3 {
   const H = Math.max(0.5, o.floorHeight - o.slabMm / 1000), slab = o.slabMm / 1000;
   // walls: even-odd combination of the merged wall rings → proper polygons with holes
@@ -66,6 +69,27 @@ export function buildScene3(o: {
     panels.push({ p: [[p.x0, y, p.y0], [p.x1, y, p.y0], [p.x1, y, p.y1], [p.x0, y, p.y1]], k: p.custom ? "dspec" : "deck", c: `${p.no} · ${p.code}` });
     deckN++; if (p.custom) special++;
   }
+  // staircases: a dog-leg stair in each stair box — flight 1 up one half of the box, landing across the far end,
+  // flight 2 back down the other half to the floor above (risers ≤ 170 mm, tread 270 mm)
+  const steps: Scene3["steps"] = [];
+  const FH = o.floorHeight;
+  for (const [x0, y0, x1, y1] of o.stairs ?? []) {
+    const along = x1 - x0 >= y1 - y0;                        // flights run along the long side of the box
+    const Lb = along ? x1 - x0 : y1 - y0, Wb = along ? y1 - y0 : x1 - x0;
+    if (Lb < 1.5 || Wb < 1) continue;
+    const per = Math.max(2, Math.ceil(FH / 2 / 0.17)), rise = FH / 2 / per;
+    const land = Math.min(1.5, Math.max(0.9, Wb / 2));
+    const tread = Math.min(0.3, (Lb - land) / Math.max(1, per - 1));
+    const half = Wb / 2;
+    const P = (u: number, v: number): [number, number] => (along ? [x0 + u, y0 + v] : [x0 + v, y0 + u]);
+    const box = (u: number, v: number, du: number, dv: number, yb: number, yt: number) => {
+      const [cx, cz] = P(u + du / 2, v + dv / 2);
+      steps.push({ c: [cx, (yb + yt) / 2, cz], s: along ? [du, yt - yb, dv] : [dv, yt - yb, du], rot: 0 });
+    };
+    for (let k = 0; k < per - 1; k++) box(k * tread, 0, tread, half, 0, (k + 1) * rise);                       // flight 1
+    box(Lb - land, 0, land, Wb, FH / 2 - 0.15, FH / 2);                                                         // mid landing
+    for (let k = 0; k < per - 1; k++) box(Lb - land - (k + 1) * tread, half, tread, half, FH / 2, FH / 2 + (k + 1) * rise);   // flight 2
+  }
   const xs: number[] = [], ys: number[] = [];
   for (const poly of slabM) for (const [x, y] of poly[0]) { xs.push(x); ys.push(y); }
   for (const poly of walls) for (const [x, y] of poly[0]) { xs.push(x); ys.push(y); }
@@ -75,6 +99,7 @@ export function buildScene3(o: {
   return {
     H, slab, box, walls: strip(walls), slabPoly: strip(slabM),
     beams: o.zoneGaps.map((g) => ({ a: g.a, b: g.b, w: Math.max(0.1, g.thk), d: Math.max(slab, o.beamDepthMm / 1000) })),
+    cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps,
     panels, mb: o.zones.flatMap((z) => z.mb), zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
     stats: { wall: wallN, deck: deckN, special },
   };

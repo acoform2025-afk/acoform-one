@@ -498,8 +498,10 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   for (const c of colAll) if (c.isCol) solid.push([closeRing(c.p.pts)]);
   let solidU: MultiPolygon = [];
   try { solidU = solid.length ? polygonClipping.union(solid[0] as Polygon, ...(solid.slice(1) as Polygon[])) : []; } catch { solidU = []; }
-  const sized = new Map<string, { b: number; d: number; len: number; bottom: number; count: number }>();
+  const sized = new Map<string, { b: number; d: number; len: number; bottom: number; count: number; inner?: number; outer?: number; lintel?: number }>();
   const beamRings: Pt[][] = [];
+  const beamRingDepth: number[] = [];   // mm, one per beam ring (3D model)
+  const beamParts: { k: string; b: number; d: number; ring: Pt[]; polys: Pt[][]; bb: number[] }[] = [];
   let unsizedLen = 0;
   // a size written next to the beam ("B:125X750H", "IVP:100X375H", "B1 230x450") when the layer has none
   const sizeTexts = (model.texts ?? []).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
@@ -521,15 +523,16 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       const wEst = (2 * Math.abs(polyArea(r)) * u2) / Math.max(1e-9, polyLength(r, true) * u) * 1000;
       const sz = lsz ?? sizeNear(r, wEst);
       if (!sz || wEst < 0.4 * sz.b || wEst > 1.8 * sz.b) { unsizedLen += polyLength(r, true) * u; continue; }
-      beamRings.push(r);
+      beamRings.push(r); beamRingDepth.push(sz.d);
       let clearA = Math.abs(polyArea(r)) * u2;
-      try { if (solidU.length) { const diff = polygonClipping.difference([closeRing(r)] as Polygon, solidU); clearA = diff.reduce((s2, poly) => s2 + Math.abs(polyArea(poly[0].slice(0, -1) as Pt[])) - poly.slice(1).reduce((h, q) => h + Math.abs(polyArea(q.slice(0, -1) as Pt[])), 0), 0) * u2; } } catch { /* keep the full area */ }
+      let polys: Pt[][] = [r];
+      try { if (solidU.length) { const diff = polygonClipping.difference([closeRing(r)] as Polygon, solidU); polys = diff.map((poly) => poly[0].slice(0, -1) as Pt[]); clearA = diff.reduce((s2, poly) => s2 + Math.abs(polyArea(poly[0].slice(0, -1) as Pt[])) - poly.slice(1).reduce((h, q) => h + Math.abs(polyArea(q.slice(0, -1) as Pt[])), 0), 0) * u2; } } catch { /* keep the full area */ }
       const k = `${sz.b}x${sz.d}`;
-      const g = sized.get(k) ?? { b: sz.b, d: sz.d, len: 0, bottom: 0, count: 0 };
+      beamParts.push({ k, b: sz.b, d: sz.d, ring: r, polys, bb: [Math.min(...r.map((q) => q[0])), Math.min(...r.map((q) => q[1])), Math.max(...r.map((q) => q[0])), Math.max(...r.map((q) => q[1]))] });
+      const g = sized.get(k) ?? { b: sz.b, d: sz.d, len: 0, bottom: 0, count: 0, inner: 0, outer: 0, lintel: 0 };
       g.len += clearA / (sz.b / 1000); g.bottom += clearA; g.count++; sized.set(k, g);
     }
   }
-  const beamSized = [...sized.values()].sort((a, b) => b.len - a.len);
 
   // slab: slab layer outlines; if none, the outer face of the walls (with columns and beams: a framed building's
   // slab runs out to its beams)
@@ -550,12 +553,70 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
   }
 
+  // beam faces: each long side of the clear part of a beam is
+  //   • inner — slab on that side: side panel (depth − slab)
+  //   • outer — no slab beyond it (slab edge, shaft, stair opening): full-depth side panel
+  //   • against a wall / another beam — no panel.
+  // A beam no wider than the wall it sits in, running from wall to wall in the wall's line, is a lintel: its sides are
+  // the wall's own panels above the opening (top panels), not beam side panels (Indian practice, e.g. Royce One BOM).
+  const inMP = (q: Pt, mp: MultiPolygon) => mp.some((poly) => inside(q, poly[0].slice(0, -1) as Pt[]) && !poly.slice(1).some((h) => inside(q, h.slice(0, -1) as Pt[])));
+  const slabPolys = slab.map((x) => x.p.pts);
+  const inSlab = (q: Pt) => !slabPolys.length || slabPolys.some((poly) => inside(q, poly));
+  const inOpening = (q: Pt) => openL.some((o) => inside(q, o.p.pts));
+  for (const bp of beamParts) {
+    const g = sized.get(bp.k)!;
+    const off = 0.05 / u, bw = bp.b / 1000 / u;
+    for (const poly of bp.polys) {
+      if (poly.length < 3) continue;
+      let ax: Pt = [1, 0], best = 0;
+      for (let i = 0; i < poly.length; i++) { const a = poly[i], c = poly[(i + 1) % poly.length]; const L = Math.hypot(c[0] - a[0], c[1] - a[1]); if (L > best) { best = L; ax = [(c[0] - a[0]) / L, (c[1] - a[1]) / L]; } }
+      let inner = 0, outer = 0, endsOnWall = 0, ends = 0, lintelEnds = 0;
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], c = poly[(i + 1) % poly.length]; const L = Math.hypot(c[0] - a[0], c[1] - a[1]); if (L * u < 0.02) continue;
+        const dx = (c[0] - a[0]) / L, dy = (c[1] - a[1]) / L; const m: Pt = [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2];
+        let n: Pt = [-dy, dx]; if (inside([m[0] + n[0] * off * 0.2, m[1] + n[1] * off * 0.2], poly)) n = [dy, -dx];   // outward normal
+        const o: Pt = [m[0] + n[0] * off, m[1] + n[1] * off];
+        const side = Math.abs(dx * ax[0] + dy * ax[1]) > 0.9;
+        if (!side) {
+          ends++;
+          if (solidU.length && inMP(o, solidU)) {
+            endsOnWall++;
+            // same-width wall beyond this end: points just inside the beam's width are wall, just outside are not
+            const t: Pt = [dx, dy], hw = bw / 2;
+            const p1: Pt = [o[0] + t[0] * (hw - 0.03 / u), o[1] + t[1] * (hw - 0.03 / u)], p2: Pt = [o[0] - t[0] * (hw - 0.03 / u), o[1] - t[1] * (hw - 0.03 / u)];
+            const q1: Pt = [o[0] + t[0] * (hw + 0.06 / u), o[1] + t[1] * (hw + 0.06 / u)], q2: Pt = [o[0] - t[0] * (hw + 0.06 / u), o[1] - t[1] * (hw + 0.06 / u)];
+            if (inMP(p1, solidU) && inMP(p2, solidU) && !inMP(q1, solidU) && !inMP(q2, solidU)) lintelEnds++;
+          }
+          continue;
+        }
+        // walk the face in 5 cm steps: parts against a wall / column / crossing beam need no panel
+        const steps = Math.max(1, Math.ceil((L * u) / 0.05)), stepL = (L * u) / steps;
+        for (let k = 0; k < steps; k++) {
+          const f = (k + 0.5) / steps; const q: Pt = [a[0] + (c[0] - a[0]) * f + n[0] * off, a[1] + (c[1] - a[1]) * f + n[1] * off];
+          if (solidU.length && inMP(q, solidU)) continue;
+          if (beamParts.some((x) => x !== bp && q[0] >= x.bb[0] && q[0] <= x.bb[2] && q[1] >= x.bb[1] && q[1] <= x.bb[3] && inside(q, x.ring))) continue;
+          if (!inSlab(q) || inOpening(q)) outer += stepL; else inner += stepL;
+        }
+      }
+      if (ends >= 2 && lintelEnds >= 2) g.lintel = (g.lintel ?? 0) + (inner + outer) / 2;
+      else { g.inner = (g.inner ?? 0) + inner; g.outer = (g.outer ?? 0) + outer; }
+    }
+  }
+  const beamSized = [...sized.values()].sort((a, b) => b.len - a.len);
+
   // "separate set" areas drawn by the user (a core cast with its own formwork): their walls and columns are left out
   const inSep = (q: Pt) => separate.some((poly) => poly.length >= 3 && inside(q, poly));
   const wallSeparate = separate.length ? U.rings.map((r, i) => (r.filter((q) => inSep(q)).length * 2 > r.length ? i : -1)).filter((i) => i >= 0) : [];
   const sepFaces = wallSeparate.reduce((s2, i) => s2 + polyLength(U.rings[i], true), 0) * u;
   const sepCols = colAll.filter((c) => c.isCol && inSep(c.p.pts[0]));
-  const cols = colAll.filter((c) => c.isCol && !sepCols.includes(c)).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
+  // a column also drawn on a wall layer (or twice on column layers) is already in the wall outlines (its faces are laid out there): count it once
+  const wallClosed = [...wallPaths.filter((p) => p.closed && p.pts.length >= 3).map((p) => p.pts), ...colWalls];   // incl. a second outline of the same column on a column layer
+  const inWallOutline = (c: { p: DxfPath }) => {
+    const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]);
+    const m: Pt = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    return wallClosed.some((w) => inside(m, w)) && U.rings.some((r) => inside(m, r));
+  };
+  const cols = colAll.filter((c) => c.isCol && !sepCols.includes(c) && !inWallOutline(c)).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
   return {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
@@ -567,7 +628,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     wallSeparate, separateWall: { faces: sepFaces, cols: sepCols.length, colPerimeter: sepCols.reduce((s2, c) => s2 + c.perimeter, 0) },
     wallTopArea: U.area * u2,
     beamLineLength: unsizedLen,
-    beamSized, beamRings,
+    beamSized, beamRings, beamRingDepth,
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose,

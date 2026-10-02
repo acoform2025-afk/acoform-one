@@ -19,7 +19,7 @@ export type FaceGeo = { a: Pt; b: Pt; off: number };                            
 export type Face = { code: string; length: number; height: number; geo?: FaceGeo; part?: "above" | "below"; set?: "column" };   // part: short piece over a door/window or below a window sill
 export type OpeningCut = { kind: "door" | "window"; w: number; h: number; t: number };                        // mm, one per opening (for reveals)                 // mm
 export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };                     // metres
-export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean }; // mm
+export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean; inner?: number; outer?: number; lintel?: number }; // mm; inner / outer = side-face lengths with / without slab beyond (outer faces are full depth), lintel = length formed by the wall's top panels
 export type ColumnRun = { code: string; w: number; d: number; h: number; qty: number; round: boolean; perimeter: number };   // mm
 export type ElementRow = { kind: "column" | "beam" | "deck"; code: string; size: string; qty: number; area: number; detail: string };
 /** Staircase geometry (mm). `assumed` = typical dog-leg used when only an area allowance is known; `sets` = identical staircases. */
@@ -140,7 +140,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const panels = fit.panels;
     // lift cores / shear walls drawn on column layers, cast first with the columns: column set to the first pour,
     // the rest formed with the slab
-    if (f.set === "column" && R?.columnsSeparate && R.columnFirstCast > 0 && f.height > R.columnFirstCast) {
+    if (f.set === "column" && R?.columnsSeparate && R.coresWithColumns && R.columnFirstCast > 0 && f.height > R.columnFirstCast) {
       const first = R.columnFirstCast, rest = Math.round(f.height - first);
       const leftC = fit.left < tol ? 0 : Math.round(fit.left / 5) * 5;
       for (const w of panels) {
@@ -298,11 +298,16 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     byCode.set("PROP", { code: pr?.panel_code ?? "PROP", description: "Adjustable steel prop", group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (pr ? Number(pr.weight_kg) : 14), custom: false, unit: "nos" });
   }
   const faceLen = layouts.reduce((s, f) => s + f.length, 0);
-  if (faceLen && deckArea > 0) {
+  // the deck meets the top of every wall face, every inner beam side and every column face: a soffit corner runs along each
+  const beamScLen = beams.reduce((s, b) => s + (b.inner != null ? b.inner : b.bottom && b.b > 0 ? b.length * b.sides : 0), 0);
+  const colScLen = (o.columns ?? []).reduce((s, c) => s + c.perimeter * c.qty, 0);
+  if (faceLen + beamScLen + colScLen > 0 && deckArea > 0) {
     const scp = sysStd ? undefined : item("soffit_corner");
     const L = sysStd ? R!.soffitCornerLen : scp?.height_mm ?? 1200;
-    const sc = Math.ceil(faceLen / L);
-    add("SC", { code: scp?.panel_code ?? `SC-100-${L}`, description: "Soffit corner (top of wall faces)", group: "corner", w: scp?.width_mm ?? 100, h: L, custom: !scp }, sc, scp ? Number(scp.weight_kg) : undefined);
+    const w = scp?.width_mm ?? 100;
+    const n = [faceLen, beamScLen, colScLen].reduce((s2, len) => s2 + (len > 50 ? Math.ceil(len / L) : 0), 0);
+    const where = [faceLen > 50 ? `wall tops ${(faceLen / 1000).toFixed(1)} m` : "", beamScLen > 50 ? `beam sides ${(beamScLen / 1000).toFixed(1)} m` : "", colScLen > 50 ? `column faces ${(colScLen / 1000).toFixed(1)} m` : ""].filter(Boolean).join(", ");
+    if (n) add("SC", { code: scp?.panel_code ?? `SC-${w}-${L}`, description: `Soffit corner (${where})`, group: "corner", w, h: L, custom: !scp }, n, scp ? Number(scp.weight_kg) : undefined);
   }
   // external kicker along the outer slab edge (next lift's wall panels sit on it)
   const kp = sysStd ? undefined : item("kicker");
@@ -326,10 +331,20 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const bStep = R?.beamLenStep && R.beamLenStep > 5 ? R.beamLenStep : 5;
     const left = fit.left < tol ? 0 : Math.ceil(fit.left / bStep) * bStep;  // beam filler made to the system's length step
     const pieces = [...fit.panels, ...(left ? [left] : [])];
+    const faceRun = (run: number) => { const f = fillRun(run, BEAM_LEN); const l = f.left < tol ? 0 : Math.ceil(f.left / bStep) * bStep; return [...f.panels, ...(l ? [l] : [])]; };
+    const faces = b.inner != null || b.outer != null;
     for (const Lp of pieces) {
       const cust = !BEAM_LEN.includes(Lp);
-      if (side > 0) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: side, h: Lp, custom: true }, b.sides);
+      if (side > 0 && !faces) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: side, h: Lp, custom: true }, b.sides);
       if (b.bottom && bw > 0) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+    }
+    if (faces) {
+      // side faces measured on the drawing: inner faces (slab beyond) depth − slab, outer faces (slab edge / opening) full depth
+      if (side > 0 && (b.inner ?? 0) > 50) for (const Lp of faceRun(b.inner!)) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${BEAM_LEN.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: side, h: Lp, custom: true }, 1);
+      const full = Math.round(b.d);
+      if ((b.outer ?? 0) > 50) for (const Lp of faceRun(b.outer!)) add(`BSE-${full}-${Lp}`, { code: `BSE-${full}-${Lp}`, description: `Beam outer side panel (slab edge / opening, full depth) ${full} × ${Lp}`, group: "beam", w: full, h: Lp, custom: true }, 1);
+      // lintels in a wall line: both faces are the wall's top panels over the opening
+      if (side > 0 && (b.lintel ?? 0) > 50) for (const Lp of faceRun(b.lintel!)) add(`T-${side}-${Lp}`, { code: `T-${side}-${Lp}`, description: `Wall top panel over opening (lintel ${bw} × ${Math.round(b.d)}) ${side} × ${Lp}`, group: "wall-top", w: side, h: Lp, custom: true }, 2);
     }
     const props = b.bottom && bw > 0 ? Math.ceil(b.length / 1200) + 1 : 0;
     beamProps += props;

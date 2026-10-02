@@ -198,3 +198,12 @@ returns and repairs.
 - FaceLayout now carries `set: "column"`.
 - Tested: Royce (tierod) 7 lists + PDF 208 KB; Motian (flattie + core separate) OK; Gorwa regression unchanged (deck 589).
 - Not done yet: odd/even floor lists (needs two plans).
+
+## Step 4 — matching real BOMs (Royce One R65)
+- Beam sides measured face by face (`dxf.ts`, after the slab outline): inner faces (slab beyond) = depth − slab, outer faces (slab edge / shaft / stair opening) = full depth (BSE-…), parts against walls / columns / crossing beams skipped (5 cm steps). Beams no wider than the wall they sit in, wall-to-wall in the wall line = lintels → wall top panels (T-…, group wall-top). `beamSized[].inner/outer/lintel` (m) → `BeamRun.inner/outer/lintel` (mm).
+- New rule `coresWithColumns` (default off): lift cores / L-walls drawn on the column layer are formed with the walls; only true columns are the column set (Royce column sets ≈ 409 m² → app 359–395).
+- Soffit corners now run along wall tops + inner beam sides + column faces (one SC line, description gives the lengths).
+- Columns also drawn on wall layers / twice are counted once.
+- Royce (tie-rod, both lift cores marked "Separate set"): main wall panels 450 vs real 452 m², deck 720 vs 726, wall tops 261 vs 282, panel total 2894 vs 2908. Shallow beams (≤ 225 drop): real BOM forms them with a B100 strip + SCU 100×125 soffit corner — app uses one BS panel (same area).
+- Motian / Gorwa regressions unchanged. Motian: unsized G_BEAM lines (564 m) still counted as BL beam sides — check visually before changing.
+- 3D model: columns (DXF column layer + drawn columns), every beam on the plan at its own depth, and a dog-leg staircase in each stair box found on stair layers (`zoneCols`, `zoneBeam3`, `zoneStairs` from panel-input → `buildScene3`). Spin 360°, side views, 45° turns, full screen.

@@ -3,16 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { Scene3 } from "@/lib/floor-plans/scene3d";
 
-type Layer = "walls" | "wallPanels" | "deck" | "slab" | "beams" | "issues";
-const LABEL: Record<Layer, string> = { walls: "Concrete walls", wallPanels: "Wall panels", deck: "Deck panels", slab: "Slab", beams: "Beams", issues: "Design check" };
-const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xe0605a, deck: 0x9fd3c7, dspec: 0xe0605a, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968 };
+type Layer = "walls" | "columns" | "wallPanels" | "deck" | "slab" | "beams" | "stairs" | "issues";
+const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", issues: "Design check" };
+const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xe0605a, deck: 0x9fd3c7, dspec: 0xe0605a, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, col: 0x8b8f99, stair: 0xc9b79c };
 
 export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
   const host = useRef<HTMLDivElement>(null);
   type View = "3d" | "top" | "front" | "back" | "left" | "right";
   const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; spin: (on: boolean) => void; turn: (deg: number) => void } | null>(null);
   const [spinning, setSpinning] = useState(false);
-  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, wallPanels: true, deck: true, slab: false, beams: true, issues: true });
+  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, deck: true, slab: false, beams: true, stairs: true, issues: true });
   const [pick, setPick] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -39,7 +39,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         ctr.minDistance = 0.5; ctr.maxDistance = span * 6;
         sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
         const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, span * 1.5, cz + span * 0.7); sc.add(sun);
-        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), wallPanels: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), issues: new THREE.Group() };
+        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), issues: new THREE.Group() };
         Object.values(groups).forEach((g) => sc.add(g));
 
         // plan (x, y-down) → shape (x, -y), extruded along +z, rotated so the extrusion goes up
@@ -55,6 +55,15 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         };
         if (scene.walls.length) groups.walls.add(extrude(scene.walls, scene.H, 0, COLOR.wall));
         if (scene.slabPoly.length) groups.slab.add(extrude(scene.slabPoly, scene.slab, scene.H, COLOR.slab, 0.55));
+        if (scene.cols?.length) groups.columns.add(extrude(scene.cols.map((r) => [r]), scene.H, 0, COLOR.col));
+        // beams drawn on the plan: their outline from the soffit down to the beam bottom
+        const byD = new Map<number, Scene3["walls"]>();
+        for (const b of scene.beamSolids ?? []) { const h = Math.round((b.d - scene.slab) * 1000) / 1000; if (h <= 0) continue; (byD.get(h) ?? byD.set(h, []).get(h)!).push([b.ring]); }
+        for (const [h, polys] of byD) groups.beams.add(extrude(polys, h, scene.H - h, COLOR.beam));
+        if (scene.steps?.length) {
+          const mat = new THREE.MeshStandardMaterial({ color: COLOR.stair, roughness: 0.9 });
+          for (const s of scene.steps) { const m = new THREE.Mesh(new THREE.BoxGeometry(s.s[0], s.s[1], s.s[2]), mat); m.position.set(s.c[0], s.c[1], s.c[2]); m.rotation.y = s.rot; groups.stairs.add(m); }
+        }
         for (const b of scene.beams) {
           const dx = b.b[0] - b.a[0], dz = b.b[1] - b.a[1], L = Math.hypot(dx, dz), h = b.d - scene.slab; if (!L || h <= 0) continue;
           const m = new THREE.Mesh(new THREE.BoxGeometry(L, h, b.w), new THREE.MeshStandardMaterial({ color: COLOR.beam, roughness: 0.9 }));

@@ -36,6 +36,7 @@ export type LayoutRules = {
   beamLenStep: number;           // beam side / bottom panel length step, mm
   columnsSeparate: boolean;      // columns and shear walls cast first with their own column formwork
   columnFirstCast: number;       // height of that first column pour, mm
+  coresWithColumns: boolean;     // lift cores / L-shaped shear walls drawn on column layers go with the column set (else with the walls)
   // accessories
   lossPct: number;               // extra % on small parts (pins, wedges, ties, sleeves)
 };
@@ -50,7 +51,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
       system: "tierod", wallWidths: range(125, 600, 25), stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100,
       internalCorner: 100, externalCorner: 63.5, kickerMm: 100, tie: "rod", tieH: 800, tieV: 600,
       deckWidths: range(200, 600, 25), deckLengths: [1200, 1050, 900, 850, 800], midBeam: 150, propHead: [150, 300],
-      soffitCornerLen: 1800, soffitCornerW: 100, propSpacing: 1.2, supportSets: 1, beamLenStep: 25, columnsSeparate: true, columnFirstCast: 2400, lossPct: 5,
+      soffitCornerLen: 1800, soffitCornerW: 100, propSpacing: 1.2, supportSets: 1, beamLenStep: 25, columnsSeparate: true, columnFirstCast: 2400, coresWithColumns: false, lossPct: 5,
     },
   },
   flattie: {
@@ -60,7 +61,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
       system: "flattie", wallWidths: range(100, 500, 50), stdHeight: 2700, fullHeight: true, bottomStrip: 40, minFiller: 100,
       internalCorner: 100, externalCorner: 65, kickerMm: 200, tie: "flat", tieH: 450, tieV: 600,
       deckWidths: range(100, 600, 50), deckLengths: [1200, 1100, 900, 800], midBeam: 100, propHead: [100, 200],
-      soffitCornerLen: 1800, soffitCornerW: 100, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, lossPct: 10,
+      soffitCornerLen: 1800, soffitCornerW: 100, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, lossPct: 10,
     },
   },
   acoform: {
@@ -70,7 +71,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
       system: "acoform", wallWidths: [], stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100,
       internalCorner: 100, externalCorner: 65, kickerMm: 100, tie: "rod", tieH: 800, tieV: 800,
       deckWidths: [], deckLengths: [1200], midBeam: 100, propHead: [100, 230],
-      soffitCornerLen: 1200, soffitCornerW: 0, propSpacing: 1.2, supportSets: 1, beamLenStep: 5, columnsSeparate: false, columnFirstCast: 0, lossPct: 5,
+      soffitCornerLen: 1200, soffitCornerW: 0, propSpacing: 1.2, supportSets: 1, beamLenStep: 5, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, lossPct: 5,
     },
   },
 };
@@ -114,6 +115,7 @@ export function normaliseLayoutRules(raw: unknown): LayoutRules {
     beamLenStep: num(r.beamLenStep, d.beamLenStep, 5, 300),
     columnsSeparate: typeof r.columnsSeparate === "boolean" ? r.columnsSeparate : d.columnsSeparate,
     columnFirstCast: num(r.columnFirstCast, d.columnFirstCast, 0, 4000),
+    coresWithColumns: typeof r.coresWithColumns === "boolean" ? r.coresWithColumns : d.coresWithColumns,
     lossPct: num(r.lossPct, d.lossPct, 0, 50),
   };
 }
@@ -126,7 +128,7 @@ export function describeLayoutRules(r: LayoutRules): string[] {
   out.push(`Deck: ${r.deckLengths.join(" / ")} mm lengths${r.deckWidths.length ? `, widths ${r.deckWidths[0]}…${r.deckWidths[r.deckWidths.length - 1]}` : ""}; mid beam ${r.midBeam} mm, prop head ${r.propHead[0]} × ${r.propHead[1]}, props @ ≤ ${r.propSpacing} m.`);
   out.push(`${r.tie === "flat" ? "Flat ties" : "Tie rods"} @ ${r.tieH} × ${r.tieV} mm.`);
   if (r.supportSets > 1) out.push(`Props and support heads stay up for ${r.supportSets} floors (${r.supportSets} sets).`);
-  if (r.columnsSeparate) out.push(`Columns / shear walls cast first with their own column formwork${r.columnFirstCast ? ` (up to ${r.columnFirstCast} mm)` : ""}.`);
+  if (r.columnsSeparate) out.push(`Columns${r.coresWithColumns ? " and lift cores / L-walls" : ""} cast first with their own column formwork${r.columnFirstCast ? ` (up to ${r.columnFirstCast} mm)` : ""}.`);
   if (r.lossPct) out.push(`${r.lossPct} % added on small parts (pins, wedges, ties).`);
   return out;
 }

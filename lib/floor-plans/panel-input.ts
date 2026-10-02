@@ -181,7 +181,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   }
   if (auto?.beamSized?.length) {
     // beams sized by their layer names: each size its own run (clear length, both sides, bottom)
-    for (const b of auto.beamSized) beams.push({ code: `B${b.b}x${b.d}`, length: b.len * 1000, b: b.b, d: b.d, sides: 2, bottom: true });
+    for (const b of auto.beamSized) beams.push({ code: `B${b.b}x${b.d}`, length: b.len * 1000, b: b.b, d: b.d, sides: 2, bottom: true, ...(b.inner != null ? { inner: b.inner * 1000, outer: (b.outer ?? 0) * 1000, lintel: (b.lintel ?? 0) * 1000 } : {}) });
     if ((auto.beamLineLength ?? 0) > 0.1) beams.push({ code: "BL", length: auto.beamLineLength! * 1000, b: 0, d: t.params.beamDepthMm ?? 600, sides: 1, bottom: false });
   } else for (const l of g.dxf.beams ?? []) {
     let L = 0; for (let i = 1; i < l.pts.length; i++) L += mm(Math.hypot(l.pts[i][0] - l.pts[i - 1][0], l.pts[i][1] - l.pts[i - 1][1]));
@@ -250,5 +250,12 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   // beams and columns in the slab (framed buildings): the deck stops at them (beam bottoms are their own panels)
   const zoneBeams: Pt[][] = frame ? [...(auto?.beamRings ?? []), ...(auto?.columnRings ?? [])].map((r) => r.map((q) => toM(frame!.toPx(q)))) : [];
   const zoneGaps = frame && auto?.beamSized?.length ? [] : frame && auto?.gaps ? auto.gaps.map((gp) => ({ a: toM(frame!.toPx(gp.a)), b: toM(frame!.toPx(gp.b)), thk: gp.thk ?? (t.params.wallThkMm ?? 150) / 1000 })) : [];
-  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, sunk: auto?.sunk ?? [] };
+  // 3D model: columns (drawn + DXF), beams with their depth, staircase boxes
+  const zoneCols: Pt[][] = [
+    ...(frame ? (auto?.columnRings ?? []).map((r) => r.map((q) => toM(frame!.toPx(q)))) : []),
+    ...(mpp > 0 ? g.shapes.filter((x) => x.kind === "column" && x.pts.length >= 2).map((x) => { if (x.pts.length >= 3) return x.pts.map((q) => toM(q)); const xs = x.pts.map((q) => q[0]), ys = x.pts.map((q) => q[1]); const a = toM([Math.min(...xs), Math.min(...ys)]), b = toM([Math.max(...xs), Math.max(...ys)]); return [a, [b[0], a[1]], b, [a[0], b[1]]] as Pt[]; }) : []),
+  ];
+  const zoneBeam3: { ring: Pt[]; d: number }[] = frame ? (auto?.beamRings ?? []).map((r, i) => ({ ring: r.map((q) => toM(frame!.toPx(q))), d: auto?.beamRingDepth?.[i] ?? (t.params.beamDepthMm ?? 600) })) : [];
+  const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : [];
+  return { faces, decks, beams, corners, openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, sunk: auto?.sunk ?? [] };
 }

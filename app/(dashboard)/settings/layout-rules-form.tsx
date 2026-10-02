@@ -88,7 +88,8 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
         {n("columnFirstCast", "Column first pour height", "(mm)")}
         {n("lossPct", "Loss on small parts", "(%)")}
       </div>
-      <div className="mt-3">{chk("columnsSeparate", "Columns and shear walls cast first with their own formwork", "They are listed as a separate column set, panels up to the first pour height.")}</div>
+      <div className="mt-3">{chk("columnsSeparate", "Columns cast first with their own formwork", "They are listed as a separate column set, panels up to the first pour height.")}</div>
+      <div className="mt-2">{chk("coresWithColumns", "Lift cores and L-shaped shear walls (drawn on the column layer) go with the column set", "Off: they are formed with the walls, as in the Royce One BOM.")}</div>
 
       <ul className="mt-4 space-y-0.5 rounded-md border border-graphite-800 bg-graphite-950 px-3 py-2 text-[11px] text-graphite-400">
         {describeLayoutRules(out).map((l) => <li key={l}>• {l}</li>)}
