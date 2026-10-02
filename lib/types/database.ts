@@ -707,6 +707,12 @@ export type Database = {
           },
         ]
       }
+      site_reports: {
+        Row: { id: string; tenant_id: string; floor_plan_id: string; floor_label: string; pour_date: string | null; cycle_days: number | null; system: string | null; lines: Json; issues: Json; notes: string | null; created_by: string | null; created_at: string }
+        Insert: { id?: string; tenant_id?: string; floor_plan_id: string; floor_label?: string; pour_date?: string | null; cycle_days?: number | null; system?: string | null; lines?: Json; issues?: Json; notes?: string | null; created_by?: string | null; created_at?: string }
+        Update: { id?: string; tenant_id?: string; floor_plan_id?: string; floor_label?: string; pour_date?: string | null; cycle_days?: number | null; system?: string | null; lines?: Json; issues?: Json; notes?: string | null; created_by?: string | null; created_at?: string }
+        Relationships: []
+      }
       measurement_rules: {
         Row: { tenant_id: string; rules: Json; layout: Json | null; updated_at: string; updated_by: string | null }
         Insert: { tenant_id?: string; rules?: Json; layout?: Json | null; updated_at?: string; updated_by?: string | null }

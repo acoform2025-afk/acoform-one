@@ -207,3 +207,11 @@ returns and repairs.
 - Royce (tie-rod, both lift cores marked "Separate set"): main wall panels 450 vs real 452 m², deck 720 vs 726, wall tops 261 vs 282, panel total 2894 vs 2908. Shallow beams (≤ 225 drop): real BOM forms them with a B100 strip + SCU 100×125 soffit corner — app uses one BS panel (same area).
 - Motian / Gorwa regressions unchanged. Motian: unsized G_BEAM lines (564 m) still counted as BL beam sides — check visually before changing.
 - 3D model: columns (DXF column layer + drawn columns), every beam on the plan at its own depth, and a dog-leg staircase in each stair box found on stair layers (`zoneCols`, `zoneBeam3`, `zoneStairs` from panel-input → `buildScene3`). Spin 360°, side views, 45° turns, full screen.
+
+## Step 6 — learn from the site
+- Table `site_reports` (migration `site_reports`, RLS by tenant; insert needs quotations:create and a plan of the same tenant): floor_label, pour_date, cycle_days, system, lines jsonb (SiteLine: family short / not used, small parts lost), issues jsonb, notes.
+- `lib/floor-plans/site-learn.ts`: designLines(bom) (pcs per family + pins / wedges / ties / props / heads), learn(reports) → spare % per family, loss % on small parts, cycle days, issue counts.
+- Page `/floor-plans/[id]/site` (button "Site reports" on the Panel layout page): phone-friendly form + list of reports.
+- Settings → "Learned from the site": totals for the current system + buttons: use the site loss %, add site spares (rule `sparePct` → BOM rows `SPARE-<most used code>`), remove spares.
+- Storage bucket floor-plans now accepts image/vnd.dxf (Mac) etc.; upload form wraps the file with the app's own MIME type.
+- Royce One test project: lead ACOFORM/LEAD/26-27/003; drawing = `Royce One - typical floor.dxf` (sheet 1 cut from r5, 355 KB, same results); takeoff prepared (layer roles, 3.65 m / 150 mm, lift cores = separate sets).

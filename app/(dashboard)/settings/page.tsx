@@ -5,6 +5,8 @@ import { CompanyForm } from "./company-form";
 import { EngineeringForm } from "./engineering-form";
 import { RulesForm } from "./rules-form";
 import { LayoutRulesForm } from "./layout-rules-form";
+import { SiteLearning } from "./site-learning";
+import type { SiteReportRow } from "@/lib/floor-plans/site-learn";
 import { loadLayoutRules } from "@/lib/design-engine/layout-rules";
 import { loadRules } from "@/lib/floor-plans/rules";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -23,6 +25,7 @@ export default async function SettingsPage() {
   const canMedia = await hasPermission("quotations", "approve");
   const rules = await loadRules(supabase);
   const layoutRules = await loadLayoutRules(supabase);
+  const { data: siteRows } = await supabase.from("site_reports").select("id, floor_label, pour_date, cycle_days, system, lines, issues, notes, created_at, floor_plan_id").eq("system", layoutRules.system).order("created_at", { ascending: false }).limit(500);
   const media = await listMedia(supabase);
   const mediaUrls = await mediaViewUrls(supabase, media);
   const tiles: MediaTile[] = media.filter((m) => mediaUrls[m.id]).map((m) => ({ id: m.id, kind: m.kind, url: mediaUrls[m.id], caption: m.caption }));
@@ -49,6 +52,10 @@ export default async function SettingsPage() {
 
       <div className="mt-8">
         <LayoutRulesForm r={layoutRules} canEdit={canEng} />
+      </div>
+
+      <div className="mt-8">
+        <SiteLearning reports={(siteRows ?? []) as unknown as SiteReportRow[]} rules={layoutRules} canEdit={canEng} />
       </div>
 
       <div className="mt-8">

@@ -523,6 +523,15 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     if (r.group === "accessory" || !(r.w > 0 && r.h > 0) || !(r.custom || !(r.weight > 0))) continue;
     r.weight = fabSpec(r.code, r.description, r.w, r.h, 1).kgEach * r.qty;
   }
+  // site spares learned from site reports: N extra pieces per panel family (the most-used sizes)
+  for (const [grp, pct] of Object.entries(R?.sparePct ?? {})) {
+    if (!(pct > 0)) continue;
+    const rows = [...byCode.values()].filter((x) => x.group === grp && x.qty > 0 && x.w > 0 && !x.code.startsWith("SPARE"));
+    const pcs = rows.reduce((s, x) => s + x.qty, 0); if (!pcs) continue;
+    const top = rows.sort((a, b) => b.qty - a.qty)[0];
+    const n = Math.ceil((pcs * pct) / 100);
+    byCode.set(`SPARE-${grp}`, { code: `SPARE-${top.code}`, description: `Site spare ${pct} % of ${pcs} pcs (learned from site reports) — ${top.description}`, group: top.group, w: top.w, h: top.h, qty: n, area: (n * top.w * top.h) / 1e6, weight: top.qty ? (top.weight / top.qty) * n : 0, custom: top.custom, sub: top.sub });
+  }
   const bom = [...byCode.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || SUBS.indexOf(a.sub ?? "") - SUBS.indexOf(b.sub ?? "") || b.w - a.w || a.code.localeCompare(b.code))
     .map((r) => ({ ...r, area: Math.round(r.area * 100) / 100, weight: Math.round(r.weight * 10) / 10 }));
   const panelArea = bom.reduce((s, r) => s + r.area, 0);

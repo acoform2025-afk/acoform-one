@@ -50,7 +50,7 @@ export function UploadFloorPlanForm({ tenantId, leads, leadId, quotationId }: { 
       let res: { error?: string };
       if (k.kind === "dwg") {
         const path = `${tenantId}/${id}/original.dwg`;
-        const up = await bucket.upload(path, file, { contentType: k.mime });
+        const up = await bucket.upload(path, new Blob([file], { type: k.mime }), { contentType: k.mime });
         if (up.error) throw new Error("Upload failed: " + up.error.message);
         // read the DWG here in the browser (big drawings need more memory than the server has)
         setBusy("Reading AutoCAD drawing on this computer…");
@@ -76,7 +76,7 @@ export function UploadFloorPlanForm({ tenantId, leads, leadId, quotationId }: { 
         }
       } else {
         const path = `${tenantId}/${id}/source.${k.ext}`;
-        const up = await bucket.upload(path, file, { contentType: k.mime });
+        const up = await bucket.upload(path, new Blob([file], { type: k.mime }), { contentType: k.mime });
         if (up.error) throw new Error("Upload failed: " + up.error.message);
         res = await createFloorPlan({ ...base, sourceKind: k.kind, filePath: path });
       }
