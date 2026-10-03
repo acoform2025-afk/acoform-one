@@ -27,7 +27,7 @@ export type StairGeo = { code: string; label: string; width: number; risers: num
 export type Fit = { panels: number[]; filler: number };
 export type ColumnLayout = { code: string; w: number; d: number; h: number; qty: number; round: boolean; faceW: Fit; faceD: Fit; top: number; clamps: number };
 export type BeamLayout = { code: string; length: number; b: number; d: number; side: number; sides: number; bottom: boolean; pieces: number[]; props: number };
-export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number };
+export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number; closed?: boolean };
 export type PanelOptions = { extCorners?: number; upstands?: { h: number; length: number; label: string }[]; sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "upstand" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
@@ -407,39 +407,71 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     else byCode.set("PROP", { code: "PROP", description: "Adjustable steel prop (beams)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: 0, custom: false, unit: "nos" });
   }
 
-  // ---- staircases: waist-slab soffit (deck-type panels across the width, 1200/900/600/300 along the slope),
-  //      riser shutters, open-side cheeks (stringers) and the landing soffit; props under soffit and landing
+  // ---- staircases (Mivan dog-tooth system, cast with the floor):
+  //   soffit panels — 400 standard across the flight, a 200 panel at each edge (free edge support / anti-
+  //     penetration panel against a full wall), lengths 1200/900/600/300 along the slope;
+  //   dog-tooth (serrated) side panels on both sides of the flight — the teeth form the step ends;
+  //   closed stair: L-shaped step panels (tread + riser in one) on every step, Ø20 vent holes every 2nd tread;
+  //     open stair: riser shutters only;
+  //  C C-channel along the foot of the flight (std 1400), stop panel at the top / construction joint;
+  //   trapezoidal wall panels (400) + one triangular panel on each wall side under the soffit;
+  //   landing soffit panels; props under soffit and landing; pins @ ≤300 (200 on step panels)
   const stairLayouts: StairLayout[] = [];
   const ALONG = [1200, 900, 600, 300];
-  const along = (L: number) => { const f = fillRun(L, ALONG); const left = f.left < tol ? 0 : Math.ceil(f.left / 5) * 5; return [...f.panels, ...(left ? [left] : [])]; };
+  // a short end piece (< 300) is not made on its own: the last panel is made longer to close the run
+  const along = (L: number) => { const f = fillRun(L, ALONG); const left = f.left < tol ? 0 : Math.ceil(f.left / 5) * 5; if (left && left < 300 && f.panels.length) { const p = [...f.panels]; p[p.length - 1] += left; return p; } return [...f.panels, ...(left ? [left] : [])]; };
   const acrossFit = (W: number): Fit => { const f = deckW.length ? fillRun(W, deckW) : { panels: [], left: W }; return { panels: f.panels, filler: f.left < tol ? 0 : r5(f.left) }; };
-  let stairProps = 0, riserBrackets = 0;
+  // soffit across the flight: 200 | 400 … 400 | (filler) | 200
+  const stairAcross = (W: number): Fit => {
+    if (W < 600) return { panels: [r5(W)], filler: 0 };
+    const inner = W - 400, n = Math.floor(inner / 400), left = r5(inner - n * 400);
+    return { panels: [200, ...Array(n).fill(400), 200], filler: left >= 25 ? left : 0 };
+  };
+  const closed = R ? R.stairClosed : true;
+  let stairProps = 0, riserBrackets = 0, stepPins = 0;
   for (const g of o.stairs ?? []) {
     if (!(g.width > 0 && g.risers > 0 && g.riser > 0 && g.tread > 0)) continue;
     const hyp = Math.hypot(g.riser, g.tread), slope = Math.round(g.risers * hyp), cos = g.tread / hyp;
     const cheekH = r5(g.waist / cos + g.riser);
-    const acr = acrossFit(g.width), alg = along(slope);
+    const acr = stairAcross(g.width), alg = along(slope);
     let landing: StairLayout["landing"] = null;
     if (g.landingM2 > 0) {
       const lw = g.width, ll = Math.round((g.landingM2 * 1e6) / lw);
       landing = { l: ll, w: lw, across: acrossFit(ll), along: along(lw) };
     }
     const props = (Math.ceil(slope / 1200) + 1) * (Math.ceil(g.width / 1200) + 1) + (landing ? Math.ceil(g.landingM2 / 1.44) + 1 : 0);
-    stairLayouts.push({ ...g, slope, angle: Math.round((Math.atan2(g.riser, g.tread) * 180) / Math.PI), across: acr, along: alg, cheekH, landing, props });
+    stairLayouts.push({ ...g, slope, angle: Math.round((Math.atan2(g.riser, g.tread) * 180) / Math.PI), across: acr, along: alg, cheekH, landing, props, closed });
     if (g.assumed) continue;                                  // area allowance only: priced as a set below, drawing shows a typical stair
-    const n = g.flights * g.sets;
+    const n = g.flights * g.sets, wallSides = Math.max(0, 2 - g.openSides);
     for (const L of alg) {
-      for (const w of acr.panels) {
-        const dp = L === deckLen ? deckCat.find((x) => x.width_mm === w) : undefined;
-        if (dp) add(dp.panel_code, { code: dp.panel_code, description: "Deck panel", group: "deck", w, h: L, custom: false }, n, Number(dp.weight_kg));
-        else add(`SS-${w}-${L}`, { code: `SS-${w}-${L}`, description: `Stair soffit panel ${w} × ${L}`, group: "stair", w, h: L, custom: true }, n);
+      for (const [i, w] of acr.panels.entries()) {
+        const edge = i === 0 || i === acr.panels.length - 1;
+        add(`SS-${w}-${L}`, { code: `SS-${w}-${L}`, description: edge && w === 200 ? "Stair soffit edge panel 200 (free-edge support / anti-penetration)" : "Stair soffit panel", group: "stair", w, h: L, custom: true }, n);
       }
       if (acr.filler) add(`SS-${acr.filler}-${L}`, { code: `SS-${acr.filler}-${L}`, description: `Stair soffit filler ${acr.filler} × ${L}`, group: "stair", w: acr.filler, h: L, custom: true }, n);
-      if (g.openSides > 0) add(`CK-${cheekH}-${L}`, { code: `CK-${cheekH}-${L}`, description: `Stair side cheek (stringer) ${cheekH} × ${L}`, group: "stair", w: cheekH, h: L, custom: true }, n * g.openSides);
+      add(`DT-${cheekH}-${L}`, { code: `DT-${cheekH}-${L}`, description: "Dog-tooth (serrated) side panel — teeth form the step ends", group: "stair", w: cheekH, h: L, custom: true }, n * 2);
     }
-    const rw = r5(g.width), rh = r5(g.riser);
-    add(`RS-${rw}-${rh}`, { code: `RS-${rw}-${rh}`, description: `Riser shutter ${rw} × ${rh}`, group: "stair", w: rw, h: rh, custom: true }, n * g.risers);
+    const rw = r5(g.width), rh = r5(g.riser), tw = r5(g.tread);
+    // step panels: one piece up to 1200 wide, wider flights in equal pieces
+    const pieces = Math.max(1, Math.ceil(rw / 1200)), pw = r5(rw / pieces);
+    if (closed) {
+      add(`TS-${pw}-${tw}x${rh}`, { code: `TS-${pw}-${tw}x${rh}`, description: `L-shaped step panel (tread ${tw} + riser ${rh})${pieces > 1 ? `, ${pieces} pieces per step` : ""} — Ø20 vent holes every 2nd tread`, group: "stair", w: pw, h: tw + rh, custom: true }, n * (g.risers - 1) * pieces);
+      add(`RS-${pw}-${rh}`, { code: `RS-${pw}-${rh}`, description: "Riser shutter (top step at the landing)", group: "stair", w: pw, h: rh, custom: true }, n * pieces);
+      stepPins += n * (g.risers - 1) * pieces * (2 * Math.ceil(pw / 200) + 2 * Math.ceil((tw + rh) / 200));
+    } else {
+      add(`RS-${pw}-${rh}`, { code: `RS-${pw}-${rh}`, description: `Riser shutter${pieces > 1 ? ` (${pieces} pieces per step)` : ""}`, group: "stair", w: pw, h: rh, custom: true }, n * g.risers * pieces);
+    }
     riserBrackets += 2 * n * g.risers;
+    // C-channel at the foot of the flight (std 1400) and stop panel at the top
+    const cc = fillRun(rw, [1400, 1200, 900, 600, 300]);
+    for (const L of [...cc.panels, ...(cc.left >= 50 ? [r5(cc.left)] : [])]) add(`CC-${L}`, { code: `CC-${L}`, description: "Stair C-channelC (foot of the flight)", group: "stair", w: 0, h: L, custom: false, unit: "nos" }, n);
+    add(`STP-${rw}-${cheekH}`, { code: `STP-${rw}-${cheekH}`, description: "Stair stop panel (top of the flight / construction joint)", group: "stair", w: rw, h: cheekH, custom: true }, n);
+    // wall side: trapezoidal wall panels 400 under the soffit + one triangular panel at the foot
+    if (wallSides) {
+      const run = (g.risers - 1) * g.tread, nT = Math.max(1, Math.floor(run / 400));
+      add("TZ-400", { code: "TZ-400", description: "Trapezoidal wall panel 400 (wall under the flight, top cut to the slope)", group: "stair", w: 400, h: 0, custom: true, unit: "nos" }, n * wallSides * nT);
+      add("TRI", { code: "TRI", description: "Triangular wall panel (foot of the flight at the wall)", group: "stair", w: 0, h: 0, custom: true, unit: "nos" }, n * wallSides);
+    }
     if (landing) for (const L of landing.along) {
       for (const w of landing.across.panels) {
         const dp = L === deckLen ? deckCat.find((x) => x.width_mm === w) : undefined;
@@ -532,7 +564,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const beamClamps = beamLayouts.reduce((a, bl) => a + (Math.ceil(bl.length / 1200) + 1), 0);
   acc("BCL", "Columns & beams", accW(/^BCL/, 2.5).code ?? "BCL", "Beam side clamp / tie", beamClamps, accW(/^BCL/, 2.5).kg, "every 1.2 m along each beam + 1");
   acc("SPROP", "Staircase", "PROP-ST", "Stair soffit prop with swivel head", stairProps, 14, "per flight: (slope ÷ 1.2 + 1) × (width ÷ 1.2 + 1) + landing");
-  acc("RBR", "Staircase", "RBR", "Riser bracket", riserBrackets, 0.8, "two per riser shutter");
+  acc("RBR", "Staircase", "RBR", "Riser bracket / step clamp", riserBrackets, 0.8, "two per step");
+  if (stepPins) acc("SPIN", "Staircase", "PIN-ST", "Pins & wedges on step panels (@ 200)", Math.ceil(stepPins * loss), 0.12, "step panel edges ÷ 200 mm");
 
   if (dropTube > 0) acc("FT-DROP", "Kicker & edges", "FT-50x50", "Square tube for drop forms (hung across the sunk slab)", Math.ceil(dropTube * 1.1 * 10) / 10, 2.1, `sunk slab edges ${dropTube.toFixed(1)} m + 10 %`, "m");
 

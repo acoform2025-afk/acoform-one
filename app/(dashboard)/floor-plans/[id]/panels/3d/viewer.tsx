@@ -5,9 +5,9 @@ import type { Scene3 } from "@/lib/floor-plans/scene3d";
 
 type Layer = "walls" | "columns" | "wallPanels" | "fillers" | "corners" | "deck" | "slab" | "beams" | "stairs" | "acc" | "arch" | "issues";
 const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", fillers: "Fillers / specials", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", acc: "Props, ties & walers", arch: "Railings & projections", issues: "Design check" };
-const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xff3fb3, deck: 0x9fd3c7, dspec: 0xff8ad1, ic: 0x34d399, ec: 0x10b981, sc: 0xa78bfa, kick: 0xfb923c, bside: 0xd4a373, bbot: 0xb08968, col: 0xfcd34d, stair: 0xc9b79c, riser: 0xe7d3b8, cheek: 0xd9a066, lsoff: 0xb9c7a0, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, colC: 0x8b8f99 };
-const KIND_LAYER: Record<Scene3["panels"][number]["k"], Layer> = { std: "wallPanels", top: "wallPanels", fill: "fillers", deck: "deck", dspec: "fillers", ic: "corners", ec: "corners", sc: "corners", kick: "corners", bside: "beams", bbot: "beams", col: "columns", stair: "stairs", riser: "stairs", cheek: "stairs", lsoff: "stairs" };
-const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standard wall panel", top: "wall-top piece", fill: "wall filler (non-standard width)", deck: "deck panel", dspec: "deck filler / special", ic: "internal corner", ec: "external corner", sc: "soffit corner", kick: "kicker", bside: "beam side panel", bbot: "beam bottom", col: "column panel", stair: "stair soffit panel", riser: "riser shutter", cheek: "stair cheek / stringer", lsoff: "landing soffit panel" };
+const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xff3fb3, deck: 0x9fd3c7, dspec: 0xff8ad1, ic: 0x34d399, ec: 0x10b981, sc: 0xa78bfa, kick: 0xfb923c, bside: 0xd4a373, bbot: 0xb08968, col: 0xfcd34d, stair: 0xc9b79c, riser: 0xe7d3b8, cheek: 0xd9a066, lsoff: 0xb9c7a0, tread: 0xf3e6cc, cchan: 0x64748b, stp: 0xa16207, tz: 0x93c5fd, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, colC: 0x8b8f99 };
+const KIND_LAYER: Record<Scene3["panels"][number]["k"], Layer> = { std: "wallPanels", top: "wallPanels", fill: "fillers", deck: "deck", dspec: "fillers", ic: "corners", ec: "corners", sc: "corners", kick: "corners", bside: "beams", bbot: "beams", col: "columns", stair: "stairs", riser: "stairs", cheek: "stairs", lsoff: "stairs", tread: "stairs", cchan: "stairs", stp: "stairs", tz: "stairs" };
+const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standard wall panel", top: "wall-top piece", fill: "wall filler (non-standard width)", deck: "deck panel", dspec: "deck filler / special", ic: "internal corner", ec: "external corner", sc: "soffit corner", kick: "kicker", bside: "beam side panel", bbot: "beam bottom", col: "column panel", stair: "stair soffit panel", riser: "riser shutter / step panel riser leg", cheek: "dog-tooth side panel 狗牙板", lsoff: "landing soffit panel", tread: "L-step panel tread cover 踏步板", cchan: "stair C-channel 楼梯C槽", stp: "stair stop panel 挡板", tz: "trapezoidal / triangular wall panel under the flight" };
 
 const span = (sc: Scene3) => Math.max(sc.box[2] - sc.box[0], sc.box[3] - sc.box[1], 5);
 
@@ -145,7 +145,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           for (const b of fl.beamSolids ?? []) { const h = Math.round((b.d - fl.slab) * 1000) / 1000; if (h <= 0) continue; (byD.get(h) ?? byD.set(h, []).get(h)!).push([b.ring]); }
           for (const [h, polys] of byD) G.beams.add(lift(extrude(polys, h, fl.H - h, COLOR.beam)));
           if (fl.steps?.length) {
-            const mat = new THREE.MeshStandardMaterial({ color: COLOR.stair, roughness: 0.9 });
+            const mat = new THREE.MeshStandardMaterial({ color: 0xbfbab0, roughness: 0.9, transparent: true, opacity: 0.28, depthWrite: false });   // concrete of the stair, see-through so the formwork round it shows
             for (const st of fl.steps) { const m = new THREE.Mesh(new THREE.BoxGeometry(st.s[0], st.s[1], st.s[2]), mat); m.position.set(st.c[0], st.c[1], st.c[2]); m.rotation.y = st.rot; G.stairs.add(m); }
           }
           for (const b of fl.beams) {
@@ -378,7 +378,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#d4a373" }} />beam side / bottom</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#fcd34d" }} />column panel</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#c9b79c" }} />stair soffit / riser</span>
-        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#d9a066" }} />stair cheek</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#d9a066" }} />dog-tooth side panel</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#d97706" }} />prop · <span style={{ color: "#9ca3af" }}>grey head</span></span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#1f2937", border: "1px solid #6b7280" }} />waler / tie</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#facc15" }} />push-pull prop</span>

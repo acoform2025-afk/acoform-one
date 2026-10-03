@@ -95,6 +95,7 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
         {n("lossPct", "Loss on small parts", "(%)")}
       </div>
       <div className="mt-3">{chk("columnsSeparate", "Columns cast first with their own formwork", "They are listed as a separate column set, panels up to the first pour height.")}</div>
+      <div className="mt-2">{chk("stairClosed", "Closed staircase: tread cover panels on every step as well as riser shutters", "Fully enclosed stair (common practice): stepped side panels on both sides, riser shutters and tread covers with Ø20 vent holes every 2nd tread. Off = treads left open and finished by hand.")}</div>
       <div className="mt-2">{chk("coresWithColumns", "Lift cores and L-shaped shear walls (drawn on the column layer): outer faces cast first with the column set", "Shaft faces inside a lift core always stay with the walls (Cosmos / Royce One practice).")}</div>
       <div className="mt-2">{chk("wallEcAngles", "External corner angles on outside wall corners", "Off: outside corners are formed by external wall panels (WE), as Cosmos does.")}</div>
       <div className="mt-2">{chk("bothLegs", "Count corner and soffit-corner area on both legs", "Indian BOM practice (e.g. 100 × 125 soffit corner = 0.225 m² per metre). Off = one leg only.")}</div>
