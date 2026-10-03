@@ -3,17 +3,27 @@
 import { useEffect, useRef, useState } from "react";
 import type { Scene3 } from "@/lib/floor-plans/scene3d";
 
-type Layer = "walls" | "columns" | "wallPanels" | "deck" | "slab" | "beams" | "stairs" | "issues";
-const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", issues: "Design check" };
-const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xe0605a, deck: 0x9fd3c7, dspec: 0xe0605a, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, col: 0x8b8f99, stair: 0xc9b79c };
+type Layer = "walls" | "columns" | "wallPanels" | "corners" | "deck" | "slab" | "beams" | "stairs" | "issues";
+const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", issues: "Design check" };
+const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xe0605a, deck: 0x9fd3c7, dspec: 0xe0605a, ic: 0x34d399, ec: 0x10b981, sc: 0xa78bfa, kick: 0xfb923c, bside: 0xd4a373, bbot: 0xb08968, col: 0xfcd34d, stair: 0xc9b79c, riser: 0xe7d3b8, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, colC: 0x8b8f99 };
+const KIND_LAYER: Record<Scene3["panels"][number]["k"], Layer> = { std: "wallPanels", top: "wallPanels", fill: "wallPanels", deck: "deck", dspec: "deck", ic: "corners", ec: "corners", sc: "corners", kick: "corners", bside: "beams", bbot: "beams", col: "columns", stair: "stairs", riser: "stairs" };
+const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standard wall panel", top: "wall-top piece", fill: "filler / special", deck: "deck panel", dspec: "deck special", ic: "internal corner", ec: "external corner", sc: "soffit corner", kick: "kicker", bside: "beam side panel", bbot: "beam bottom", col: "column panel", stair: "stair soffit", riser: "riser panel" };
+
+const span = (sc: Scene3) => Math.max(sc.box[2] - sc.box[0], sc.box[3] - sc.box[1], 5);
 
 export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
   const host = useRef<HTMLDivElement>(null);
   type View = "3d" | "top" | "front" | "back" | "left" | "right";
-  const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; turn: (deg: number) => void } | null>(null);
-  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, deck: true, slab: false, beams: true, stairs: true, issues: true });
+  const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; turn: (deg: number) => void; cut: (y: number | null) => void; flyTo: (x: number, y: number, z: number, dist?: number) => void; highlight: (test: ((p: Scene3["panels"][number]) => boolean) | null) => number } | null>(null);
+  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, corners: true, deck: true, slab: false, beams: true, stairs: true, issues: true });
   const [pick, setPick] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [cut, setCut] = useState<number>(100);          // % of the floor height shown (section cut from the top)
+  const [zone, setZone] = useState<string>("");
+  const [query, setQuery] = useState<string>("");
+  const [hits, setHits] = useState<number | null>(null);
+  const [showIssues, setShowIssues] = useState(false);
+  const top = scene.H + scene.slab + 0.3;
 
   useEffect(() => {
     let disposed = false, raf = 0;
@@ -38,7 +48,10 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         ctr.minDistance = 0.5; ctr.maxDistance = span * 6;
         sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
         const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, span * 1.5, cz + span * 0.7); sc.add(sun);
-        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), issues: new THREE.Group() };
+        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), corners: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), issues: new THREE.Group() };
+        // section cut: everything above the cut height is clipped away (slider)
+        const clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), top);
+        renderer.clippingPlanes = [clip];
         Object.values(groups).forEach((g) => sc.add(g));
 
         // plan (x, y-down) → shape (x, -y), extruded along +z, rotated so the extrusion goes up
@@ -54,7 +67,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         };
         if (scene.walls.length) groups.walls.add(extrude(scene.walls, scene.H, 0, COLOR.wall));
         if (scene.slabPoly.length) groups.slab.add(extrude(scene.slabPoly, scene.slab, scene.H, COLOR.slab, 0.55));
-        if (scene.cols?.length) groups.columns.add(extrude(scene.cols.map((r) => [r]), scene.H, 0, COLOR.col));
+        if (scene.cols?.length) groups.columns.add(extrude(scene.cols.map((r) => [r]), scene.H, 0, COLOR.colC));
         // beams drawn on the plan: their outline from the soffit down to the beam bottom
         const byD = new Map<number, Scene3["walls"]>();
         for (const b of scene.beamSolids ?? []) { const h = Math.round((b.d - scene.slab) * 1000) / 1000; if (h <= 0) continue; (byD.get(h) ?? byD.set(h, []).get(h)!).push([b.ring]); }
@@ -70,22 +83,37 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           groups.beams.add(m);
         }
         // panels: one mesh + outline per kind; quad index kept for picking
-        const pickables: { mesh: InstanceType<typeof THREE.Mesh>; list: Scene3["panels"] }[] = [];
-        for (const k of ["std", "top", "fill", "deck", "dspec"] as const) {
+        const pickables: { mesh: InstanceType<typeof THREE.Mesh>; list: Scene3["panels"]; base: InstanceType<typeof THREE.Color>; colors: Float32Array }[] = [];
+        for (const k of Object.keys(KIND_LAYER) as Scene3["panels"][number]["k"][]) {
           const list = scene.panels.filter((p) => p.k === k); if (!list.length) continue;
-          const pos = new Float32Array(list.length * 18), edge = new Float32Array(list.length * 24);
+          const pos = new Float32Array(list.length * 18), edge = new Float32Array(list.length * 24), colors = new Float32Array(list.length * 18);
+          const base = new THREE.Color(COLOR[k]);
           list.forEach((q, i) => {
             const [a, b, c, d] = q.p;
-            [a, b, c, a, c, d].forEach((v, j) => pos.set(v, i * 18 + j * 3));
+            [a, b, c, a, c, d].forEach((v, j) => { pos.set(v, i * 18 + j * 3); colors.set([base.r, base.g, base.b], i * 18 + j * 3); });
             [a, b, b, c, c, d, d, a].forEach((v, j) => edge.set(v, i * 24 + j * 3));
           });
-          const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.computeVertexNormals();
-          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: COLOR[k], side: THREE.DoubleSide, roughness: 0.6, metalness: 0.2 }));
+          const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(colors, 3)); g.computeVertexNormals();
+          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.2 }));
           const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(edge, 3));
           const lines = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x1f2937 }));
-          const grp = k === "deck" || k === "dspec" ? groups.deck : groups.wallPanels;
-          grp.add(mesh, lines); pickables.push({ mesh, list });
+          groups[KIND_LAYER[k]].add(mesh, lines); pickables.push({ mesh, list, base, colors });
         }
+        // highlight: matching pieces turn bright orange, the rest fade; returns how many matched
+        const hl = new THREE.Color(0xff6a00), dim = new THREE.Color(0x3a3d44);
+        const highlight = (test: ((p: Scene3["panels"][number]) => boolean) | null) => {
+          let n = 0; let first: [number, number, number] | null = null;
+          for (const pk of pickables) {
+            pk.list.forEach((q, i) => {
+              const m = test ? test(q) : false; if (m) { n++; if (!first) first = q.p[0]; }
+              const c = test ? (m ? hl : dim) : pk.base;
+              for (let j = 0; j < 6; j++) pk.colors.set([c.r, c.g, c.b], i * 18 + j * 3);
+            });
+            (pk.mesh.geometry.getAttribute("color") as InstanceType<typeof THREE.BufferAttribute>).needsUpdate = true;
+          }
+          return n;
+        };
+        const flyTo = (x: number, y: number, z: number, dist = Math.max(4, span * 0.12)) => { cam.position.set(x + dist * 0.6, y + dist * 0.8, z + dist * 0.8); ctr.target.set(x, y, z); ctr.update(); };
         if (scene.mb.length) {
           const arr = new Float32Array(scene.mb.length * 6);
           scene.mb.forEach(([a, b], i) => arr.set([a[0], scene.H - 0.02, a[1], b[0], scene.H - 0.02, b[1]], i * 6));
@@ -125,7 +153,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           const a = (deg * Math.PI) / 180, t = ctr.target, ox = cam.position.x - t.x, oz = cam.position.z - t.z;
           cam.position.x = t.x + ox * Math.cos(a) - oz * Math.sin(a); cam.position.z = t.z + ox * Math.sin(a) + oz * Math.cos(a); ctr.update();
         };
-        api.current = { set: (l, v) => { groups[l].visible = v; }, view, turn };
+        api.current = { set: (l, v) => { groups[l].visible = v; }, view, turn, cut: (y) => { clip.constant = y == null ? top : y; }, flyTo, highlight };
         (Object.keys(groups) as Layer[]).forEach((l) => { groups[l].visible = on[l]; });
 
         const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
@@ -141,7 +169,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           const hit = ray.intersectObjects(vis.map((p) => p.mesh), false)[0];
           if (!hit) { setPick(null); return; }
           const owner = vis.find((p) => p.mesh === hit.object); const q = owner?.list[Math.floor((hit.faceIndex ?? 0) / 2)];
-          setPick(q ? q.c : null);
+          setPick(q ? `${KIND_LABEL[q.k]} · ${q.c}${q.z ? ` · ${q.z}` : ""}` : null);
         };
         renderer.domElement.addEventListener("click", onClick);
         const onResize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); ctr.handleResize(); };
@@ -167,9 +195,9 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         {(Object.keys(LABEL) as Layer[]).map((l) => {
           // how many pieces each layer has — a layer with nothing on this floor (e.g. no columns in a shear-wall building) is shown greyed with "0"
-          const n = l === "walls" ? scene.walls.length : l === "columns" ? (scene.cols?.length ?? 0) : l === "wallPanels" ? scene.panels.filter((p) => p.k !== "deck" && p.k !== "dspec").length
-            : l === "deck" ? scene.panels.filter((p) => p.k === "deck" || p.k === "dspec").length : l === "slab" ? scene.slabPoly.length : l === "beams" ? (scene.beamSolids?.length ?? 0) + scene.beams.length
-            : l === "stairs" ? (scene.steps?.length ?? 0) : (scene.issues?.length ?? 0);
+          const pcs = scene.panels.filter((p) => KIND_LAYER[p.k] === l).length;
+          const n = l === "walls" ? scene.walls.length : l === "columns" ? (scene.cols?.length ?? 0) + pcs : l === "slab" ? scene.slabPoly.length : l === "beams" ? (scene.beamSolids?.length ?? 0) + scene.beams.length + pcs
+            : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
           return (
             <button key={l} type="button" onClick={() => toggle(l)} title={n ? `${n} on this floor` : "nothing of this kind on this floor"}
               className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : n ? "border border-graphite-700 text-graphite-300 hover:bg-graphite-800" : "border border-dashed border-graphite-800 text-graphite-600"}`}>{LABEL[l]}{n ? "" : " (0)"}</button>
@@ -185,8 +213,36 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         <button type="button" onClick={() => { const el = host.current; if (!el) return; if (document.fullscreenElement) void document.exitFullscreen(); else void el.requestFullscreen?.(); }}
           className="rounded-md border border-graphite-700 px-2.5 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">⛶ Full screen (Esc to leave)</button>
       </div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-graphite-300">
+        <label className="flex items-center gap-1.5">Section cut
+          <input type="range" min={5} max={100} value={cut} onChange={(e) => { const v = Number(e.target.value); setCut(v); api.current?.cut(v >= 100 ? null : (top * v) / 100); }} className="w-36" />
+          <span className="w-16 font-mono text-graphite-400">{cut >= 100 ? "off" : `${Math.round((top * cut) / 100 * 1000)} mm`}</span>
+        </label>
+        <label className="flex items-center gap-1.5">Room
+          <select value={zone} onChange={(e) => { const v = e.target.value; setZone(v); if (!v) { api.current?.highlight(null); api.current?.view("3d"); return; } const z = scene.zones.find((x) => x.code === v); if (z) { api.current?.flyTo(z.at[0], scene.H / 2, z.at[1], Math.max(5, span(scene) * 0.18)); api.current?.highlight((p) => p.z === v); } }}
+            className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100">
+            <option value="">all</option>{scene.zones.map((z) => <option key={z.code} value={z.code}>{z.code}</option>)}
+          </select>
+        </label>
+        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); const q = query.trim().toLowerCase(); if (!q) { setHits(null); api.current?.highlight(null); return; } const n = api.current?.highlight((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)) ?? 0; setHits(n); const first = scene.panels.find((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)); if (first) api.current?.flyTo(first.p[0][0], first.p[0][1], first.p[0][2]); }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="find panel no. / code (e.g. M4-07, WP-600)" className="w-56 rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-graphite-100" />
+          <button className="rounded border border-graphite-700 px-2 py-1 hover:bg-graphite-800">Find</button>
+          {hits != null ? <span className="text-graphite-400">{hits} found</span> : null}
+          {hits != null || zone ? <button type="button" onClick={() => { setHits(null); setQuery(""); setZone(""); api.current?.highlight(null); }} className="text-brand-orange hover:underline">clear</button> : null}
+        </form>
+        {(scene.issues?.length ?? 0) > 0 ? <button type="button" onClick={() => setShowIssues((v) => !v)} className={`rounded border px-2 py-1 ${showIssues ? "border-brand-orange text-brand-orange" : "border-graphite-700 hover:bg-graphite-800"}`}>{showIssues ? "Hide" : "Show"} problem list ({scene.issues!.length})</button> : null}
+      </div>
       <div ref={host} className="relative h-[70vh] min-h-[420px] overflow-hidden rounded-lg border border-graphite-800">
         {err ? <p className="p-4 text-sm text-signal-red">{err}</p> : null}
+        {showIssues && scene.issues?.length ? (
+          <div className="absolute right-2 top-2 z-10 max-h-[60%] w-80 overflow-auto rounded-md border border-graphite-700 bg-graphite-950/95 p-2 text-xs">
+            {scene.issues.map((is) => (
+              <button key={is.id} type="button" onClick={() => { api.current?.flyTo(is.at[0], is.y, is.at[1]); setPick(`${is.id} · ${is.text}`); }} className="flex w-full items-start gap-2 rounded px-1.5 py-1 text-left text-graphite-200 hover:bg-graphite-800">
+                <span className="mt-1 inline-block size-2 shrink-0 rounded-full" style={{ background: is.sev === "error" ? "#ef4444" : "#f59e0b" }} /><span><span className="font-mono text-graphite-400">{is.id}</span> {is.text}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {pick ? <div className="absolute left-2 top-2 z-10 flex max-w-[90%] items-start gap-2 rounded-md px-3 py-2 text-sm font-medium shadow-lg" style={{ background: "#111827", color: "#ffffff", border: "1px solid #f59e0b" }}><span>{pick}</span><button type="button" onClick={() => setPick(null)} className="ml-1 shrink-0 text-base leading-none" style={{ color: "#fbbf24" }} aria-label="Close">×</button></div> : null}
       </div>
       <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-graphite-400">
@@ -194,6 +250,12 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#f2c76b" }} />wall-top piece</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#9fd3c7" }} />deck panel</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#e0605a" }} />special / filler</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#34d399" }} />internal / external corner</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#a78bfa" }} />soffit corner</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#fb923c" }} />kicker</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#d4a373" }} />beam side / bottom</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#fcd34d" }} />column panel</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#c9b79c" }} />stair soffit / riser</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-full" style={{ background: "#ef4444" }} />design-check error</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-full" style={{ background: "#f59e0b" }} />warning</span>
         <span>· drag with the mouse to turn the model to any angle (360° in every direction, also from underneath) · right-drag to move · scroll to zoom · click a panel or a ball to see its number / problem</span>
