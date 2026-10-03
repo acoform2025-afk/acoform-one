@@ -47,7 +47,7 @@ function Elevation({ t, sc, tieH, tieV, stdHeight }: { t: ModType; sc: number; t
   const H = f.height, main = Math.min(stdHeight, H), top = f.top;
   const W = f.length * sc, Hh = H * sc;
   const padL = 26, padB = 26, padT = 8;
-  const w = W + padL + 10, h = Hh + padB + padT;
+  const w = W + padL + 24, h = Hh + padB + padT;
   const y0 = padT + Hh;                        // ground line (pt)
   const X = (mm: number) => padL + mm * sc, Y = (mm: number) => y0 - mm * sc;
   const pieces: { x: number; w: number }[] = []; let run = 0;
@@ -75,6 +75,14 @@ function Elevation({ t, sc, tieH, tieV, stdHeight }: { t: ModType; sc: number; t
         </G>
       ) : null}
       {tieRows.flatMap((z) => tieX.map((x) => <Rect key={`${x}-${z}`} x={X(x) - 1.2} y={Y(z) - 1.2} width={2.4} height={2.4} fill="#111" />))}
+      {/* alignment walers (2 rows, on the face that carries them) and push-pull props every ~3 m — as in the 3D model */}
+      {f.length >= 600 ? [600, Math.max(1200, H - 700)].map((z) => (
+        <G key={`w${z}`}>
+          <Line x1={X(0)} y1={Y(z)} x2={X(f.length)} y2={Y(z)} stroke="#15803d" strokeWidth={1.6} strokeDasharray="5 2" />
+          <Text x={X(f.length) + 1.5} y={Y(z) + 2} style={{ fontSize: 5.2, fontFamily: "Carlito", color: "#15803d" }}>{`W${z}`}</Text>
+        </G>
+      )) : null}
+      {Array.from({ length: Math.floor(f.length / 3000) }, (_, i) => { const x = (f.length * (i + 1)) / (Math.floor(f.length / 3000) + 1), z = Math.min(2100, H - 400); return <Path key={`pp${i}`} d={`M${X(x)} ${Y(z) - 3} L${X(x) + 3} ${Y(z) + 2} L${X(x) - 3} ${Y(z) + 2} Z`} fill="#ca8a04" />; })}
       {/* overall length dimension */}
       <Line x1={X(0)} y1={y0 + 10} x2={X(f.length)} y2={y0 + 10} stroke="#111" strokeWidth={0.5} />
       <Line x1={X(0)} y1={y0 + 6} x2={X(0)} y2={y0 + 14} stroke="#111" strokeWidth={0.5} />
@@ -259,7 +267,7 @@ function StairCell({ s }: { s: StairLayout }) {
         {joints.map((j, i) => <G key={`j${i}`}>{T(j.x - 6, j.y + 14, String(j.L), 6, [1200, 900, 600, 300].includes(j.L) ? "#111" : RED)}</G>)}
         {/* riser shutters */}
         {Array.from({ length: s.risers }, (_, i) => <Line key={`r${i}`} x1={ox + i * s.tread * k - 1.5} y1={oy - i * s.riser * k} x2={ox + i * s.tread * k - 1.5} y2={oy - (i + 1) * s.riser * k} stroke="#2563eb" strokeWidth={2} />)}
-        {T(ox, oy + ny + 30, `ELEVATION OF ONE FLIGHT · orange = soffit panels (${s.along.join(" + ")}) · blue = riser shutters ${s.width} × ${s.riser} (${s.risers} per flight)${s.openSides ? ` · open side cheek ${s.cheekH} high (${s.openSides} side${s.openSides > 1 ? "s" : ""})` : ""}`, 6.5, GRAY)}
+        {T(ox, oy + ny + 30, `ELEVATION OF ONE FLIGHT · orange = soffit panels (${s.along.join(" + ")}) · blue = ${(s.closed ?? true) ? "L-step panels (riser + tread cover)" : "riser shutters"} ${s.width} × ${s.riser} (${s.risers} per flight) · dog-tooth side panels ${s.cheekH} deep on both sides · full detail: Staircase assembly PDF`, 6.5, GRAY)}
         {/* plan of soffit panels */}
         {s.along.flatMap((L, r) => {
           const yy = py0 + s.along.slice(0, r).reduce((a, b) => a + b, 0) * pk; let xx = px0;
@@ -334,7 +342,7 @@ export function ModulationDocument({ types, info, totalFaces, columns = [], beam
       {types.length ? (
       <Page size="A3" orientation="landscape" style={pageStyle}>
         <Text style={{ fontSize: 15, fontWeight: "bold" }}>WALL MODULATION SCHEDULE</Text>
-        <Text style={{ color: GRAY, marginBottom: 8 }}>{totalFaces} wall faces grouped into {types.length} types. Wall panels {info.stdHeight} mm high + top pieces; F = filler (made to size); black dots = tie positions (@ {info.tieH} h × {info.tieV} v). All sizes in mm. Also in this set: {columns.length} column types, {bt.length} beam types, {stairs.length} staircase{stairs.length === 1 ? "" : "s"}, accessory schedule.</Text>
+        <Text style={{ color: GRAY, marginBottom: 8 }}>{totalFaces} wall faces grouped into {types.length} types. Wall panels {info.stdHeight} mm high + top pieces; F = filler (made to size); black dots = tie positions (@ {info.tieH} h × {info.tieV} v); green dashed = alignment walers (W600 and top row, one face of each wall); yellow triangle = push-pull prop (about every 3 m). All sizes in mm. Also in this set: {columns.length} column types, {bt.length} beam types, {stairs.length} staircase{stairs.length === 1 ? "" : "s"}, accessory schedule.</Text>
         <View style={{ borderWidth: 0.6, borderColor: "#999" }}>
           <View style={{ flexDirection: "row", backgroundColor: "#fdf3e4", fontWeight: "bold" }}>
             {["Type", "Nos", "Length", "Height", "Panels (width)", "Top", "Filler", "Faces"].map((h, i) => (
@@ -359,7 +367,7 @@ export function ModulationDocument({ types, info, totalFaces, columns = [], beam
       </Page>) : null}
       {pages.map((list, pi) => (
         <Page key={`w${pi}`} size="A3" orientation="landscape" style={pageStyle}>
-          {head("WALL FACE ELEVATIONS (viewed from the panel side)", `Scale ${scaleTxt} on A3 · black dots = ties · red = filler · cream = wall-top piece`)}
+          {head("WALL FACE ELEVATIONS (viewed from the panel side)", `Scale ${scaleTxt} on A3 · black dots = ties · green = walers · yellow = push-pull props · red = filler · cream = wall-top piece`)}
           <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
             {list.map((t, i) => (
               <View key={t.code} style={{ width: CELL_W, height: CELL_H, padding: 4, borderWidth: 0.4, borderColor: "#ddd", marginRight: i % COLS === COLS - 1 ? 0 : GAP, marginBottom: 6 }} wrap={false}>
@@ -393,7 +401,7 @@ export function ModulationDocument({ types, info, totalFaces, columns = [], beam
       {stairPages.map((list, pi) => (
         <Page key={`s${pi}`} size="A3" orientation="landscape" style={pageStyle}>
           {head("STAIRCASE MODULATION", "Waist-slab soffit panels, riser shutters, side cheeks and landing soffit · sizes in mm")}
-          {list.map((s) => <View key={s.code} style={{ marginBottom: 6 }}><StairCell s={s} /></View>)}
+          {list.map((s, i) => <View key={`${s.code}-${i}`} style={{ marginBottom: 6 }}><StairCell s={s} /></View>)}
           <Footer info={info} page={++pg} pages={totalPages} title="STAIRCASE MODULATION" />
         </Page>
       ))}

@@ -259,7 +259,10 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     stairs.push({ code: `ST${i + 1}`, label: `Staircase ${i + 1} (measured) — ${st.desc}`, width: r.width_mm, risers: r.risers, riser: r.riser_mm, tread: r.tread_mm, waist: r.waist_mm, openSides: r.open_sides ?? 1, landingM2: r.landing_m2 ?? 0, flights: r.flights, sets: 1, assumed: false });
   }
   const measured = (lbl: string, calc: string) => /soffit/.test(calc) && (/flight/.test(lbl) || /measured/.test(lbl));
-  const stairSets = (totals.items ?? []).filter((i) => i.group === "extra" && i.area > 0 && !measured(i.label, i.calc)).map((i) => ({ code: i.code, label: i.label, area: i.area }));
+  // when the stairs are known flight by flight (typed or read from the drawing) they get real panels; the company
+  // allowance line (used for the quote) must not also add a stair set to the parts list
+  const realStairs = stairs.length > 0;
+  const stairSets = (totals.items ?? []).filter((i) => i.group === "extra" && i.area > 0 && !measured(i.label, i.calc) && !(realStairs && /stair/i.test(i.label))).map((i) => ({ code: i.code, label: i.label, area: i.area }));
   const Hf = Math.round(t.params.floorHeight * 1000);
   for (const ss of stairSets.filter((x) => /stair/i.test(x.label))) {
     const per = Math.ceil(Hf / 2 / 170), cnt = Number(ss.label.match(/×\s*(\d+)/)?.[1]) || 1;

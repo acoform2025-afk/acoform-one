@@ -3,28 +3,13 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { runPanels, type PanelQuery } from "@/lib/floor-plans/run-panels";
 import { checkLayout } from "@/lib/floor-plans/check-run";
-import { buildScene3, type Scene3 } from "@/lib/floor-plans/scene3d";
+import type { Scene3 } from "@/lib/floor-plans/scene3d";
+import { sceneOf, type Ran } from "@/lib/floor-plans/scene-of";
 import { groupLevels, levelRank, type Building } from "@/lib/floor-plans/building";
 import { Viewer3D, type Stack3 } from "./viewer";
 
 export const metadata = { title: "3D model" };
 export const dynamic = "force-dynamic";
-
-type Ran = NonNullable<Awaited<ReturnType<typeof runPanels>>>;
-/** The formwork of one plan as a 3D scene, at a given floor height (a taller level reuses the typical plan's layout at its own height). */
-function sceneOf(r: Ran, floorMm?: number): Scene3 | null {
-  if (r.error || !r.inp || !r.shell) return null;
-  const ck = checkLayout(r)!;
-  const scene = buildScene3({
-    zoneWalls: r.inp.zoneWalls, zoneGaps: r.inp.zoneGaps, decks: r.inp.decks, zones: ck.zones, faces: r.result.faces, mpp: r.shell.mpp,
-    floorHeight: floorMm ? floorMm / 1000 : Number(r.t.params.floorHeight) || 3, slabMm: Number(r.t.params.slabMm) || 150, stdHeight: r.opt.stdHeight, beamDepthMm: Number(r.t.params.beamDepthMm) || 600,
-    cols: r.inp.zoneCols, beams3: r.inp.zoneBeam3, stairs: r.inp.zoneStairs,
-    stairGeo: r.inp.stairs, kickerMm: r.layoutRules?.kickerMm ?? 0, scMm: r.layoutRules ? [r.layoutRules.soffitCornerW, r.layoutRules.soffitCornerLeg] : undefined, icMm: r.layoutRules?.internalCorner, ecMm: r.layoutRules?.externalCorner,
-    openings: r.inp.zoneOpenings, arch: r.inp.zoneArch, stairLay: r.result.stairs, propSpacing: r.opt.propSpacing, tieH: r.layoutRules?.tieH, tieV: r.layoutRules?.tieV,
-  });
-  scene.issues = ck.check.issues.filter((i) => i.at).map((i) => ({ id: i.id, sev: i.sev, text: `${i.where}: ${i.detail}`, at: [Math.round(i.at![0] * 1000) / 1000, Math.round(i.at![1] * 1000) / 1000], y: i.z ?? scene.H }));
-  return scene;
-}
 
 export default async function Model3DPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<PanelQuery & { focus?: string; building?: string }> }) {
   const { id } = await params;
@@ -80,6 +65,7 @@ export default async function Model3DPage({ params, searchParams }: { params: Pr
       {back}
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-graphite-50">3D model — {whole ? "whole building" : "typical floor"}</h1>
+        <a href={`/floor-plans/${id}/panels/render?${qs}`} target="_blank" rel="noreferrer" className="rounded-md border border-graphite-700 px-2.5 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">3D views (PDF)</a>
         <a href={`/floor-plans/${id}/panels/stairs?${qs}`} target="_blank" rel="noreferrer" className="rounded-md border border-graphite-700 px-2.5 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">Staircase assembly drawing (PDF)</a>
         {building?.levels.length ? (
           <div className="flex items-center gap-1 text-xs">
