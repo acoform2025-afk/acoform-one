@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
-import { buildingTotals, groupLevels, KIND_LABEL, type Building, type Level, type LevelGroup, type LevelUse } from "@/lib/floor-plans/building";
+import { buildingTotals, groupLevels, KIND_LABEL, type Building, type Level, type LevelGroup, type LevelUse, type Question } from "@/lib/floor-plans/building";
 import { fmtArea } from "@/lib/floor-plans/calc";
 
 export type SiblingPlan = { id: string; name: string; contact: number; quote: number; measured: boolean };
@@ -16,8 +16,9 @@ const USE_LABEL: Record<LevelUse, string> = { typical: "Typical plan", own: "Own
  * has, whether the typical plan stands for it, and the open questions for the architect / structural engineer /
  * client. The whole-building formwork area is the sum over the formed levels.
  */
-export function BuildingPanel({ building, parts, typical, siblings, planId, canEdit, onChange, onReread, onMeasure, onShowPart }: {
+export function BuildingPanel({ building, parts, typical, siblings, planId, canEdit, extra = [], onChange, onReread, onMeasure, onShowPart }: {
   building: Building; parts: LevelPartInfo[]; typical: { contact: number; quote: number }; siblings: SiblingPlan[]; planId: string; canEdit: boolean;
+  extra?: Question[];      // questions from the measurement itself (slab, beams, openings …) — shown with the level questions, printed on the sheet
   onChange: (b: Building) => void; onReread: () => void;
   onMeasure: (g: LevelGroup, part: LevelPartInfo | null) => Promise<void>;
   onShowPart: (part: LevelPartInfo) => void;
@@ -41,10 +42,11 @@ export function BuildingPanel({ building, parts, typical, siblings, planId, canE
     levels = levels.map((l) => (l.kind === "floor" && (l.no ?? 0) >= first + g.count ? { ...l, key: `f${(l.no ?? 0) + d}`, no: (l.no ?? 0) + d, name: /^Floor \d+$/.test(l.name) ? `Floor ${(l.no ?? 0) + d}` : l.name } : l));
     onChange({ ...building, edited: true, levels: [...levels, ...add] });
   };
-  const open = building.questions.filter((q) => !q.done);
+  const allQ = [...building.questions, ...extra.filter((e) => !building.questions.some((b) => b.id === e.id))];
+  const open = allQ.filter((q) => !q.done);
   const sel = "rounded border border-graphite-700 bg-graphite-950 px-1 py-0.5 text-[11px] text-graphite-100 disabled:opacity-60";
   const copyQuestions = async () => {
-    const by = (to: string) => building.questions.filter((q) => q.to === to && !q.done);
+    const by = (to: string) => allQ.filter((q) => q.to === to && !q.done);
     const block = (to: string, who: string) => (by(to).length ? `For the ${who}:\n${by(to).map((q, i) => `${i + 1}. ${q.text}`).join("\n")}\n\n` : "");
     const text = `Clarifications needed before the formwork design can be finalised\n\n${block("architect", "architect")}${block("structure", "structural engineer")}${block("client", "client / site team")}`.trim();
     try { await navigator.clipboard.writeText(text); } catch { /* clipboard blocked */ }
@@ -106,14 +108,17 @@ export function BuildingPanel({ building, parts, typical, siblings, planId, canE
 
       <div className="mt-3 flex items-center justify-between">
         <button type="button" onClick={() => setShowQ((v) => !v)} className="text-xs font-medium text-graphite-100">Questions for architect / structure / client ({open.length} open)</button>
-        {open.length ? <button type="button" onClick={copyQuestions} className="text-[11px] text-brand-orange hover:underline">Copy for e-mail</button> : null}
+        <span className="flex items-center gap-2">
+          {open.length ? <button type="button" onClick={copyQuestions} className="text-[11px] text-brand-orange hover:underline">Copy for e-mail</button> : null}
+          <a href={`/floor-plans/${planId}/questions`} target="_blank" rel="noreferrer" className="rounded border border-graphite-700 px-1.5 py-0.5 text-[11px] text-graphite-200 hover:border-brand-orange" title="One sheet per party, with space for the answers">Clarification sheet (PDF)</a>
+        </span>
       </div>
       {showQ ? (
         <ul className="mt-1.5 space-y-1.5">
-          {building.questions.map((q) => (
+          {allQ.map((q) => (
             <li key={q.id} className={`rounded border px-2 py-1.5 ${q.done ? "border-graphite-800 opacity-50" : "border-graphite-700"}`}>
               <label className="flex items-start gap-2">
-                <input type="checkbox" checked={!!q.done} disabled={!canEdit} onChange={(e) => onChange({ ...building, questions: building.questions.map((x) => (x.id === q.id ? { ...x, done: e.target.checked } : x)) })} className="mt-0.5" />
+                <input type="checkbox" checked={!!q.done} disabled={!canEdit} onChange={(e) => onChange({ ...building, questions: building.questions.some((x) => x.id === q.id) ? building.questions.map((x) => (x.id === q.id ? { ...x, done: e.target.checked } : x)) : [...building.questions, { ...q, done: e.target.checked }] })} className="mt-0.5" />
                 <span className="min-w-0">
                   <span className="mr-1 rounded bg-graphite-800 px-1 text-[10px] uppercase tracking-wide text-graphite-400">{q.to === "structure" ? "structural" : q.to}</span>
                   <span className="text-[11px] text-graphite-100">{q.text}</span>
@@ -122,7 +127,7 @@ export function BuildingPanel({ building, parts, typical, siblings, planId, canE
               </label>
             </li>
           ))}
-          {!building.questions.length ? <li className="text-[11px] text-graphite-500">Nothing open — the drawing answered everything the level list needs.</li> : null}
+          {!allQ.length ? <li className="text-[11px] text-graphite-500">Nothing open — the drawing answered everything the level list needs.</li> : null}
         </ul>
       ) : null}
       {siblings.filter((s) => s.id !== planId && !building.levels.some((l) => l.planId === s.id)).length ? (

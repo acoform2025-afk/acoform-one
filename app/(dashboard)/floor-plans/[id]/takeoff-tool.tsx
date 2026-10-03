@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { ScopePanel } from "./scope-panel";
 import { BuildingPanel, type SiblingPlan } from "./building-panel";
 import { readBuilding, type Building } from "@/lib/floor-plans/building";
+import { measureQuestions } from "@/lib/floor-plans/questions";
 import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
@@ -876,6 +877,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
 
         {isDxf && t.building && !t.parentPlan ? (
           <BuildingPanel building={t.building} parts={parts.map((q) => ({ n: q.n, title: q.title, px: q.px }))} typical={{ contact: totals.contact_area, quote: totals.quote_area }} siblings={siblings} planId={plan.id} canEdit={canEdit}
+            extra={measureQuestions(t, totals, auto, rules, modelRef.current ? drawingSection(modelRef.current) : null)}
             onChange={setBuilding} onReread={() => { const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n); if (b) setBuilding({ ...b, edited: false }); }} onMeasure={makeLevelPlan} onShowPart={(q) => fitBox(q.px)} />
         ) : null}
         {t.parentPlan ? <p className="rounded-lg border border-graphite-800 bg-graphite-900 p-3 text-[11px] text-graphite-400">This is one level&apos;s own plan. The whole building is listed on its typical plan: <Link href={`/floor-plans/${t.parentPlan}`} className="text-brand-orange hover:underline">open it</Link>.</p> : null}
