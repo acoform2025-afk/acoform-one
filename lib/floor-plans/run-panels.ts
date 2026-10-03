@@ -1,6 +1,8 @@
 import type { createClient } from "@/lib/supabase/server";
 import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
-import { readDxf, type DxfModel } from "./dxf";
+import { drawingParts, drawingSection, dxfFrame, readDxf, type DxfModel } from "./dxf";
+import { readBuilding } from "./building";
+import { UNIT_TO_M } from "./calc";
 import { panelInputs } from "./panel-input";
 import { loadRules } from "./rules";
 import type { Takeoff } from "./calc";
@@ -52,6 +54,15 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
       if (blob) { try { model = readDxf(await dxfTextFromBlob(blob)); } catch { model = null; } }
       if (model) remember(modelCache, mk, model, 2);
     }
+  }
+  // a plan measured before the whole-building list existed (or never saved since): its levels are read here, unsaved
+  if (!t.building && model && t.dxf) {
+    try {
+      const u = UNIT_TO_M[t.dxf.units], parts = drawingParts(model, u, t.dxf.layerRoles), reg = t.dxf.region, f = dxfFrame(model, 2400);
+      const area = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+      const typ = reg ? parts.find((p) => { const a = f.toPx([p.box[0], p.box[1]]), b = f.toPx([p.box[2], p.box[3]]); const px = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]; const i = area([Math.max(px[0], reg[0]), Math.max(px[1], reg[1]), Math.min(px[2], reg[2]), Math.min(px[3], reg[3])]); return i > 0.85 * area(px) && i > 0.6 * area(reg); }) : undefined;
+      t.building = readBuilding({ texts: model.texts ?? [], unitToM: u, parts, section: drawingSection(model), said: { floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, planName: plan.name, typicalPartN: typ?.n });
+    } catch { /* no levels */ }
   }
   const inp = panelInputs(t, model, rules);
   const o: PanelOptions = { ...opt, extCorners: inp.extCorners, upstands: inp.upstands, sunk: inp.sunk, rules: layoutRules, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns, stairSets: inp.stairSets, stairs: inp.stairs };
