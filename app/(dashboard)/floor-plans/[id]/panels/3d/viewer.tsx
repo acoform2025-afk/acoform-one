@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Scene3 } from "@/lib/floor-plans/scene3d";
 
-type Layer = "walls" | "columns" | "wallPanels" | "fillers" | "corners" | "deck" | "slab" | "beams" | "stairs" | "issues";
-const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", fillers: "Fillers / specials", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", issues: "Design check" };
+type Layer = "walls" | "columns" | "wallPanels" | "fillers" | "corners" | "deck" | "slab" | "beams" | "stairs" | "arch" | "issues";
+const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", fillers: "Fillers / specials", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", arch: "Railings & projections", issues: "Design check" };
 const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xff3fb3, deck: 0x9fd3c7, dspec: 0xff8ad1, ic: 0x34d399, ec: 0x10b981, sc: 0xa78bfa, kick: 0xfb923c, bside: 0xd4a373, bbot: 0xb08968, col: 0xfcd34d, stair: 0xc9b79c, riser: 0xe7d3b8, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, colC: 0x8b8f99 };
 const KIND_LAYER: Record<Scene3["panels"][number]["k"], Layer> = { std: "wallPanels", top: "wallPanels", fill: "fillers", deck: "deck", dspec: "fillers", ic: "corners", ec: "corners", sc: "corners", kick: "corners", bside: "beams", bbot: "beams", col: "columns", stair: "stairs", riser: "stairs" };
 const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standard wall panel", top: "wall-top piece", fill: "wall filler (non-standard width)", deck: "deck panel", dspec: "deck filler / special", ic: "internal corner", ec: "external corner", sc: "soffit corner", kick: "kicker", bside: "beam side panel", bbot: "beam bottom", col: "column panel", stair: "stair soffit", riser: "riser panel" };
@@ -18,7 +18,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
   const host = useRef<HTMLDivElement>(null);
   type View = "3d" | "top" | "front" | "back" | "left" | "right";
   const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; turn: (deg: number) => void; cut: (y: number | null) => void; flyTo: (x: number, y: number, z: number, dist?: number) => void; highlight: (test: ((p: Scene3["panels"][number]) => boolean) | null) => number } | null>(null);
-  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, fillers: true, corners: true, deck: true, slab: false, beams: true, stairs: true, issues: true });
+  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, fillers: true, corners: true, deck: true, slab: false, beams: true, stairs: true, arch: true, issues: true });
   const [pick, setPick] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [cut, setCut] = useState<number>(100);          // % of the floor height shown (section cut from the top)
@@ -53,7 +53,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
         ctr.minDistance = 0.5; ctr.maxDistance = Math.max(span, totalH) * 6;
         sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
         const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, totalH + span * 1.5, cz + span * 0.7); sc.add(sun);
-        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), fillers: new THREE.Group(), corners: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), issues: new THREE.Group() };
+        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), fillers: new THREE.Group(), corners: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), arch: new THREE.Group(), issues: new THREE.Group() };
         // section cut: everything above the cut height is clipped away (slider)
         const clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), top);
         renderer.clippingPlanes = [clip];
@@ -86,8 +86,26 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           if (fl.walls.length) G.walls.add(lift(extrude(fl.walls, fl.H, 0, COLOR.wall)));
           // sill walls under windows, lintels over doors / windows, glass in the windows
           for (const wb of fl.wallBits ?? []) G.walls.add(extrude([wb.poly], wb.z1 - wb.z0, wb.z0, COLOR.wall));
+          // railings (a see-through fence 1 m high), parapet walls (0.9 m), sunshades / projections (a thin slab at lintel level)
+          if (fl.arch?.length) {
+            const railM = new THREE.MeshStandardMaterial({ color: 0xc9d1d9, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+            const parM = new THREE.MeshStandardMaterial({ color: 0xb7b9ad, side: THREE.DoubleSide, roughness: 0.9 });
+            const projM = new THREE.MeshStandardMaterial({ color: 0xa7a99d, side: THREE.DoubleSide, roughness: 0.9 });
+            const railV: number[] = [], railTop: number[] = [], parV: number[] = [], projV: number[] = [];
+            const quad = (arr: number[], a: [number, number], b: [number, number], z0: number, z1: number) => arr.push(a[0], z0, a[1], b[0], z0, b[1], b[0], z1, b[1], a[0], z0, a[1], b[0], z1, b[1], a[0], z1, a[1]);
+            for (const it of fl.arch) {
+              if (it.k === "proj" && it.ring) { G.arch.add(extrude([[it.ring]], 0.08, 2.1, 0xa7a99d)); continue; }
+              if (!it.a || !it.b) continue;
+              if (it.k === "rail") { quad(railV, it.a, it.b, 0, 1.0); railTop.push(it.a[0], 1.0, it.a[1], it.b[0], 1.0, it.b[1]); }
+              else if (it.k === "parapet") quad(parV, it.a, it.b, 0, 0.9);
+              else quad(projV, it.a, it.b, 2.1, 2.18);
+            }
+            const mk = (v: number[], m: InstanceType<typeof THREE.MeshStandardMaterial>) => { if (!v.length) return; const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(v), 3)); g.computeVertexNormals(); G.arch.add(new THREE.Mesh(g, m)); };
+            mk(railV, railM); mk(parV, parM); mk(projV, projM);
+            if (railTop.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(railTop), 3)); G.arch.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xe5e7eb }))); }
+          }
           if (fl.glass?.length) {
-            const gm = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, transparent: true, opacity: 0.45, side: THREE.DoubleSide, roughness: 0.1, metalness: 0.3, depthWrite: false });
+            const gm = new THREE.MeshStandardMaterial({ color: 0x9fdcff, emissive: 0x1c4a66, transparent: true, opacity: 0.75, side: THREE.DoubleSide, roughness: 0.1, metalness: 0.2, depthWrite: false });
             const dm = new THREE.MeshStandardMaterial({ color: 0x5b4636, side: THREE.DoubleSide, roughness: 0.8 });
             for (const gl of fl.glass) {
               const [a, b, c, d] = gl.p; const g = new THREE.BufferGeometry();
@@ -263,7 +281,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           // how many pieces each layer has — a layer with nothing on this floor (e.g. no columns in a shear-wall building) is shown greyed with "0"
           const pcs = scene.panels.filter((p) => KIND_LAYER[p.k] === l).length;
           const n = l === "walls" ? scene.walls.length : l === "columns" ? (scene.cols?.length ?? 0) + pcs : l === "slab" ? scene.slabPoly.length : l === "beams" ? (scene.beamSolids?.length ?? 0) + scene.beams.length + pcs
-            : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
+            : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "arch" ? (scene.arch?.length ?? 0) : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
           return (
             <button key={l} type="button" onClick={() => toggle(l)} onDoubleClick={() => only(l)} title={`${n ? `${n} on this floor` : "nothing of this kind on this floor"} · double-click to see only this`}
               className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : n ? "border border-graphite-700 text-graphite-300 hover:bg-graphite-800" : "border border-dashed border-graphite-800 text-graphite-600"}`}>{LABEL[l]}{n ? "" : " (0)"}</button>

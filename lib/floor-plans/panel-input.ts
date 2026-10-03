@@ -4,6 +4,7 @@
  */
 import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals, autoStairRows } from "./calc";
+import { isRailLayer } from "./layer-rules";
 import { closedLoops, dxfAuto, dxfFrame, separateAreas, type DxfModel } from "./dxf";
 import { nearRings, wallUnion } from "./geom";
 import { buildShell } from "./shell";
@@ -30,11 +31,30 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   const faces: Face[] = [];
   // net soffit area — same as the area list
   let auto: ReturnType<typeof dxfAuto> | null = null;
+  const archItems: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[] = [];
   let frame: ReturnType<typeof dxfFrame> | null = null;
   if (model && t.dxf) {
     const f = dxfFrame(model, 2400); frame = f; const reg = t.dxf.region;
     const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0 });
+    // architecture around the formwork, for the 3D model only: balcony railings, parapet walls, sunshades / projections
+    const roles = t.dxf.layerRoles ?? {};
+    const kindOf = (layer: string): "rail" | "parapet" | "proj" | null => {
+      const r = roles[layer]; if (r === "walls" || r === "slab" || r === "columns" || r === "beams" || r === "upstand") return null;
+      if (isRailLayer(layer)) return "rail";
+      const n = layer.toLowerCase();
+      if (/parapet|kerb|curb/.test(n)) return "parapet";
+      if (/projection|chajj|chhajj|sunshade|sun-shade|canopy|(^|[-_ ])shade|ledge|weather/.test(n)) return "proj";
+      return null;
+    };
+    const tm = (q: Pt): Pt => { const [x, y] = f.toPx(q); return [x * mpp, y * mpp]; };
+    for (const p of [...(model.rails ?? []), ...model.paths]) {
+      if (archItems.length > 6000) break;
+      const k = kindOf(p.layer); if (!k || (keep && !keep(p))) continue;
+      const pts = p.pts.map(tm);
+      if (k === "proj" && p.closed && pts.length >= 3) { archItems.push({ k, ring: pts }); continue; }
+      for (let i = 0; i < pts.length - (p.closed ? 0 : 1); i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) >= 0.1) archItems.push({ k, a, b }); }
+    }
   }
   let corners = 0, extCorners = 0;          // internal (room) corners → IC, external (outside) corners → EC
   let solidPx: Pt[][] = [];
@@ -309,5 +329,5 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 + z.n[0] * z.thk / 2 - mid[0], (z.a[1] + z.b[1]) / 2 + z.n[1] * z.thk / 2 - mid[1]) < 0.3)) continue;
     zoneOpenings.push({ a: [ca[0] - nx * h, ca[1] - ny * h], b: [cb[0] - nx * h, cb[1] - ny * h], n: [nx, ny], thk: dg.thk, door: dg.door, sill: dg.door ? 0 : OPENING_DEFAULTS.windowSill, head: dg.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, gap: true });
   }
-  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneOpenings, sunk: auto?.sunk ?? [] };
+  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [] };
 }
