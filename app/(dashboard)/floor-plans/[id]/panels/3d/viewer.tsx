@@ -76,24 +76,29 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
         const rBall = Math.max(0.12, Math.min(0.35, span / 120));
         // one floor's formwork, lifted to y0; the pieces of one scene share their geometry across the floors it is drawn on
         const geoCache = new Map<Scene3, Map<string, { pos: Float32Array; edge: Float32Array; list: Scene3["panels"]; base: InstanceType<typeof THREE.Color>; colors: Float32Array }>>();
-        const addFloor = (fl: Scene3, y0: number, levelName: string, withIssues: boolean) => {
-          const lift = (m: InstanceType<typeof THREE.Object3D>) => { m.position.y += y0; return m; };
-          if (fl.walls.length) groups.walls.add(lift(extrude(fl.walls, fl.H, 0, COLOR.wall)));
-          if (fl.slabPoly.length) groups.slab.add(lift(extrude(fl.slabPoly, fl.slab, fl.H, COLOR.slab, 0.55)));
-          if (fl.cols?.length) groups.columns.add(lift(extrude(fl.cols.map((r) => [r]), fl.H, 0, COLOR.colC)));
+        const addFloor = (fl: Scene3, y0: number, levelName: string, withIssues: boolean, h?: number) => {
+          // everything of this floor goes into one sub-group per layer, placed at y0 and stretched to the level height
+          const k = h ? h / (fl.H + fl.slab) : 1;
+          const subs = new Map<Layer, InstanceType<typeof THREE.Group>>();
+          const sub = (l: Layer) => { let g = subs.get(l); if (!g) { g = new THREE.Group(); g.position.y = y0; g.scale.y = k; groups[l].add(g); subs.set(l, g); } return g; };
+          const G = new Proxy({} as Record<Layer, InstanceType<typeof THREE.Group>>, { get: (_t, l: string) => sub(l as Layer) });
+          const lift = (m: InstanceType<typeof THREE.Object3D>) => m;
+          if (fl.walls.length) G.walls.add(lift(extrude(fl.walls, fl.H, 0, COLOR.wall)));
+          if (fl.slabPoly.length) G.slab.add(lift(extrude(fl.slabPoly, fl.slab, fl.H, COLOR.slab, 0.55)));
+          if (fl.cols?.length) G.columns.add(lift(extrude(fl.cols.map((r) => [r]), fl.H, 0, COLOR.colC)));
           // beams drawn on the plan: their outline from the soffit down to the beam bottom
           const byD = new Map<number, Scene3["walls"]>();
           for (const b of fl.beamSolids ?? []) { const h = Math.round((b.d - fl.slab) * 1000) / 1000; if (h <= 0) continue; (byD.get(h) ?? byD.set(h, []).get(h)!).push([b.ring]); }
-          for (const [h, polys] of byD) groups.beams.add(lift(extrude(polys, h, fl.H - h, COLOR.beam)));
+          for (const [h, polys] of byD) G.beams.add(lift(extrude(polys, h, fl.H - h, COLOR.beam)));
           if (fl.steps?.length) {
             const mat = new THREE.MeshStandardMaterial({ color: COLOR.stair, roughness: 0.9 });
-            for (const st of fl.steps) { const m = new THREE.Mesh(new THREE.BoxGeometry(st.s[0], st.s[1], st.s[2]), mat); m.position.set(st.c[0], st.c[1] + y0, st.c[2]); m.rotation.y = st.rot; groups.stairs.add(m); }
+            for (const st of fl.steps) { const m = new THREE.Mesh(new THREE.BoxGeometry(st.s[0], st.s[1], st.s[2]), mat); m.position.set(st.c[0], st.c[1], st.c[2]); m.rotation.y = st.rot; G.stairs.add(m); }
           }
           for (const b of fl.beams) {
             const dx = b.b[0] - b.a[0], dz = b.b[1] - b.a[1], L = Math.hypot(dx, dz), h = b.d - fl.slab; if (!L || h <= 0) continue;
             const m = new THREE.Mesh(new THREE.BoxGeometry(L, h, b.w), new THREE.MeshStandardMaterial({ color: COLOR.beam, roughness: 0.9 }));
-            m.position.set((b.a[0] + b.b[0]) / 2, fl.H - h / 2 + y0, (b.a[1] + b.b[1]) / 2); m.rotation.y = -Math.atan2(dz, dx);
-            groups.beams.add(m);
+            m.position.set((b.a[0] + b.b[0]) / 2, fl.H - h / 2, (b.a[1] + b.b[1]) / 2); m.rotation.y = -Math.atan2(dz, dx);
+            G.beams.add(m);
           }
           // panels: one mesh + outline per kind; quad index kept for picking
           let cache = geoCache.get(fl);
@@ -112,28 +117,27 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
             }
             geoCache.set(fl, cache);
           }
-          for (const [k, c] of cache) {
+          for (const [kk, c] of cache) {
             // the same arrays on every floor drawn from this scene (one colour buffer → a highlight shows on all of them)
             const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(c.pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(c.colors, 3)); g.computeVertexNormals();
             const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(c.edge, 3));
             const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.2 }));
             const lines = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x1f2937 }));
-            mesh.position.y = y0; lines.position.y = y0;
-            groups[KIND_LAYER[k as Scene3["panels"][number]["k"]]].add(mesh, lines); pickables.push({ mesh, list: c.list, base: c.base, colors: c.colors, level: levelName });
+            G[KIND_LAYER[kk as Scene3["panels"][number]["k"]]].add(mesh, lines); pickables.push({ mesh, list: c.list, base: c.base, colors: c.colors, level: levelName });
           }
           if (fl.mb.length) {
             const arr = new Float32Array(fl.mb.length * 6);
-            fl.mb.forEach(([a, b], i) => arr.set([a[0], fl.H - 0.02 + y0, a[1], b[0], fl.H - 0.02 + y0, b[1]], i * 6));
+            fl.mb.forEach(([a, b], i) => arr.set([a[0], fl.H - 0.02, a[1], b[0], fl.H - 0.02, b[1]], i * 6));
             const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
-            groups.deck.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x2563eb })));
+            G.deck.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x2563eb })));
           }
           // design-check markers: a red (error) / amber (warning) ball on a pole at the spot (on the lowest floor drawn from this scene)
           if (withIssues) for (const is of fl.issues ?? []) {
             const col = is.sev === "error" ? 0xef4444 : 0xf59e0b;
             const ball = new THREE.Mesh(new THREE.SphereGeometry(rBall, 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 }));
-            ball.position.set(is.at[0], is.y + y0 + rBall * 2.5, is.at[1]); ball.renderOrder = 10;
+            ball.position.set(is.at[0], is.y * k + y0 + rBall * 2.5, is.at[1]); ball.renderOrder = 10;
             const pole = new THREE.Mesh(new THREE.CylinderGeometry(rBall * 0.15, rBall * 0.15, rBall * 2.5, 6), new THREE.MeshBasicMaterial({ color: col }));
-            pole.position.set(is.at[0], is.y + y0 + rBall * 1.25, is.at[1]);
+            pole.position.set(is.at[0], is.y * k + y0 + rBall * 1.25, is.at[1]);
             groups.issues.add(ball, pole); marks.push({ mesh: ball, text: `${levelName ? `${levelName} · ` : ""}${is.id} · ${is.text}` });
           }
         };
@@ -146,7 +150,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
               if (outline.length) { const m = extrude(outline, l.h, 0, 0x6b7280, 0.18); m.position.y = l.y0; groups.walls.add(m); }
               continue;
             }
-            addFloor(stack.scenes[l.sceneIdx], l.y0, l.name, !seen.has(l.sceneIdx)); seen.add(l.sceneIdx);
+            addFloor(stack.scenes[l.sceneIdx], l.y0, l.name, !seen.has(l.sceneIdx), l.h); seen.add(l.sceneIdx);
           }
           // level lines + names up the side of the building
           const lab = (text: string, y: number) => {
@@ -183,6 +187,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           else if (v === "back") cam.position.set(cx, ym, cz - d);
           else if (v === "left") cam.position.set(cx - d, ym, cz);
           else if (v === "right") cam.position.set(cx + d, ym, cz);
+          else if (stack) { const D = Math.max(span, totalH) * 1.9; cam.position.set(cx + D * 0.55, ym + D * 0.3, cz + D * 0.75); }
           else cam.position.set(cx + d * 0.55, ym + d * 0.45, cz + d * 0.7);
           ctr.target.set(cx, v === "top" ? totalH : ym, cz); ctr.update();
         };

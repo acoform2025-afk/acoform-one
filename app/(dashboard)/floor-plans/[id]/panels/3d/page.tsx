@@ -48,7 +48,7 @@ export default async function Model3DPage({ params, searchParams }: { params: Pr
   if (whole && building) {
     const typicalMm = Math.round((Number(r.t.params.floorHeight) || 3) * 1000);
     const scenes: Scene3[] = [scene];
-    const key = new Map<string, number>([[`typ|${typicalMm}`, 0]]);
+    const key = new Map<string, number>();
     const own = new Map<string, Ran | null>();
     const levels: Stack3["levels"] = [];
     const ownIdx = new Set<number>();
@@ -64,11 +64,9 @@ export default async function Model3DPage({ params, searchParams }: { params: Pr
         if (o && !o.error && o.inp && o.shell) { if (!key.has(k)) { const s = sceneOf(o); if (s) { key.set(k, scenes.length); ownIdx.add(scenes.length); scenes.push(s); } } idx = key.get(k) ?? null; }
         if (idx == null) missingOwn.push(l.name);
       }
-      if (idx == null && l.use !== "none") {
-        const k = `typ|${l.floorMm ?? typicalMm}`;
-        if (!key.has(k)) { const s = sceneOf(r, l.floorMm); if (s) { key.set(k, scenes.length); scenes.push(s); } }
-        idx = key.get(k) ?? 0;
-      }
+      // the typical layout stands for every other formed level; a taller / lower level shows it stretched to its own
+      // height (one layout only — building a fresh layout per height is too heavy for the server)
+      if (idx == null && l.use !== "none") idx = 0;
       if (l.kind === "headroom" && l.use === "none") continue;        // nothing to draw above the terrace
       levels.push({ key: l.key, name: l.name, kind: l.kind, y0: y, h, sceneIdx: idx, own: idx != null && ownIdx.has(idx) });
       y += h;
