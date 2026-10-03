@@ -11,7 +11,10 @@ const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standa
 
 const span = (sc: Scene3) => Math.max(sc.box[2] - sc.box[0], sc.box[3] - sc.box[1], 5);
 
-export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
+/** The whole building: levels from the bottom up, each at its height, drawn from one of the scenes (null = not formed with this set). */
+export type Stack3 = { levels: { key: string; name: string; kind: string; y0: number; h: number; sceneIdx: number | null; own: boolean }[]; scenes: Scene3[] };
+
+export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: string; stack?: Stack3 }) {
   const host = useRef<HTMLDivElement>(null);
   type View = "3d" | "top" | "front" | "back" | "left" | "right";
   const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; turn: (deg: number) => void; cut: (y: number | null) => void; flyTo: (x: number, y: number, z: number, dist?: number) => void; highlight: (test: ((p: Scene3["panels"][number]) => boolean) | null) => number } | null>(null);
@@ -23,7 +26,9 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
   const [query, setQuery] = useState<string>("");
   const [hits, setHits] = useState<number | null>(null);
   const [showIssues, setShowIssues] = useState(false);
-  const top = scene.H + scene.slab + 0.3;
+  const totalH = stack ? stack.levels.reduce((s, l) => s + l.h, 0) : scene.H + scene.slab;
+  const top = totalH + 0.3;
+  const [lvl, setLvl] = useState<string>("");        // whole building: the level the room / find tools work on
 
   useEffect(() => {
     let disposed = false, raf = 0;
@@ -41,13 +46,13 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         el.appendChild(renderer.domElement);
         const sc = new THREE.Scene();
         const [x0, y0, x1, y1] = scene.box; const cx = (x0 + x1) / 2, cz = (y0 + y1) / 2, span = Math.max(x1 - x0, y1 - y0, 5);
-        const cam = new THREE.PerspectiveCamera(40, W / Hh, 0.05, span * 20);
+        const cam = new THREE.PerspectiveCamera(40, W / Hh, 0.05, Math.max(span, totalH) * 20);
         // free rotation with the mouse in every direction (over the top, from underneath — no stops), right-drag moves, wheel zooms
-        const ctr = new TrackballControls(cam, renderer.domElement); ctr.target.set(cx, scene.H / 2, cz);
+        const ctr = new TrackballControls(cam, renderer.domElement); ctr.target.set(cx, totalH / 2, cz);
         ctr.rotateSpeed = 3; ctr.zoomSpeed = 1.2; ctr.panSpeed = 0.8; ctr.dynamicDampingFactor = 0.15;
-        ctr.minDistance = 0.5; ctr.maxDistance = span * 6;
+        ctr.minDistance = 0.5; ctr.maxDistance = Math.max(span, totalH) * 6;
         sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
-        const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, span * 1.5, cz + span * 0.7); sc.add(sun);
+        const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, totalH + span * 1.5, cz + span * 0.7); sc.add(sun);
         const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), fillers: new THREE.Group(), corners: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), issues: new THREE.Group() };
         // section cut: everything above the cut height is clipped away (slider)
         const clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), top);
@@ -65,81 +70,121 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           g.rotateX(-Math.PI / 2); g.translate(0, base, 0);
           return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, transparent: opacity < 1, opacity, roughness: 0.9 }));
         };
-        if (scene.walls.length) groups.walls.add(extrude(scene.walls, scene.H, 0, COLOR.wall));
-        if (scene.slabPoly.length) groups.slab.add(extrude(scene.slabPoly, scene.slab, scene.H, COLOR.slab, 0.55));
-        if (scene.cols?.length) groups.columns.add(extrude(scene.cols.map((r) => [r]), scene.H, 0, COLOR.colC));
-        // beams drawn on the plan: their outline from the soffit down to the beam bottom
-        const byD = new Map<number, Scene3["walls"]>();
-        for (const b of scene.beamSolids ?? []) { const h = Math.round((b.d - scene.slab) * 1000) / 1000; if (h <= 0) continue; (byD.get(h) ?? byD.set(h, []).get(h)!).push([b.ring]); }
-        for (const [h, polys] of byD) groups.beams.add(extrude(polys, h, scene.H - h, COLOR.beam));
-        if (scene.steps?.length) {
-          const mat = new THREE.MeshStandardMaterial({ color: COLOR.stair, roughness: 0.9 });
-          for (const s of scene.steps) { const m = new THREE.Mesh(new THREE.BoxGeometry(s.s[0], s.s[1], s.s[2]), mat); m.position.set(s.c[0], s.c[1], s.c[2]); m.rotation.y = s.rot; groups.stairs.add(m); }
-        }
-        for (const b of scene.beams) {
-          const dx = b.b[0] - b.a[0], dz = b.b[1] - b.a[1], L = Math.hypot(dx, dz), h = b.d - scene.slab; if (!L || h <= 0) continue;
-          const m = new THREE.Mesh(new THREE.BoxGeometry(L, h, b.w), new THREE.MeshStandardMaterial({ color: COLOR.beam, roughness: 0.9 }));
-          m.position.set((b.a[0] + b.b[0]) / 2, scene.H - h / 2, (b.a[1] + b.b[1]) / 2); m.rotation.y = -Math.atan2(dz, dx);
-          groups.beams.add(m);
-        }
-        // panels: one mesh + outline per kind; quad index kept for picking
-        const pickables: { mesh: InstanceType<typeof THREE.Mesh>; list: Scene3["panels"]; base: InstanceType<typeof THREE.Color>; colors: Float32Array }[] = [];
-        for (const k of Object.keys(KIND_LAYER) as Scene3["panels"][number]["k"][]) {
-          const list = scene.panels.filter((p) => p.k === k); if (!list.length) continue;
-          const pos = new Float32Array(list.length * 18), edge = new Float32Array(list.length * 24), colors = new Float32Array(list.length * 18);
-          const base = new THREE.Color(COLOR[k]);
-          list.forEach((q, i) => {
-            const [a, b, c, d] = q.p;
-            [a, b, c, a, c, d].forEach((v, j) => { pos.set(v, i * 18 + j * 3); colors.set([base.r, base.g, base.b], i * 18 + j * 3); });
-            [a, b, b, c, c, d, d, a].forEach((v, j) => edge.set(v, i * 24 + j * 3));
-          });
-          const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(colors, 3)); g.computeVertexNormals();
-          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.2 }));
-          const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(edge, 3));
-          const lines = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x1f2937 }));
-          groups[KIND_LAYER[k]].add(mesh, lines); pickables.push({ mesh, list, base, colors });
-        }
+        type Pickable = { mesh: InstanceType<typeof THREE.Mesh>; list: Scene3["panels"]; base: InstanceType<typeof THREE.Color>; colors: Float32Array; level: string };
+        const pickables: Pickable[] = [];
+        const marks: { mesh: InstanceType<typeof THREE.Mesh>; text: string }[] = [];
+        const rBall = Math.max(0.12, Math.min(0.35, span / 120));
+        // one floor's formwork, lifted to y0; the pieces of one scene share their geometry across the floors it is drawn on
+        const geoCache = new Map<Scene3, Map<string, { pos: Float32Array; edge: Float32Array; list: Scene3["panels"]; base: InstanceType<typeof THREE.Color>; colors: Float32Array }>>();
+        const addFloor = (fl: Scene3, y0: number, levelName: string, withIssues: boolean) => {
+          const lift = (m: InstanceType<typeof THREE.Object3D>) => { m.position.y += y0; return m; };
+          if (fl.walls.length) groups.walls.add(lift(extrude(fl.walls, fl.H, 0, COLOR.wall)));
+          if (fl.slabPoly.length) groups.slab.add(lift(extrude(fl.slabPoly, fl.slab, fl.H, COLOR.slab, 0.55)));
+          if (fl.cols?.length) groups.columns.add(lift(extrude(fl.cols.map((r) => [r]), fl.H, 0, COLOR.colC)));
+          // beams drawn on the plan: their outline from the soffit down to the beam bottom
+          const byD = new Map<number, Scene3["walls"]>();
+          for (const b of fl.beamSolids ?? []) { const h = Math.round((b.d - fl.slab) * 1000) / 1000; if (h <= 0) continue; (byD.get(h) ?? byD.set(h, []).get(h)!).push([b.ring]); }
+          for (const [h, polys] of byD) groups.beams.add(lift(extrude(polys, h, fl.H - h, COLOR.beam)));
+          if (fl.steps?.length) {
+            const mat = new THREE.MeshStandardMaterial({ color: COLOR.stair, roughness: 0.9 });
+            for (const st of fl.steps) { const m = new THREE.Mesh(new THREE.BoxGeometry(st.s[0], st.s[1], st.s[2]), mat); m.position.set(st.c[0], st.c[1] + y0, st.c[2]); m.rotation.y = st.rot; groups.stairs.add(m); }
+          }
+          for (const b of fl.beams) {
+            const dx = b.b[0] - b.a[0], dz = b.b[1] - b.a[1], L = Math.hypot(dx, dz), h = b.d - fl.slab; if (!L || h <= 0) continue;
+            const m = new THREE.Mesh(new THREE.BoxGeometry(L, h, b.w), new THREE.MeshStandardMaterial({ color: COLOR.beam, roughness: 0.9 }));
+            m.position.set((b.a[0] + b.b[0]) / 2, fl.H - h / 2 + y0, (b.a[1] + b.b[1]) / 2); m.rotation.y = -Math.atan2(dz, dx);
+            groups.beams.add(m);
+          }
+          // panels: one mesh + outline per kind; quad index kept for picking
+          let cache = geoCache.get(fl);
+          if (!cache) {
+            cache = new Map();
+            for (const k of Object.keys(KIND_LAYER) as Scene3["panels"][number]["k"][]) {
+              const list = fl.panels.filter((p) => p.k === k); if (!list.length) continue;
+              const pos = new Float32Array(list.length * 18), edge = new Float32Array(list.length * 24), colors = new Float32Array(list.length * 18);
+              const base = new THREE.Color(COLOR[k]);
+              list.forEach((q, i) => {
+                const [a, b, c, d] = q.p;
+                [a, b, c, a, c, d].forEach((v, j) => { pos.set(v, i * 18 + j * 3); colors.set([base.r, base.g, base.b], i * 18 + j * 3); });
+                [a, b, b, c, c, d, d, a].forEach((v, j) => edge.set(v, i * 24 + j * 3));
+              });
+              cache.set(k, { pos, edge, list, base, colors });
+            }
+            geoCache.set(fl, cache);
+          }
+          for (const [k, c] of cache) {
+            // the same arrays on every floor drawn from this scene (one colour buffer → a highlight shows on all of them)
+            const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(c.pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(c.colors, 3)); g.computeVertexNormals();
+            const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(c.edge, 3));
+            const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.2 }));
+            const lines = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x1f2937 }));
+            mesh.position.y = y0; lines.position.y = y0;
+            groups[KIND_LAYER[k as Scene3["panels"][number]["k"]]].add(mesh, lines); pickables.push({ mesh, list: c.list, base: c.base, colors: c.colors, level: levelName });
+          }
+          if (fl.mb.length) {
+            const arr = new Float32Array(fl.mb.length * 6);
+            fl.mb.forEach(([a, b], i) => arr.set([a[0], fl.H - 0.02 + y0, a[1], b[0], fl.H - 0.02 + y0, b[1]], i * 6));
+            const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+            groups.deck.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x2563eb })));
+          }
+          // design-check markers: a red (error) / amber (warning) ball on a pole at the spot (on the lowest floor drawn from this scene)
+          if (withIssues) for (const is of fl.issues ?? []) {
+            const col = is.sev === "error" ? 0xef4444 : 0xf59e0b;
+            const ball = new THREE.Mesh(new THREE.SphereGeometry(rBall, 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 }));
+            ball.position.set(is.at[0], is.y + y0 + rBall * 2.5, is.at[1]); ball.renderOrder = 10;
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(rBall * 0.15, rBall * 0.15, rBall * 2.5, 6), new THREE.MeshBasicMaterial({ color: col }));
+            pole.position.set(is.at[0], is.y + y0 + rBall * 1.25, is.at[1]);
+            groups.issues.add(ball, pole); marks.push({ mesh: ball, text: `${levelName ? `${levelName} · ` : ""}${is.id} · ${is.text}` });
+          }
+        };
+        if (stack) {
+          const seen = new Set<number>();
+          for (const l of stack.levels) {
+            if (l.sceneIdx == null) {
+              // not formed with this set: a faint block of the building outline, so the stack reads as one building
+              const outline = (stack.scenes[0].slabPoly.length ? stack.scenes[0].slabPoly : stack.scenes[0].walls);
+              if (outline.length) { const m = extrude(outline, l.h, 0, 0x6b7280, 0.18); m.position.y = l.y0; groups.walls.add(m); }
+              continue;
+            }
+            addFloor(stack.scenes[l.sceneIdx], l.y0, l.name, !seen.has(l.sceneIdx)); seen.add(l.sceneIdx);
+          }
+          // level lines + names up the side of the building
+          const lab = (text: string, y: number) => {
+            const c = document.createElement("canvas"); c.width = 256; c.height = 48; const g2 = c.getContext("2d")!;
+            g2.fillStyle = "#e5e7eb"; g2.font = "bold 26px sans-serif"; g2.textBaseline = "middle"; g2.fillText(text, 4, 24);
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
+            sp.scale.set(span * 0.12, span * 0.0225, 1); sp.position.set(x0 - span * 0.08, y, y1 + span * 0.02); sp.renderOrder = 11; sc.add(sp);
+          };
+          for (const l of stack.levels) lab(l.name, l.y0 + 0.05);
+        } else addFloor(scene, 0, "", true);
         // highlight: matching pieces turn bright orange, the rest fade; returns how many matched
         const hl = new THREE.Color(0xff6a00), dim = new THREE.Color(0x3a3d44);
         const highlight = (test: ((p: Scene3["panels"][number]) => boolean) | null) => {
-          let n = 0; let first: [number, number, number] | null = null;
+          let n = 0;
+          const done = new Set<Float32Array>();
           for (const pk of pickables) {
-            pk.list.forEach((q, i) => {
-              const m = test ? test(q) : false; if (m) { n++; if (!first) first = q.p[0]; }
-              const c = test ? (m ? hl : dim) : pk.base;
-              for (let j = 0; j < 6; j++) pk.colors.set([c.r, c.g, c.b], i * 18 + j * 3);
-            });
+            if (!done.has(pk.colors)) {
+              done.add(pk.colors);
+              pk.list.forEach((q, i) => {
+                const m = test ? test(q) : false; if (m) n++;
+                const c = test ? (m ? hl : dim) : pk.base;
+                for (let j = 0; j < 6; j++) pk.colors.set([c.r, c.g, c.b], i * 18 + j * 3);
+              });
+            }
             (pk.mesh.geometry.getAttribute("color") as InstanceType<typeof THREE.BufferAttribute>).needsUpdate = true;
           }
           return n;
         };
         const flyTo = (x: number, y: number, z: number, dist = Math.max(4, span * 0.12)) => { cam.position.set(x + dist * 0.6, y + dist * 0.8, z + dist * 0.8); ctr.target.set(x, y, z); ctr.update(); };
-        if (scene.mb.length) {
-          const arr = new Float32Array(scene.mb.length * 6);
-          scene.mb.forEach(([a, b], i) => arr.set([a[0], scene.H - 0.02, a[1], b[0], scene.H - 0.02, b[1]], i * 6));
-          const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
-          groups.deck.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x2563eb })));
-        }
-        // design-check markers: a red (error) / amber (warning) ball on a pole at the spot
-        const marks: { mesh: InstanceType<typeof THREE.Mesh>; text: string }[] = [];
-        const rBall = Math.max(0.12, Math.min(0.35, span / 120));
-        for (const is of scene.issues ?? []) {
-          const col = is.sev === "error" ? 0xef4444 : 0xf59e0b;
-          const ball = new THREE.Mesh(new THREE.SphereGeometry(rBall, 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 }));
-          ball.position.set(is.at[0], is.y + rBall * 2.5, is.at[1]); ball.renderOrder = 10;
-          const pole = new THREE.Mesh(new THREE.CylinderGeometry(rBall * 0.15, rBall * 0.15, rBall * 2.5, 6), new THREE.MeshBasicMaterial({ color: col }));
-          pole.position.set(is.at[0], is.y + rBall * 1.25, is.at[1]);
-          groups.issues.add(ball, pole); marks.push({ mesh: ball, text: `${is.id} · ${is.text}` });
-        }
         const view = (v: View) => {
-          const d = span * 1.3; cam.up.set(0, 1, 0);
-          if (v === "top") cam.position.set(cx, span * 1.6, cz + 0.001);
-          else if (v === "front") cam.position.set(cx, scene.H / 2, cz + d);
-          else if (v === "back") cam.position.set(cx, scene.H / 2, cz - d);
-          else if (v === "left") cam.position.set(cx - d, scene.H / 2, cz);
-          else if (v === "right") cam.position.set(cx + d, scene.H / 2, cz);
-          else cam.position.set(cx + span * 0.55, span * 0.6, cz + span * 0.7);
-          ctr.target.set(cx, v === "top" ? 0 : scene.H / 2, cz); ctr.update();
+          const d = Math.max(span, totalH) * 1.3, ym = totalH / 2; cam.up.set(0, 1, 0);
+          if (v === "top") cam.position.set(cx, totalH + span * 1.6, cz + 0.001);
+          else if (v === "front") cam.position.set(cx, ym, cz + d);
+          else if (v === "back") cam.position.set(cx, ym, cz - d);
+          else if (v === "left") cam.position.set(cx - d, ym, cz);
+          else if (v === "right") cam.position.set(cx + d, ym, cz);
+          else cam.position.set(cx + d * 0.55, ym + d * 0.45, cz + d * 0.7);
+          ctr.target.set(cx, v === "top" ? totalH : ym, cz); ctr.update();
         };
         view("3d");
         const f = focus ? (scene.issues ?? []).find((i) => i.id === focus) : undefined;
@@ -169,7 +214,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           const hit = ray.intersectObjects(vis.map((p) => p.mesh), false)[0];
           if (!hit) { setPick(null); return; }
           const owner = vis.find((p) => p.mesh === hit.object); const q = owner?.list[Math.floor((hit.faceIndex ?? 0) / 2)];
-          setPick(q ? `${KIND_LABEL[q.k]} · ${q.c}${q.z ? ` · ${q.z}` : ""}` : null);
+          setPick(q ? `${owner?.level ? `${owner.level} · ` : ""}${KIND_LABEL[q.k]} · ${q.c}${q.z ? ` · ${q.z}` : ""}` : null);
         };
         renderer.domElement.addEventListener("click", onClick);
         const onResize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); ctr.handleResize(); };
@@ -187,8 +232,10 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
     })();
     return () => { disposed = true; cleanup(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, focus]);
+  }, [scene, focus, stack]);
 
+  // whole building: the room / find tools fly to the chosen level (else the lowest level drawn from the typical plan)
+  const levelY0 = () => { if (!stack) return 0; const L = stack.levels.find((x) => x.key === lvl) ?? stack.levels.find((x) => x.sceneIdx === 0); return L?.y0 ?? 0; };
   const toggle = (l: Layer) => setOn((o) => { const v = !o[l]; api.current?.set(l, v); return { ...o, [l]: v }; });
   // double-click a layer: see only that layer (e.g. only the fillers); "All" brings everything back
   const only = (l: Layer) => setOn((o) => { const n = { ...o }; for (const k of Object.keys(n) as Layer[]) { n[k] = k === l || k === "issues"; api.current?.set(k, n[k]); } return n; });
@@ -219,16 +266,24 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-graphite-300">
         <label className="flex items-center gap-1.5">Section cut
-          <input type="range" min={5} max={100} value={cut} onChange={(e) => { const v = Number(e.target.value); setCut(v); api.current?.cut(v >= 100 ? null : (top * v) / 100); }} className="w-36" />
-          <span className="w-16 font-mono text-graphite-400">{cut >= 100 ? "off" : `${Math.round((top * cut) / 100 * 1000)} mm`}</span>
+          <input type="range" min={1} max={100} value={cut} onChange={(e) => { const v = Number(e.target.value); setCut(v); api.current?.cut(v >= 100 ? null : (top * v) / 100); }} className="w-36" />
+          <span className="w-16 font-mono text-graphite-400">{cut >= 100 ? "off" : stack ? `${((top * cut) / 100).toFixed(1)} m` : `${Math.round((top * cut) / 100 * 1000)} mm`}</span>
         </label>
+        {stack ? (
+          <label className="flex items-center gap-1.5">Level
+            <select value={lvl} onChange={(e) => { const v = e.target.value; setLvl(v); const L = stack.levels.find((x) => x.key === v); if (L) { const [bx0, by0, bx1, by1] = scene.box; api.current?.flyTo((bx0 + bx1) / 2, L.y0 + L.h / 2, (by0 + by1) / 2, Math.max(6, span(scene) * 0.9)); api.current?.cut(L.y0 + L.h - 0.05); setCut(Math.round(((L.y0 + L.h - 0.05) / top) * 100)); } else { api.current?.cut(null); setCut(100); api.current?.view("3d"); } }}
+              className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100">
+              <option value="">whole</option>{[...stack.levels].reverse().map((L) => <option key={L.key} value={L.key}>{L.name}{L.sceneIdx == null ? " (not formed)" : L.own ? " (own plan)" : ""}</option>)}
+            </select>
+          </label>
+        ) : null}
         <label className="flex items-center gap-1.5">Room
-          <select value={zone} onChange={(e) => { const v = e.target.value; setZone(v); if (!v) { api.current?.highlight(null); api.current?.view("3d"); return; } const z = scene.zones.find((x) => x.code === v); if (z) { api.current?.flyTo(z.at[0], scene.H / 2, z.at[1], Math.max(5, span(scene) * 0.18)); api.current?.highlight((p) => p.z === v); } }}
+          <select value={zone} onChange={(e) => { const v = e.target.value; setZone(v); if (!v) { api.current?.highlight(null); api.current?.view("3d"); return; } const z = scene.zones.find((x) => x.code === v); if (z) { api.current?.flyTo(z.at[0], levelY0() + scene.H / 2, z.at[1], Math.max(5, span(scene) * 0.18)); api.current?.highlight((p) => p.z === v); } }}
             className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100">
             <option value="">all</option>{scene.zones.map((z) => <option key={z.code} value={z.code}>{z.code}</option>)}
           </select>
         </label>
-        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); const q = query.trim().toLowerCase(); if (!q) { setHits(null); api.current?.highlight(null); return; } const n = api.current?.highlight((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)) ?? 0; setHits(n); const first = scene.panels.find((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)); if (first) api.current?.flyTo(first.p[0][0], first.p[0][1], first.p[0][2]); }}>
+        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); const q = query.trim().toLowerCase(); if (!q) { setHits(null); api.current?.highlight(null); return; } const n = api.current?.highlight((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)) ?? 0; setHits(n); const first = scene.panels.find((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)); if (first) api.current?.flyTo(first.p[0][0], first.p[0][1] + levelY0(), first.p[0][2]); }}>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="find panel no. / code (e.g. M4-07, WP-600)" className="w-56 rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-graphite-100" />
           <button className="rounded border border-graphite-700 px-2 py-1 hover:bg-graphite-800">Find</button>
           {hits != null ? <span className="text-graphite-400">{hits} found</span> : null}
