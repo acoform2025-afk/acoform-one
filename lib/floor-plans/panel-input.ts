@@ -53,7 +53,13 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
       const k = kindOf(p.layer); if (!k || (keep && !keep(p))) continue;
       const pts = p.pts.map(tm);
       if (k === "proj" && p.closed && pts.length >= 3) { archItems.push({ k, ring: pts }); continue; }
-      for (let i = 0; i < pts.length - (p.closed ? 0 : 1); i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) >= 0.1) archItems.push({ k, a, b }); }
+      for (let i = 0; i < pts.length - (p.closed ? 0 : 1); i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length], dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]);
+        if (Math.hypot(dx, dy) < 0.1) continue;
+        // a slanting line on a projection layer is the cross marking an opening / shaft, not a sunshade
+        if (k === "proj" && Math.min(dx, dy) > 0.1 * Math.max(dx, dy)) continue;
+        archItems.push({ k, a, b });
+      }
     }
   }
   let corners = 0, extCorners = 0;          // internal (room) corners → IC, external (outside) corners → EC
@@ -203,6 +209,8 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   const holes: Pt[][] = [
     ...g.shapes.filter((s) => s.kind === "opening").map((s) => s.pts.map(toM)),
     ...(auto ? fromAuto(auto.openingLoops) : closedLoops((g.dxf.opening ?? []).map((l) => ({ layer: "o", ...l })), tolPx).map((pts) => pts.map(toM))),
+    // the staircase well (flights + mid landing) is not decked: the stair has its own formwork
+    ...(frame ? (auto?.stairBoxes ?? []).map((bx): Pt[] => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); const x0 = Math.min(p[0], q[0]), y0 = Math.min(p[1], q[1]), x1 = Math.max(p[0], q[0]), y1 = Math.max(p[1], q[1]); return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]; }).filter((r) => (r[1][0] - r[0][0]) >= 1.5 && (r[2][1] - r[1][1]) >= 1.5) : []),
   ];
   const decks: DeckPoly[] = [
     ...(auto?.slabFromWalls ? fromAuto(auto.slabLoops).map((pts, i) => ({ code: `SW${i + 1}`, pts, holes })) : []),
