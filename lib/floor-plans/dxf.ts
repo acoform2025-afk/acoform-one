@@ -493,6 +493,64 @@ const closeRing = (r: Pt[]): [number, number][] => { const o = r.map((q) => [q[0
  * edge) → the stretch of that face that is an opening. Walls drawn straight through windows / doors (common on
  * shell plans) would otherwise be measured and panelled full height. Units: drawing units; t0 / t1 along the edge.
  */
+/**
+ * Doors / windows standing in a break of the wall (the wall stops either side of the door / window drawing): each
+ * door / window drawing is one opening, from its own extent — whether or not the two wall ends look alike. Its width
+ * is the long side of the drawing, the wall thickness the short side (at most 350 mm). Drawing units, thk / span in m.
+ */
+function dwGapsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], u: number): { a: Pt; b: Pt; thk: number; door: boolean }[] {
+  if (!dw.length || !rings.length) return [];
+  const inWall = (x: number, y: number) => { let c = false; for (const r of rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const [xi, yi] = r[i], [xj, yj] = r[j]; if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
+  // one door / window = the lines lying within 150 mm of each other (same kind)
+  type G = { x0: number; y0: number; x1: number; y1: number; door: boolean; n: number };
+  const groups: G[] = []; const near = 0.15 / u;
+  const boxOf = (p: DxfPath) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; };
+  for (const p of dw) {
+    const [x0, y0, x1, y1] = boxOf(p);
+    if ((x1 - x0) * u > 6 || (y1 - y0) * u > 6) continue;
+    const door = p.kind === "door";
+    const hit = groups.filter((g) => g.door === door && x0 <= g.x1 + near && x1 >= g.x0 - near && y0 <= g.y1 + near && y1 >= g.y0 - near);
+    const g: G = hit[0] ?? { x0, y0, x1, y1, door, n: 0 };
+    if (!hit.length) groups.push(g);
+    g.x0 = Math.min(g.x0, x0, ...hit.slice(1).map((h) => h.x0)); g.y0 = Math.min(g.y0, y0, ...hit.slice(1).map((h) => h.y0));
+    g.x1 = Math.max(g.x1, x1, ...hit.slice(1).map((h) => h.x1)); g.y1 = Math.max(g.y1, y1, ...hit.slice(1).map((h) => h.y1)); g.n += 1 + hit.slice(1).reduce((s2, h) => s2 + h.n, 0);
+    for (const h of hit.slice(1)) groups.splice(groups.indexOf(h), 1);
+  }
+  const out: { a: Pt; b: Pt; thk: number; door: boolean }[] = [];
+  for (const g of groups) {
+    const w = g.x1 - g.x0, h = g.y1 - g.y0, along = w >= h;
+    // a door drawing includes its swing (a square-ish box): the leaf side is the long one only for windows
+    let span = (along ? w : h) * u, thk = (along ? h : w) * u;
+    if (span < 0.4 || span > 4.5) continue;
+    const cx = (g.x0 + g.x1) / 2, cy = (g.y0 + g.y1) / 2;
+    // which way the wall runs: walls just beyond both ends of the opening along that axis
+    const probe = (ax: boolean): number | null => {
+      const half = ((ax ? w : h) / 2), out1 = half + 0.12 / u;
+      for (const off of [0, -0.1 / u, 0.1 / u, -0.2 / u, 0.2 / u]) {
+        const p1: Pt = ax ? [cx - out1, cy + off] : [cx + off, cy - out1], p2: Pt = ax ? [cx + out1, cy + off] : [cx + off, cy + out1];
+        if (inWall(p1[0], p1[1]) && inWall(p2[0], p2[1])) return off;
+      }
+      return null;
+    };
+    let ax = along, off = probe(ax);
+    if (off == null && g.door) { ax = !along; off = probe(ax); if (off != null) { span = (ax ? w : h) * u; } }
+    if (off == null || span < 0.4 || span > 4.5) continue;
+    // the wall thickness at the ends (the door / window drawing may be thinner or thicker than the wall)
+    const half = (ax ? w : h) / 2, endP: Pt = ax ? [cx - half - 0.06 / u, cy + off] : [cx + off, cy - half - 0.06 / u];
+    let lo = 0, hi = 0; for (let s2 = 0.01; s2 <= 0.4; s2 += 0.01) { if (inWall(ax ? endP[0] : endP[0] - s2 / u, ax ? endP[1] - s2 / u : endP[1])) lo = s2; else break; }
+    for (let s2 = 0.01; s2 <= 0.4; s2 += 0.01) { if (inWall(ax ? endP[0] : endP[0] + s2 / u, ax ? endP[1] + s2 / u : endP[1])) hi = s2; else break; }
+    // a wall running across at the end reads too thick: then the door / window drawing's own depth is used
+    if (lo + hi > 0.35) { lo = Math.min(lo, Math.max(0.05, thk / 2)); hi = Math.min(hi, Math.max(0.05, thk / 2)); }
+    thk = Math.min(0.35, Math.max(0.075, lo + hi));
+    const mid = ax ? cy + off + (hi - lo) / 2 / u : cx + off + (hi - lo) / 2 / u;
+    const a: Pt = ax ? [cx - half, mid] : [mid, cy - half], b: Pt = ax ? [cx + half, mid] : [mid, cy + half];
+    if (inWall((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;        // inside the wall: a cut in the wall, found elsewhere
+    if (out.some((o) => Math.hypot((o.a[0] + o.b[0]) / 2 - (a[0] + b[0]) / 2, (o.a[1] + o.b[1]) / 2 - (a[1] + b[1]) / 2) * u < 0.3)) continue;
+    out.push({ a, b, thk, door: g.door });
+  }
+  return out;
+}
+
 function wallOpeningsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], u: number) {
   const out: { ring: number; edge: number; t0: number; t1: number; door: boolean; thk: number }[] = [];
   if (!dw.length || !rings.length) return out;
@@ -832,6 +890,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       return out;
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
+    dwGaps: dwGapsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
     // wet rooms (toilet / kitchen / balcony names on the plan): the room around the label, bounded by the walls —
     // a concrete kerb (upstand / sunk-slab edge) runs along its walls and is formed on both faces
     wetRooms: (() => {

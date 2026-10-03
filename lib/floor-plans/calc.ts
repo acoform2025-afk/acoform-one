@@ -130,7 +130,8 @@ export type DxfAuto = {
   edgeBeamLength?: number;                          // slab edges with no full-height wall under them (balcony fronts, open edges), m
   edgeBeams?: [Pt, Pt][];                           // those edges (drawing units), for drawings
   parapetRings?: Pt[][];                            // balcony parapet outlines (drawing units)
-  gaps?: { a: Pt; b: Pt; span: number; thk?: number }[];  // a, b in drawing units; span, thk in m
+  gaps?: { a: Pt; b: Pt; span: number; thk?: number }[];
+  dwGaps?: { a: Pt; b: Pt; thk: number; door: boolean }[];   // doors / windows standing in a break of the wall: the opening's centre line (drawing units), wall thickness m  // a, b in drawing units; span, thk in m
 };
 
 export type Totals = {

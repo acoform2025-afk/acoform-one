@@ -11,7 +11,7 @@ const NOISE = new RegExp([
   "furn", "(^|-)fur(-|$)", "p-fur", "sanit", "fixture", "fitting", "plumb", "hatch", "(^|-)dim", "dimension",
   "tree", "plant", "landscap", "vehicle", "(^|-)car(-|$)", "people", "human", "tile", "flooring", "pattern",
   "fixt", "sanr", "^a-genm", "^a-detl", "^a-glaz", "glazing", "glass", "^a-door", "(^|-)doors?(-|$)", "(^|-)windows?(-|$)",
-  "^a-window", "^a-flor-hral", "^q-spcq", "^q-case", "^e-comm", "^i-", "-patt(-|$)",
+  "^a-window", "^a-win($|-)", "(^|-)win(-|$)", "(^|-)wndw", "^a-flor-hral", "^q-spcq", "^q-case", "^e-comm", "^i-", "-patt(-|$)",
   "^a-elevation", "^a-hdwr",
   // Chinese: door, window, furniture, hatch / fill, dimension, sanitary, index marks
   "门", "窗", "家具", "填充", "标注", "洁具", "卫浴", "索引",
@@ -22,7 +22,7 @@ export const doorWindowKind = (name: string): "door" | "window" | null => {
   const n = normLayer(name);
   if (/elev|elv|section|sec-|立面|剖面|tag|text|txt/.test(n)) return null;
   if (/(^|-)doors?(-|$)|^a-door|门/.test(n)) return "door";
-  if (/(^|-)windows?(-|$)|^a-window|^a-win($|-)|^a-glaz|glazing|窗/.test(n)) return "window";
+  if (/(^|-)windows?(-|$)|^a-window|^a-win($|-)|(^|-)win(-|$)|(^|-)wndw|^a-glaz|glazing|窗/.test(n)) return "window";
   return null;
 };
 

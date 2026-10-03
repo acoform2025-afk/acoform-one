@@ -284,7 +284,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   const zoneBeam3: { ring: Pt[]; d: number }[] = frame ? (auto?.beamRings ?? []).map((r, i) => ({ ring: r.map((q) => toM(frame!.toPx(q))), d: auto?.beamRingDepth?.[i] ?? (t.params.beamDepthMm ?? 600) })) : [];
   const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : [];
   // doors / windows inside the walls, for the 3D model: the opening across the wall (metres), sill and head (mm)
-  const zoneOpenings: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number }[] = [];
+  const zoneOpenings: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean }[] = [];
   if (frame && auto?.wallRings) for (const op of auto.wallOpenings ?? []) {
     const r = auto.wallRings[op.ring]; if (!r) continue;
     const A = r[op.edge], B = r[(op.edge + 1) % r.length]; const Ld = Math.hypot(B[0] - A[0], B[1] - A[1]); if (!Ld) continue;
@@ -299,6 +299,15 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     // both faces of one wall carry the same opening: once
     if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 - mid[0], (z.a[1] + z.b[1]) / 2 - mid[1]) <= Math.max(z.thk, thk) + 0.05)) continue;
     zoneOpenings.push({ a: pa, b: pb, n: [nx, ny], thk, door: op.door, sill: op.door ? 0 : OPENING_DEFAULTS.windowSill, head: op.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH });
+  }
+  // doors / windows in a break of the wall: the opening across the gap (the face line on one side)
+  if (frame) for (const dg of auto?.dwGaps ?? []) {
+    const ca = toM(frame.toPx(dg.a)), cb = toM(frame.toPx(dg.b));
+    const dx = cb[0] - ca[0], dy = cb[1] - ca[1], L = Math.hypot(dx, dy); if (L < 0.3) continue;
+    const nx = -dy / L, ny = dx / L, h = dg.thk / 2;
+    const mid: Pt = [(ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2];
+    if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 + z.n[0] * z.thk / 2 - mid[0], (z.a[1] + z.b[1]) / 2 + z.n[1] * z.thk / 2 - mid[1]) < 0.3)) continue;
+    zoneOpenings.push({ a: [ca[0] - nx * h, ca[1] - ny * h], b: [cb[0] - nx * h, cb[1] - ny * h], n: [nx, ny], thk: dg.thk, door: dg.door, sill: dg.door ? 0 : OPENING_DEFAULTS.windowSill, head: dg.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, gap: true });
   }
   return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneOpenings, sunk: auto?.sunk ?? [] };
 }
