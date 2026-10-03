@@ -7,11 +7,11 @@ import polygonClipping, { type MultiPolygon } from "polygon-clipping";
 import type { Pt } from "./calc";
 import type { FaceLayout } from "@/lib/design-engine/floor-panels";
 import type { Zone } from "./zones";
-import type { StairGeo } from "@/lib/design-engine/floor-panels";
+import type { StairGeo, StairLayout } from "@/lib/design-engine/floor-panels";
 import { inRings } from "@/lib/design-engine/design-check";
 
 export type Poly2 = Pt[][];                         // outer ring + holes (metres)
-export type Panel3Kind = "std" | "top" | "fill" | "deck" | "dspec" | "ic" | "ec" | "sc" | "kick" | "bside" | "bbot" | "col" | "stair" | "riser";
+export type Panel3Kind = "std" | "top" | "fill" | "deck" | "dspec" | "ic" | "ec" | "sc" | "kick" | "bside" | "bbot" | "col" | "stair" | "riser" | "cheek" | "lsoff";
 export type Panel3 = { p: [number, number, number][]; k: Panel3Kind; c: string; z?: string };   // quad corners; z = zone / face the piece belongs to
 export type Scene3 = {
   H: number; slab: number; box: [number, number, number, number];
@@ -23,6 +23,16 @@ export type Scene3 = {
   wallBits?: { poly: Poly2; z0: number; z1: number; infill?: boolean }[];   // infill: block / brick wall round a window (not formed)          // concrete under windows (sill) and over openings (lintel)
   glass?: { p: [number, number, number][]; door: boolean }[];     // window panes / door leaves in the openings
   arch?: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[];   // railings, parapets, sunshades (not formwork)
+  acc?: Acc3;                                                       // accessories: props, heads, ties, walers, push-pull props, riser brackets
+};
+/** Accessories, each as a straight piece between two points (x, y, z; metres) — drawn as a rod / tube of its kind. */
+export type Acc3 = {
+  props: [number, number, number, number, number][];    // x, z, bottom y, top y, kind (0 deck · 1 beam · 2 stair)
+  ties: [number, number, number, number, number][];     // x, y, z, normal x, normal z (tie end on a wall face)
+  walers: [number, number, number, number, number][];   // x0, y, z0, x1, z1
+  pushPull: [number, number, number, number, number, number][];   // wall point x, y, z → floor point x, 0, z
+  brackets: [number, number, number][];                 // riser brackets
+  heads: [number, number, number, number][];            // prop heads / drop heads: x, y, z, kind
 };
 
 const ring = (r: Pt[]): [number, number][] => { const o = r.map((p) => [p[0], p[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
@@ -35,6 +45,8 @@ export function buildScene3(o: {
   stairGeo?: StairGeo[]; kickerMm?: number; scMm?: [number, number]; icMm?: number; ecMm?: number;
   openings?: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean; free?: boolean }[];
   arch?: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[];
+  stairLay?: StairLayout[];                 // the stair panels the layout chose (soffit / cheek / landing pieces)
+  propSpacing?: number; tieH?: number; tieV?: number;   // m, mm, mm
 }): Scene3 {
   const H = Math.max(0.5, o.floorHeight - o.slabMm / 1000), slab = o.slabMm / 1000;
   // walls: even-odd combination of the merged wall rings → proper polygons with holes
@@ -164,6 +176,7 @@ export function buildScene3(o: {
   // staircases: a dog-leg stair in each stair box — flight 1 up one half of the box, landing across the far end,
   // flight 2 back down the other half to the floor above (risers ≤ 170 mm, tread 270 mm)
   const steps: Scene3["steps"] = [];
+  const acc: Acc3 = { props: [], ties: [], walers: [], pushPull: [], brackets: [], heads: [] };
   const FH = o.floorHeight;
   (o.stairs ?? []).forEach(([x0, y0, x1, y1], si) => {
     const along = x1 - x0 >= y1 - y0;                        // flights run along the long side of the box
@@ -190,15 +203,117 @@ export function buildScene3(o: {
       const [ax, az] = P(u0, v0), [bx, bz] = P(u1, v0), [cx2, cz2] = P(u1, v1), [dx2, dz2] = P(u0, v1);
       panels.push({ p: [[ax, y0, az], [bx, y1, bz], [cx2, y1, cz2], [dx2, y0, dz2]], k, c, z: `ST${si + 1}` });
     };
-    const waist = 0.15, run1 = (per - 1) * tread;
-    Q(0, 0, run1, half, -waist, topOf - rise - waist, "stair", `ST${si + 1} flight 1 soffit ${Math.round(half * 1000)} wide`);
-    for (let k = 0; k < per - 1; k++) { const [ax, az] = P(k * tread, 0), [bx, bz] = P(k * tread, half); panels.push({ p: [[ax, k * rise, az], [bx, k * rise, bz], [bx, (k + 1) * rise, bz], [ax, (k + 1) * rise, az]], k: "riser", c: `ST${si + 1} riser ${Math.round(rise * 1000)}`, z: `ST${si + 1}` }); }
-    Q(Lb - land, 0, Lb, Wb, topOf - 0.15, topOf - 0.15, "stair", `ST${si + 1} landing soffit`);
+    const waist = (g?.waist ?? 150) / 1000, run1 = (per - 1) * tread;
+    const ST = `ST${si + 1}`;
+    // the stair panels the layout chose: soffit panels across the flight width × lengths along the slope, cheeks
+    // (stringers) on the open side, riser shutters on every step, landing soffit panels; props under all of it
+    const sl = g ? (o.stairLay ?? []).filter((x) => !x.assumed)[si] : undefined;
+    const acrW = sl ? [...sl.across.panels, ...(sl.across.filler ? [sl.across.filler] : [])] : [Math.round(half * 1000)];
+    const hyp = Math.hypot(rise, tread), cos = tread / hyp, k1 = rise / tread;
+    const algL = sl ? sl.along : [Math.round((run1 / cos) * 1000)];
+    const cheekH = (sl?.cheekH ?? Math.round((waist / cos + rise) * 1000)) / 1000;
+    // one flight: starts at u0 (plan), runs in direction ud, across v from vA to vB, its soffit starts at y0 and rises
+    const flight = (fi: number, u0: number, ud: number, vA: number, vB: number, y0: number, openV: number | null) => {
+      let s0 = 0;
+      for (const L of algL) {
+        const du0 = (s0 / 1000) * cos, du1 = Math.min(run1 + tread, ((s0 + L) / 1000) * cos); s0 += L;
+        const ya = y0 + du0 * k1, yb = y0 + du1 * k1;
+        let v = vA;
+        for (const w of acrW) {
+          const v1 = Math.min(vB, v + w / 1000); if (v1 - v < 0.01) break;
+          const [ax, az] = P(u0 + ud * du0, v), [bx, bz] = P(u0 + ud * du1, v), [cx2, cz2] = P(u0 + ud * du1, v1), [dx2, dz2] = P(u0 + ud * du0, v1);
+          panels.push({ p: [[ax, ya, az], [bx, yb, bz], [cx2, yb, cz2], [dx2, ya, dz2]], k: "stair", c: `${ST} flight ${fi} · soffit panel SS ${w} × ${L}`, z: ST }); special++;
+          v = v1;
+        }
+        // cheek (stringer side form) on the open side of the flight: from the soffit up by the cheek height
+        if (openV != null) {
+          const [ax, az] = P(u0 + ud * du0, openV), [bx, bz] = P(u0 + ud * du1, openV);
+          panels.push({ p: [[ax, ya, az], [bx, yb, bz], [bx, yb + cheekH, bz], [ax, ya + cheekH, az]], k: "cheek", c: `${ST} flight ${fi} · cheek (stringer) CK ${Math.round(cheekH * 1000)} × ${L}`, z: ST }); special++;
+        }
+      }
+      // props under the soffit: rows every prop spacing along the flight, lines every 1.2 m across (+ both edges)
+      const sp = o.propSpacing ?? 1.2, nAl = Math.max(1, Math.ceil(run1 / sp)), nAc = Math.max(1, Math.ceil((vB - vA) / 1.2));
+      for (let i = 0; i <= nAl; i++) for (let j = 0; j <= nAc; j++) {
+        const du = Math.min(run1, 0.15 + (i * (run1 - 0.3)) / nAl), v = vA + 0.15 + (j * (vB - vA - 0.3)) / nAc;
+        const [x, z] = P(u0 + ud * du, v), top = y0 + du * k1 - 0.005;
+        if (top > 0.3) { acc.props.push([x, z, 0, top, 2]); acc.heads.push([x, top, z, 2]); }
+      }
+    };
+    flight(1, 0, 1, 0, half, -waist, fl > 1 ? half : null);
+    for (let k = 0; k < per - 1; k++) {
+      const [ax, az] = P(k * tread, 0), [bx, bz] = P(k * tread, half);
+      panels.push({ p: [[ax, k * rise, az], [bx, k * rise, bz], [bx, (k + 1) * rise, bz], [ax, (k + 1) * rise, az]], k: "riser", c: `${ST} riser shutter RS ${Math.round(half * 1000)} × ${Math.round(rise * 1000)}`, z: ST });
+      acc.brackets.push([ax, (k + 1) * rise, az], [bx, (k + 1) * rise, bz]);
+    }
+    // landing soffit: panels across the landing at its underside, props under it
+    const ly = topOf - 0.15;
+    {
+      const lAcr = sl?.landing ? [...sl.landing.across.panels, ...(sl.landing.across.filler ? [sl.landing.across.filler] : [])] : [Math.round(land * 1000)];
+      let u = Lb - land;
+      for (const w of lAcr) {
+        const u1 = Math.min(Lb, u + w / 1000); if (u1 - u < 0.01) break;
+        Q(u, 0, u1, Wb, ly, ly, "lsoff", `${ST} landing soffit panel LS ${w} × ${Math.round(Wb * 1000)}`); special++;
+        u = u1;
+      }
+      const nA = Math.max(1, Math.ceil(land / 1.2)), nB = Math.max(1, Math.ceil(Wb / 1.2));
+      for (let i = 0; i <= nA; i++) for (let j = 0; j <= nB; j++) {
+        const [x, z] = P(Lb - land + 0.15 + (i * (land - 0.3)) / nA, 0.15 + (j * (Wb - 0.3)) / nB);
+        acc.props.push([x, z, 0, ly - 0.005, 2]); acc.heads.push([x, ly - 0.005, z, 2]);
+      }
+    }
     if (fl > 1) {
-      Q(Lb - land - run1, half, Lb - land, Wb, topOf + (per - 1) * rise - waist, topOf - waist, "stair", `ST${si + 1} flight 2 soffit`);
-      for (let k = 0; k < per - 1; k++) { const [ax, az] = P(Lb - land - k * tread, half), [bx, bz] = P(Lb - land - k * tread, Wb); panels.push({ p: [[ax, topOf + k * rise, az], [bx, topOf + k * rise, bz], [bx, topOf + (k + 1) * rise, bz], [ax, topOf + (k + 1) * rise, az]], k: "riser", c: `ST${si + 1} riser ${Math.round(rise * 1000)}`, z: `ST${si + 1}` }); }
+      flight(2, Lb - land, -1, half, Wb, topOf - waist, half);
+      for (let k = 0; k < per - 1; k++) {
+        const [ax, az] = P(Lb - land - k * tread, half), [bx, bz] = P(Lb - land - k * tread, Wb);
+        panels.push({ p: [[ax, topOf + k * rise, az], [bx, topOf + k * rise, bz], [bx, topOf + (k + 1) * rise, bz], [ax, topOf + (k + 1) * rise, az]], k: "riser", c: `${ST} riser shutter RS ${Math.round((Wb - half) * 1000)} × ${Math.round(rise * 1000)}`, z: ST });
+        acc.brackets.push([ax, topOf + (k + 1) * rise, az], [bx, topOf + (k + 1) * rise, bz]);
+      }
     }
   });
+  // ---- accessories (the same rules as the parts list) ----
+  // deck props: a prop with a drop head under every mid-beam end and along it at the prop spacing
+  const sp = o.propSpacing ?? 1.2, seenP = new Set<string>();
+  const addProp = (x: number, z: number, top: number, kind: number) => { const k = `${Math.round(x * 20)}:${Math.round(z * 20)}:${kind}`; if (seenP.has(k)) return; seenP.add(k); acc.props.push([x, z, 0, top, kind]); acc.heads.push([x, top, z, kind]); };
+  for (const zn of o.zones) for (const [a, b] of zn.mb) {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 0.2) continue;
+    const n = Math.max(1, Math.ceil(L / sp));
+    for (let i = 0; i <= n; i++) addProp(a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n, H - 0.07, 0);
+  }
+  // beam props: under every beam bottom along its length
+  for (const b3 of o.beams3 ?? []) {
+    const d = Math.max(slab, b3.d / 1000), h = d - slab; if (h <= 0.01 || b3.ring.length < 3) continue;
+    const xs2 = b3.ring.map((q) => q[0]), ys2 = b3.ring.map((q) => q[1]);
+    const x0 = Math.min(...xs2), x1 = Math.max(...xs2), y0 = Math.min(...ys2), y1 = Math.max(...ys2), along = x1 - x0 >= y1 - y0;
+    const L = along ? x1 - x0 : y1 - y0, n = Math.max(1, Math.ceil(L / 1.2));
+    for (let i = 0; i <= n; i++) { const t = 0.1 + (i * (L - 0.2)) / n; addProp(along ? x0 + t : (x0 + x1) / 2, along ? (y0 + y1) / 2 : y0 + t, H - h - 0.005, 1); }
+  }
+  // wall faces: ties at the panel joints in rows, walers (2 rows) and push-pull props on one face of each wall
+  const tH = (o.tieH ?? 800) / 1000, tV = (o.tieV ?? 800) / 1000;
+  for (const f of o.faces) {
+    if (!f.geo || !(mpp > 0) || f.set === "column") continue;
+    const { a: A, b: B, off } = f.geo;
+    const dx = B[0] - A[0], dy = B[1] - A[1], Lp = Math.hypot(dx, dy); if (!Lp) continue;
+    const ux = dx / Lp, uy = dy / Lp; let nx = -uy, ny = ux; const s2 = off < 0 ? -1 : 1;
+    const a: Pt = [A[0] * mpp + nx * (off * mpp), A[1] * mpp + ny * (off * mpp)], L = Lp * mpp;
+    // the face looks away from its wall: the side where the wall is not
+    const probe: Pt = [a[0] + ux * L / 2 + nx * 0.03, a[1] + uy * L / 2 + ny * 0.03];
+    if (inRings(probe, o.zoneWalls)) { nx = -nx; ny = -ny; }
+    void s2;
+    const hF = Math.min(H, f.height / 1000);
+    const nT = Math.max(1, Math.ceil(L / tH)), rows = Math.max(1, Math.floor(hF / tV));
+    for (let i = 0; i < nT; i++) {
+      const t = ((i + 0.5) * L) / nT;
+      for (let j = 0; j < rows; j++) acc.ties.push([a[0] + ux * t, Math.min(hF - 0.2, 0.3 + j * tV), a[1] + uy * t, nx, ny]);
+    }
+    // one face of each wall carries the walers / push-pull props (the face looking +x, or +y when square to it)
+    const pick = nx > 0.01 || (Math.abs(nx) <= 0.01 && ny > 0);
+    if (pick && L >= 0.6) {
+      const o2 = 0.09;
+      for (const y of [0.6, Math.max(1.2, hF - 0.7)]) acc.walers.push([a[0] + nx * o2, y, a[1] + ny * o2, a[0] + ux * L + nx * o2, a[1] + uy * L + ny * o2]);
+      const nP = Math.floor(L / 3);
+      for (let i = 1; i <= nP; i++) { const t = (i * L) / (nP + 1), wx = a[0] + ux * t + nx * o2, wz = a[1] + uy * t + ny * o2; acc.pushPull.push([wx, Math.min(2.1, hF - 0.4), wz, wx + nx * 1.6, wz + ny * 1.6, 0]); }
+    }
+  }
   const xs: number[] = [], ys: number[] = [];
   for (const poly of slabM) for (const [x, y] of poly[0]) { xs.push(x); ys.push(y); }
   for (const poly of walls) for (const [x, y] of poly[0]) { xs.push(x); ys.push(y); }
@@ -211,6 +326,7 @@ export function buildScene3(o: {
     cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps,
     panels, mb: o.zones.flatMap((z) => z.mb), zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
     stats: { wall: wallN, deck: deckN, special },
+    acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map(r3) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map(r3) as Acc3["heads"][number]) },
     arch: (o.arch ?? []).map((x) => ({ k: x.k, ...(x.a ? { a: [r3(x.a[0]), r3(x.a[1])] as Pt } : {}), ...(x.b ? { b: [r3(x.b[0]), r3(x.b[1])] as Pt } : {}), ...(x.ring ? { ring: x.ring.map((q) => [r3(q[0]), r3(q[1])] as Pt) } : {}) })),
     wallBits, glass: glass.map((g) => ({ ...g, p: g.p.map((v) => [r3(v[0]), r3(v[1]), r3(v[2])]) as [number, number, number][] })),
   };
