@@ -498,7 +498,7 @@ const closeRing = (r: Pt[]): [number, number][] => { const o = r.map((q) => [q[0
  * door / window drawing is one opening, from its own extent — whether or not the two wall ends look alike. Its width
  * is the long side of the drawing, the wall thickness the short side (at most 350 mm). Drawing units, thk / span in m.
  */
-function dwGapsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], u: number): { a: Pt; b: Pt; thk: number; door: boolean }[] {
+function dwGapsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], u: number): { a: Pt; b: Pt; thk: number; door: boolean; free?: boolean }[] {
   if (!dw.length || !rings.length) return [];
   const inWall = (x: number, y: number) => { let c = false; for (const r of rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const [xi, yi] = r[i], [xj, yj] = r[j]; if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
   // one door / window = the lines lying within 150 mm of each other (same kind)
@@ -516,7 +516,7 @@ function dwGapsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], 
     g.x1 = Math.max(g.x1, x1, ...hit.slice(1).map((h) => h.x1)); g.y1 = Math.max(g.y1, y1, ...hit.slice(1).map((h) => h.y1)); g.n += 1 + hit.slice(1).reduce((s2, h) => s2 + h.n, 0);
     for (const h of hit.slice(1)) groups.splice(groups.indexOf(h), 1);
   }
-  const out: { a: Pt; b: Pt; thk: number; door: boolean }[] = [];
+  const out: { a: Pt; b: Pt; thk: number; door: boolean; free?: boolean }[] = [];
   for (const g of groups) {
     const w = g.x1 - g.x0, h = g.y1 - g.y0, along = w >= h;
     // a door drawing includes its swing (a square-ish box): the leaf side is the long one only for windows
@@ -534,6 +534,13 @@ function dwGapsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], 
     };
     let ax = along, off = probe(ax);
     if (off == null && g.door) { ax = !along; off = probe(ax); if (off != null) { span = (ax ? w : h) * u; } }
+    // a window with no concrete wall either side (it sits in a block / brick wall, or the wall is not drawn):
+    // shown in the model as the window in a masonry infill — nothing to form there
+    if (off == null && !g.door && thk <= 0.35 && span >= 0.4 && span <= 4.5) {
+      const half2 = (along ? w : h) / 2, a: Pt = along ? [cx - half2, cy] : [cx, cy - half2], b: Pt = along ? [cx + half2, cy] : [cx, cy + half2];
+      if (!out.some((o) => Math.hypot((o.a[0] + o.b[0]) / 2 - cx, (o.a[1] + o.b[1]) / 2 - cy) * u < 0.3)) out.push({ a, b, thk: Math.max(0.1, thk), door: false, free: true });
+      continue;
+    }
     if (off == null || span < 0.4 || span > 4.5) continue;
     // the wall thickness at the ends (the door / window drawing may be thinner or thicker than the wall)
     const half = (ax ? w : h) / 2, endP: Pt = ax ? [cx - half - 0.06 / u, cy + off] : [cx + off, cy - half - 0.06 / u];

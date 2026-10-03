@@ -20,7 +20,7 @@ export type Scene3 = {
   steps: { c: [number, number, number]; s: [number, number, number]; rot: number }[];   // stair treads / landings as boxes (centre, size x·y·z, rotation about y)
   panels: Panel3[]; mb: [Pt, Pt][]; zones: { code: string; at: Pt }[]; stats: { wall: number; deck: number; special: number };
   issues?: { id: string; sev: "error" | "warn"; text: string; at: Pt; y: number }[];
-  wallBits?: { poly: Poly2; z0: number; z1: number }[];          // concrete under windows (sill) and over openings (lintel)
+  wallBits?: { poly: Poly2; z0: number; z1: number; infill?: boolean }[];   // infill: block / brick wall round a window (not formed)          // concrete under windows (sill) and over openings (lintel)
   glass?: { p: [number, number, number][]; door: boolean }[];     // window panes / door leaves in the openings
   arch?: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[];   // railings, parapets, sunshades (not formwork)
 };
@@ -33,7 +33,7 @@ export function buildScene3(o: {
   zones: Zone[]; faces: FaceLayout[]; mpp: number; floorHeight: number; slabMm: number; stdHeight: number; beamDepthMm: number;
   cols?: Pt[][]; beams3?: { ring: Pt[]; d: number }[]; stairs?: [number, number, number, number][];
   stairGeo?: StairGeo[]; kickerMm?: number; scMm?: [number, number]; icMm?: number; ecMm?: number;
-  openings?: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean }[];
+  openings?: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean; free?: boolean }[];
   arch?: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[];
 }): Scene3 {
   const H = Math.max(0.5, o.floorHeight - o.slabMm / 1000), slab = o.slabMm / 1000;
@@ -47,14 +47,15 @@ export function buildScene3(o: {
     const e = 0.01, [nx, ny] = op.n;
     const at = (p: Pt, d: number): [number, number] => [p[0] + nx * d, p[1] + ny * d];
     const rect: [number, number][] = [at(op.a, -e), at(op.b, -e), at(op.b, op.thk + e), at(op.a, op.thk + e), at(op.a, -e)];
-    try { walls = polygonClipping.difference(walls, [rect]); } catch { continue; }
+    if (!op.free) { try { walls = polygonClipping.difference(walls, [rect]); } catch { continue; } }
     const poly: Poly2 = [rect.slice(0, -1) as Pt[]];
     const sill = Math.min(op.sill / 1000, H), head = Math.min(op.head / 1000, H);
-    if (sill > 0.02) wallBits.push({ poly, z0: 0, z1: sill });
-    if (H - head > 0.02) wallBits.push({ poly, z0: head, z1: H });
+    const infill = op.free ? { infill: true } : {};
+    if (sill > 0.02) wallBits.push({ poly, z0: 0, z1: sill, ...infill });
+    if (H - head > 0.02) wallBits.push({ poly, z0: head, z1: H, ...infill });
     const m1 = at(op.a, op.thk / 2), m2 = at(op.b, op.thk / 2);
     glass.push({ p: [[m1[0], sill, m1[1]], [m2[0], sill, m2[1]], [m2[0], head, m2[1]], [m1[0], head, m1[1]]], door: op.door });
-    openPieces.push({ op, sill, head });
+    if (!op.free) openPieces.push({ op, sill, head });
   }
   let slabM: MultiPolygon = [];
   for (const d of o.decks) if (d.pts.length >= 3) { try { slabM = slabM.length ? polygonClipping.union(slabM, [ring(d.pts)]) : [[ring(d.pts)]]; } catch { /* skip */ } }

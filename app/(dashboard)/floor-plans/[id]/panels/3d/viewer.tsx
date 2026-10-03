@@ -85,7 +85,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           const lift = (m: InstanceType<typeof THREE.Object3D>) => m;
           if (fl.walls.length) G.walls.add(lift(extrude(fl.walls, fl.H, 0, COLOR.wall)));
           // sill walls under windows, lintels over doors / windows, glass in the windows
-          for (const wb of fl.wallBits ?? []) G.walls.add(extrude([wb.poly], wb.z1 - wb.z0, wb.z0, COLOR.wall));
+          for (const wb of fl.wallBits ?? []) G.walls.add(extrude([wb.poly], wb.z1 - wb.z0, wb.z0, wb.infill ? 0xd9cfbf : COLOR.wall));
           // railings (a see-through fence 1 m high), parapet walls (0.9 m), sunshades / projections (a thin slab at lintel level)
           if (fl.arch?.length) {
             const railM = new THREE.MeshStandardMaterial({ color: 0xc9d1d9, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
