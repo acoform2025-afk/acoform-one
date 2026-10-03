@@ -274,6 +274,8 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
   // double-click a layer: see only that layer (e.g. only the fillers); "All" brings everything back
   const only = (l: Layer) => setOn((o) => { const n = { ...o }; for (const k of Object.keys(n) as Layer[]) { n[k] = k === l || k === "issues"; api.current?.set(k, n[k]); } return n; });
   const all = () => setOn((o) => { const n = { ...o }; for (const k of Object.keys(n) as Layer[]) { n[k] = k !== "slab"; api.current?.set(k, n[k]); } return n; });
+  // the building as the architect draws it (concrete, slabs, windows, doors, railings) — no formwork
+  const building = () => setOn((o) => { const n = { ...o }; const show: Layer[] = ["walls", "columns", "slab", "beams", "stairs", "arch"]; for (const k of Object.keys(n) as Layer[]) { n[k] = show.includes(k); api.current?.set(k, n[k]); } return n; });
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
@@ -287,7 +289,8 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
               className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : n ? "border border-graphite-700 text-graphite-300 hover:bg-graphite-800" : "border border-dashed border-graphite-800 text-graphite-600"}`}>{LABEL[l]}{n ? "" : " (0)"}</button>
           );
         })}
-        <button type="button" onClick={all} title="Show every layer again" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">All</button>
+        <button type="button" onClick={all} title="Show every layer again (formwork view)" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">All</button>
+        <button type="button" onClick={building} title="The building as on the architect's elevation: concrete, slabs, windows, doors, railings — no formwork" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">Building view</button>
         <span className="mx-1 h-5 w-px bg-graphite-700" />
         <button type="button" title="Turn left 45°" onClick={() => api.current?.turn(-45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↺ 45°</button>
         <button type="button" title="Turn right 45°" onClick={() => api.current?.turn(45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↻ 45°</button>

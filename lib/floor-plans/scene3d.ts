@@ -43,7 +43,8 @@ export function buildScene3(o: {
   // doors / windows inside the walls: a hole through the wall, sill wall under a window, lintel over the opening
   const wallBits: NonNullable<Scene3["wallBits"]> = [], glass: NonNullable<Scene3["glass"]> = [];
   const openPieces: { op: NonNullable<typeof o.openings>[number]; sill: number; head: number }[] = [];
-  for (const op of o.openings ?? []) {
+  const glassOf = new Map<number, number>();          // opening → its pane
+  for (const [oi, op] of (o.openings ?? []).entries()) {
     const e = 0.01, [nx, ny] = op.n;
     const at = (p: Pt, d: number): [number, number] => [p[0] + nx * d, p[1] + ny * d];
     const rect: [number, number][] = [at(op.a, -e), at(op.b, -e), at(op.b, op.thk + e), at(op.a, op.thk + e), at(op.a, -e)];
@@ -54,6 +55,7 @@ export function buildScene3(o: {
     if (sill > 0.02) wallBits.push({ poly, z0: 0, z1: sill, ...infill });
     if (H - head > 0.02) wallBits.push({ poly, z0: head, z1: H, ...infill });
     const m1 = at(op.a, op.thk / 2), m2 = at(op.b, op.thk / 2);
+    glassOf.set(oi, glass.length);
     glass.push({ p: [[m1[0], sill, m1[1]], [m2[0], sill, m2[1]], [m2[0], head, m2[1]], [m1[0], head, m1[1]]], door: op.door });
     if (!op.free) openPieces.push({ op, sill, head });
   }
@@ -61,6 +63,14 @@ export function buildScene3(o: {
   for (const d of o.decks) if (d.pts.length >= 3) { try { slabM = slabM.length ? polygonClipping.union(slabM, [ring(d.pts)]) : [[ring(d.pts)]]; } catch { /* skip */ } }
   const holes: MultiPolygon = o.decks.flatMap((d) => d.holes.filter((h) => h.length >= 3).map((h) => [ring(h)]));
   if (holes.length && slabM.length) { try { slabM = polygonClipping.difference(slabM, ...holes); } catch { /* keep */ } }
+  // a door with open air on one side (no floor slab there) is a glazed door to the outside — shown as glass
+  const inSlab = (q: Pt) => slabM.some((poly) => inRings(q, [poly[0].slice(0, -1) as Pt[]]) && !poly.slice(1).some((h) => inRings(q, [h.slice(0, -1) as Pt[]])));
+  if (slabM.length) (o.openings ?? []).forEach((op, i) => {
+    const gi = glassOf.get(i); if (!op.door || gi == null) return;
+    const mid: Pt = [(op.a[0] + op.b[0]) / 2 + op.n[0] * op.thk / 2, (op.a[1] + op.b[1]) / 2 + op.n[1] * op.thk / 2];
+    const d = op.thk / 2 + 0.4;
+    if (!inSlab([mid[0] + op.n[0] * d, mid[1] + op.n[1] * d]) || !inSlab([mid[0] - op.n[0] * d, mid[1] - op.n[1] * d])) glass[gi].door = false;
+  });
 
   const panels: Panel3[] = [];
   let wallN = 0, special = 0;
