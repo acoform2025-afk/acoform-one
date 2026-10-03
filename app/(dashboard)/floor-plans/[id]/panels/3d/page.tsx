@@ -80,6 +80,7 @@ export default async function Model3DPage({ params, searchParams }: { params: Pr
       {back}
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-graphite-50">3D model — {whole ? "whole building" : "typical floor"}</h1>
+        <a href={`/floor-plans/${id}/panels/stairs?${qs}`} target="_blank" rel="noreferrer" className="rounded-md border border-graphite-700 px-2.5 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">Staircase assembly drawing (PDF)</a>
         {building?.levels.length ? (
           <div className="flex items-center gap-1 text-xs">
             <Link href={`/floor-plans/${id}/panels/3d?${qs}`} className={`rounded-md px-2.5 py-1.5 ${!whole ? "bg-brand-orange text-white" : "border border-graphite-700 text-graphite-300 hover:bg-graphite-800"}`}>Typical floor</Link>
