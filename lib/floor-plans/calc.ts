@@ -7,6 +7,7 @@
  * + the additional pieces non-typical floors need (first floor, terrace, refuge…). `floors` is for information only.
  */
 
+import type { Building } from "./building";
 import { DEFAULT_RULES, normaliseRules, type MeasureRules } from "./rules";
 
 export type Pt = [number, number];
@@ -85,6 +86,8 @@ export type Takeoff = {
   stairs?: StairRow[];
   shell?: ShellMeta;
   system?: "tierod" | "flattie" | "acoform";   // formwork system for this plan only (unset = company setting)
+  building?: Building;                  // every level of the building (read from the drawing) + open questions — on the typical plan
+  parentPlan?: string;                  // this plan is one level's own plan, made from that typical plan
   ruleOverrides?: { columnSetPct?: number };   // layout-rule values for this plan only
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null };
 };

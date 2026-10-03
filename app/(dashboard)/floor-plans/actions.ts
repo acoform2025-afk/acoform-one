@@ -297,3 +297,43 @@ export async function touchPlanFile(id: string): Promise<Result> {
   if (row.lead_id) revalidatePath(`/leads/${row.lead_id}`);
   return { ok: true };
 }
+
+const levelPlanSchema = z.object({
+  fromId: uuid,
+  name: z.string().trim().min(1).max(150),
+  region: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable(),   // the level's drawing (screen px of the same file), null = pick by hand
+  floorMm: z.number().min(1500).max(9000).optional(),
+  floors: z.number().int().min(1).max(200).default(1),
+});
+/**
+ * A level's own plan (stilt, ground, refuge …) made from the same drawing file as the typical floor: same file, layers,
+ * scale and settings; its own region, floor height and count. Measured like any plan; the typical plan's building list
+ * points at it.
+ */
+export async function createLevelPlan(input: z.infer<typeof levelPlanSchema>): Promise<Result<{ id: string }>> {
+  const denied = await guard(); if (denied) return { error: denied };
+  const p = levelPlanSchema.safeParse(input);
+  if (!p.success) return { error: p.error.issues[0]?.message ?? "Check the level." };
+  const supabase = await createClient();
+  const { data: src } = await supabase.from("floor_plans").select("id, name, lead_id, source_kind, drawing_type, file_path, original_path, file_name, takeoff").eq("id", p.data.fromId).maybeSingle();
+  if (!src) return { error: "Floor plan not found." };
+  const t = (src.takeoff && typeof src.takeoff === "object" && !Array.isArray(src.takeoff) ? src.takeoff : {}) as Record<string, unknown>;
+  const params = (t.params && typeof t.params === "object" ? t.params : {}) as Record<string, unknown>;
+  const dxf = (t.dxf && typeof t.dxf === "object" ? t.dxf : null) as Record<string, unknown> | null;
+  const takeoff = {
+    v: 1, metersPerPx: t.metersPerPx ?? null, calib: t.calib, image: t.image, shapes: [], columns: [], beams: [], extras: [], nonTypical: [], stairs: [],
+    system: t.system, shell: t.shell,
+    params: { ...params, floors: p.data.floors, ...(p.data.floorMm ? { floorHeight: p.data.floorMm / 1000 } : {}) },
+    dxf: dxf ? { ...dxf, region: p.data.region } : undefined,
+    auto: { done: true, note: `made from "${src.name}" for this level` },
+    parentPlan: src.id,
+  };
+  const { data, error } = await supabase.from("floor_plans").insert({
+    name: p.data.name, lead_id: src.lead_id, source_kind: src.source_kind, drawing_type: src.drawing_type,
+    file_path: src.file_path, original_path: src.original_path, file_name: src.file_name, takeoff: takeoff as never,
+  }).select("id").single();
+  if (error || !data) return { error: dbError(error?.message ?? "Could not create the plan.") };
+  revalidatePath("/floor-plans");
+  if (src.lead_id) revalidatePath(`/leads/${src.lead_id}`);
+  return { ok: true, data: { id: data.id } };
+}

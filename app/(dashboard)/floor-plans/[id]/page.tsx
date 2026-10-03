@@ -36,6 +36,13 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
   const { data: orig } = plan.original_path ? await bucket.createSignedUrl(plan.original_path, 60 * 60) : { data: null };
 
   const lead = Array.isArray(plan.leads) ? plan.leads[0] : plan.leads;
+  // other plans made from the same drawing file (the levels' own plans, other blocks): their measured areas feed the whole-building figure
+  const { data: sibRows } = await supabase.from("floor_plans").select("id, name, totals, takeoff").eq("file_path", plan.file_path).neq("id", plan.id).limit(100);
+  const siblings = (sibRows ?? []).map((r) => {
+    const tt = (r.totals && typeof r.totals === "object" ? r.totals : null) as { contact_area?: number; quote_area?: number } | null;
+    const tk = (r.takeoff && typeof r.takeoff === "object" ? r.takeoff : null) as { shapes?: unknown[]; dxf?: { region?: unknown } } | null;
+    return { id: r.id, name: r.name, contact: Number(tt?.contact_area) || 0, quote: Number(tt?.quote_area) || 0, measured: !!tt && (Number(tt.contact_area) || 0) > 0 && !!(tk?.dxf?.region || tk?.shapes?.length) };
+  });
   // quotations this plan can feed: the lead's open ones + the one we came from
   const quoteSel = "id, quotation_code, quotation_type, formwork_type, status, floor_plan_id, total_area_sqm";
   const lists = await Promise.all([
@@ -86,7 +93,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
         {fileUrl?.signedUrl ? (
           <TakeoffTool
             plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}` } : null }}
-            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules}
+            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules} siblings={siblings}
           />
         ) : <p className="text-sm text-signal-red">The plan file could not be opened.</p>}
       </div>

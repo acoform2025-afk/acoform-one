@@ -2,18 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AppWindow, Check, Crop, Eye, EyeOff, Minimize, RefreshCw, Type, Tag, ZoomIn, DoorOpen, FileDown, Hand, Layers, Loader2, MoveVertical, Maximize, Minus, MousePointer2, PenLine, Plus, Ruler, Save, Square, SquareDashed, Trash2, Undo2, X, Columns3,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ScopePanel } from "./scope-panel";
+import { BuildingPanel, type SiblingPlan } from "./building-panel";
+import { readBuilding, type Building } from "@/lib/floor-plans/building";
 import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
 import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
-import { saveTakeoff } from "../actions";
+import { createLevelPlan, saveTakeoff } from "../actions";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
@@ -22,6 +25,8 @@ type Tool = "pan" | "zoom" | "select" | "calibrate" | "measure" | "region" | "sl
 type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
 
 const MAX_SIDE = 2400;
+const boxA = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+const boxI = (a: number[], b: number[]) => boxA([Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])]);
 const SHAPE_STYLE: Record<ShapeKind, { stroke: string; fill: string; label: string }> = {
   slab: { stroke: "#2563eb", fill: "rgba(37,99,235,0.14)", label: "Slab area" },
   opening: { stroke: "#9333ea", fill: "rgba(147,51,234,0.22)", label: "Opening / shaft" },
@@ -73,7 +78,7 @@ function normalise(t: Partial<Takeoff> | null): Takeoff {
   };
 }
 
-export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = DEFAULT_RULES }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules }) {
+export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = DEFAULT_RULES, siblings = [] }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[] }) {
   const router = useRouter();
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -357,6 +362,25 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const area = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
     return parts.find((q) => { const i = area([Math.max(q.px[0], r[0]), Math.max(q.px[1], r[1]), Math.min(q.px[2], r[2]), Math.min(q.px[3], r[3])]); return i > 0.85 * area(q.px) && i > 0.6 * area(r); }) ?? null;
   }, [t.dxf?.region, parts]);
+  // the whole building — every level read from the level table / section level names, matched to its drawing, with
+  // the open questions; what the estimator set by hand (own plans made, questions ticked) is kept across readings
+  const readLevels = useCallback((said: { floors?: number; floorMm?: number; slabMm?: number }, typicalPartN?: number): Building | null => {
+    if (!modelRef.current || !t.dxf) return null;
+    const bld = readBuilding({ texts: modelRef.current.texts ?? [], unitToM: UNIT_TO_M[t.dxf.units], parts, section: drawingSection(modelRef.current), said, planName: plan.name, typicalPartN });
+    if (t.building) {
+      for (const l of bld.levels) { const o = t.building.levels.find((x) => x.key === l.key); if (o?.planId) { l.planId = o.planId; l.use = o.use; } }
+      for (const q of bld.questions) { const o = t.building.questions.find((x) => x.text === q.text); if (o?.done) q.done = true; }
+    }
+    return bld;
+  }, [t.dxf, t.building, parts, plan.name]);
+  // a plan measured before this existed: its levels are read once, without touching anything else
+  const levelsDone = useRef(false);
+  useEffect(() => {
+    if (levelsDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size || t.building || t.parentPlan || !t.auto?.done || !parts.length) return;
+    levelsDone.current = true;
+    const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n);
+    if (b) update((p) => ({ ...p, building: b }));
+  }, [canEdit, isDxf, t.dxf, t.building, t.parentPlan, t.auto?.done, t.params.floors, t.params.floorHeight, t.params.slabMm, size, parts.length, currentPart?.n, readLevels, update]);
   // automatic: pick the typical floor plan (most walls + "typical … plan" title), read floors & floor height from the drawing
   const detect = useCallback((force: boolean) => {
     if (!modelRef.current || !t.dxf) return;
@@ -377,9 +401,14 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     if (fh) notes.push(`floor height ${fh} mm (${sec?.floorMm ? "from the sections" : info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing"})`);
     if (sec) notes.push(`sections: slab ${sec.slabMm} mm concrete${sec.finishMm ? ` (+ ${sec.finishMm} mm floor finish, ${sec.totalMm} mm in all — finish not formed)` : ""}${slabMm ? "" : " — kept the slab you set"}${sec.beamMm ? ` · beams / lintels ${sec.beamMm} mm deep` : ""}`);
     if (force && !pick && !fh && !floors && !sec) notes.push("nothing new could be read — set the region, floors and floor height by hand");
+    // the whole building: every level, its drawing and the open questions (kept once the estimator has edited it, unless read again)
+    const pickedPart = pick ? parts.find((q) => { const i = boxI(q.px, pick.px); return i > 0.85 * boxA(q.px) && i > 0.6 * boxA(pick.px); }) : currentPart;
+    const bld = force || !t.building || !t.building.edited ? readLevels({ floors: floors ?? t.params.floors, floorMm: fh ?? Math.round((t.params.floorHeight || 3) * 1000), slabMm: slabMm ?? t.params.slabMm }, pickedPart?.n) : null;
+    if (bld) notes.push(`${bld.levels.length} levels (${bld.note})${bld.questions.length ? ` · ${bld.questions.length} questions for the architect / structure / client` : ""}`);
     const note = notes.length ? notes.join(" · ") + "." : undefined;
     update((pp) => ({
       ...pp,
+      ...(bld ? { building: bld } : {}),
       auto: { done: true, note },
       params: { ...pp.params, ...(floors ? { floors } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}), ...(slabMm ? { slabMm } : {}), ...(beamDepthMm ? { beamDepthMm } : {}) },
       dxf: pp.dxf && pick ? { ...pp.dxf, region: pick.px } : pp.dxf,
@@ -387,7 +416,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     setAutoNote(note ?? null);
     if (note) setAutoSave(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, t.dxf, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update]);
+  }, [candidates, parts, currentPart, readLevels, t.dxf, t.building, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update]);
   useEffect(() => {
     if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size) return;
     // only the first time a plan is opened: once the user has a region / saved values, nothing is changed automatically
@@ -543,6 +572,19 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const [p1, p2] = draft;
     update((p) => ({ ...p, metersPerPx: mm / 1000 / calibPx, calib: { p1, p2, mm } }));
     setDraft([]); setCalibMm(""); setTool("slab");
+  }
+
+  /* ---------- a level's own plan ---------- */
+  const setBuilding = (b: Building) => update((p) => ({ ...p, building: b }));
+  async function makeLevelPlan(g: { keys: string[]; name: string; count: number; floorMm?: number }, part: { px: [number, number, number, number] } | null) {
+    const res = await createLevelPlan({ fromId: plan.id, name: `${plan.name} — ${g.name}`, region: part ? part.px : null, floorMm: g.floorMm, floors: g.count });
+    if (res.error || !res.data) { setMsg({ error: res.error ?? "Could not make the plan." }); return; }
+    const nb: Building = t.building ? { ...t.building, edited: true, levels: t.building.levels.map((l) => (g.keys.includes(l.key) ? { ...l, planId: res.data!.id, use: "own" as const } : l)) } : { v: 1, levels: [], questions: [], note: "" };
+    const next = { ...t, building: nb };
+    setT(next);
+    const sv = await saveTakeoff(plan.id, next, totals, null);
+    if (sv.error) { setMsg({ error: sv.error }); return; }
+    router.push(`/floor-plans/${res.data.id}`);
   }
 
   /* ---------- save ---------- */
@@ -831,6 +873,12 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
             </ul>
           </Panel>
         ) : null}
+
+        {isDxf && t.building && !t.parentPlan ? (
+          <BuildingPanel building={t.building} parts={parts.map((q) => ({ n: q.n, title: q.title, px: q.px }))} typical={{ contact: totals.contact_area, quote: totals.quote_area }} siblings={siblings} planId={plan.id} canEdit={canEdit}
+            onChange={setBuilding} onReread={() => { const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n); if (b) setBuilding({ ...b, edited: false }); }} onMeasure={makeLevelPlan} onShowPart={(q) => fitBox(q.px)} />
+        ) : null}
+        {t.parentPlan ? <p className="rounded-lg border border-graphite-800 bg-graphite-900 p-3 text-[11px] text-graphite-400">This is one level&apos;s own plan. The whole building is listed on its typical plan: <Link href={`/floor-plans/${t.parentPlan}`} className="text-brand-orange hover:underline">open it</Link>.</p> : null}
 
         <Panel title="Scale & heights">
           {isDxf && t.dxf ? (

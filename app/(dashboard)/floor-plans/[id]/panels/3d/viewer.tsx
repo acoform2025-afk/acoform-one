@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { Scene3 } from "@/lib/floor-plans/scene3d";
 
-type Layer = "walls" | "columns" | "wallPanels" | "corners" | "deck" | "slab" | "beams" | "stairs" | "issues";
-const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", issues: "Design check" };
-const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xe0605a, deck: 0x9fd3c7, dspec: 0xe0605a, ic: 0x34d399, ec: 0x10b981, sc: 0xa78bfa, kick: 0xfb923c, bside: 0xd4a373, bbot: 0xb08968, col: 0xfcd34d, stair: 0xc9b79c, riser: 0xe7d3b8, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, colC: 0x8b8f99 };
-const KIND_LAYER: Record<Scene3["panels"][number]["k"], Layer> = { std: "wallPanels", top: "wallPanels", fill: "wallPanels", deck: "deck", dspec: "deck", ic: "corners", ec: "corners", sc: "corners", kick: "corners", bside: "beams", bbot: "beams", col: "columns", stair: "stairs", riser: "stairs" };
-const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standard wall panel", top: "wall-top piece", fill: "filler / special", deck: "deck panel", dspec: "deck special", ic: "internal corner", ec: "external corner", sc: "soffit corner", kick: "kicker", bside: "beam side panel", bbot: "beam bottom", col: "column panel", stair: "stair soffit", riser: "riser panel" };
+type Layer = "walls" | "columns" | "wallPanels" | "fillers" | "corners" | "deck" | "slab" | "beams" | "stairs" | "issues";
+const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", fillers: "Fillers / specials", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", issues: "Design check" };
+const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xff3fb3, deck: 0x9fd3c7, dspec: 0xff8ad1, ic: 0x34d399, ec: 0x10b981, sc: 0xa78bfa, kick: 0xfb923c, bside: 0xd4a373, bbot: 0xb08968, col: 0xfcd34d, stair: 0xc9b79c, riser: 0xe7d3b8, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, colC: 0x8b8f99 };
+const KIND_LAYER: Record<Scene3["panels"][number]["k"], Layer> = { std: "wallPanels", top: "wallPanels", fill: "fillers", deck: "deck", dspec: "fillers", ic: "corners", ec: "corners", sc: "corners", kick: "corners", bside: "beams", bbot: "beams", col: "columns", stair: "stairs", riser: "stairs" };
+const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standard wall panel", top: "wall-top piece", fill: "wall filler (non-standard width)", deck: "deck panel", dspec: "deck filler / special", ic: "internal corner", ec: "external corner", sc: "soffit corner", kick: "kicker", bside: "beam side panel", bbot: "beam bottom", col: "column panel", stair: "stair soffit", riser: "riser panel" };
 
 const span = (sc: Scene3) => Math.max(sc.box[2] - sc.box[0], sc.box[3] - sc.box[1], 5);
 
@@ -15,7 +15,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
   const host = useRef<HTMLDivElement>(null);
   type View = "3d" | "top" | "front" | "back" | "left" | "right";
   const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; turn: (deg: number) => void; cut: (y: number | null) => void; flyTo: (x: number, y: number, z: number, dist?: number) => void; highlight: (test: ((p: Scene3["panels"][number]) => boolean) | null) => number } | null>(null);
-  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, corners: true, deck: true, slab: false, beams: true, stairs: true, issues: true });
+  const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, fillers: true, corners: true, deck: true, slab: false, beams: true, stairs: true, issues: true });
   const [pick, setPick] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [cut, setCut] = useState<number>(100);          // % of the floor height shown (section cut from the top)
@@ -48,7 +48,7 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         ctr.minDistance = 0.5; ctr.maxDistance = span * 6;
         sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
         const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, span * 1.5, cz + span * 0.7); sc.add(sun);
-        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), corners: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), issues: new THREE.Group() };
+        const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), fillers: new THREE.Group(), corners: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), issues: new THREE.Group() };
         // section cut: everything above the cut height is clipped away (slider)
         const clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), top);
         renderer.clippingPlanes = [clip];
@@ -190,6 +190,9 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
   }, [scene, focus]);
 
   const toggle = (l: Layer) => setOn((o) => { const v = !o[l]; api.current?.set(l, v); return { ...o, [l]: v }; });
+  // double-click a layer: see only that layer (e.g. only the fillers); "All" brings everything back
+  const only = (l: Layer) => setOn((o) => { const n = { ...o }; for (const k of Object.keys(n) as Layer[]) { n[k] = k === l || k === "issues"; api.current?.set(k, n[k]); } return n; });
+  const all = () => setOn((o) => { const n = { ...o }; for (const k of Object.keys(n) as Layer[]) { n[k] = k !== "slab"; api.current?.set(k, n[k]); } return n; });
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
@@ -199,10 +202,11 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
           const n = l === "walls" ? scene.walls.length : l === "columns" ? (scene.cols?.length ?? 0) + pcs : l === "slab" ? scene.slabPoly.length : l === "beams" ? (scene.beamSolids?.length ?? 0) + scene.beams.length + pcs
             : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
           return (
-            <button key={l} type="button" onClick={() => toggle(l)} title={n ? `${n} on this floor` : "nothing of this kind on this floor"}
+            <button key={l} type="button" onClick={() => toggle(l)} onDoubleClick={() => only(l)} title={`${n ? `${n} on this floor` : "nothing of this kind on this floor"} · double-click to see only this`}
               className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : n ? "border border-graphite-700 text-graphite-300 hover:bg-graphite-800" : "border border-dashed border-graphite-800 text-graphite-600"}`}>{LABEL[l]}{n ? "" : " (0)"}</button>
           );
         })}
+        <button type="button" onClick={all} title="Show every layer again" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">All</button>
         <span className="mx-1 h-5 w-px bg-graphite-700" />
         <button type="button" title="Turn left 45°" onClick={() => api.current?.turn(-45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↺ 45°</button>
         <button type="button" title="Turn right 45°" onClick={() => api.current?.turn(45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↻ 45°</button>
@@ -249,7 +253,8 @@ export function Viewer3D({ scene, focus }: { scene: Scene3; focus?: string }) {
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#7aa7e0" }} />standard wall panel</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#f2c76b" }} />wall-top piece</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#9fd3c7" }} />deck panel</span>
-        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#e0605a" }} />special / filler</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#ff3fb3" }} />wall filler</span>
+        <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#ff8ad1" }} />deck filler / special</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#34d399" }} />internal / external corner</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#a78bfa" }} />soffit corner</span>
         <span><span className="mr-1 inline-block size-2.5 rounded-sm" style={{ background: "#fb923c" }} />kicker</span>
