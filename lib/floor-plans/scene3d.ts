@@ -20,6 +20,8 @@ export type Scene3 = {
   steps: { c: [number, number, number]; s: [number, number, number]; rot: number }[];   // stair treads / landings as boxes (centre, size x·y·z, rotation about y)
   panels: Panel3[]; mb: [Pt, Pt][]; zones: { code: string; at: Pt }[]; stats: { wall: number; deck: number; special: number };
   issues?: { id: string; sev: "error" | "warn"; text: string; at: Pt; y: number }[];
+  wallBits?: { poly: Poly2; z0: number; z1: number }[];          // concrete under windows (sill) and over openings (lintel)
+  glass?: { p: [number, number, number][]; door: boolean }[];     // window panes / door leaves in the openings
 };
 
 const ring = (r: Pt[]): [number, number][] => { const o = r.map((p) => [p[0], p[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
@@ -30,11 +32,28 @@ export function buildScene3(o: {
   zones: Zone[]; faces: FaceLayout[]; mpp: number; floorHeight: number; slabMm: number; stdHeight: number; beamDepthMm: number;
   cols?: Pt[][]; beams3?: { ring: Pt[]; d: number }[]; stairs?: [number, number, number, number][];
   stairGeo?: StairGeo[]; kickerMm?: number; scMm?: [number, number]; icMm?: number; ecMm?: number;
+  openings?: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number }[];
 }): Scene3 {
   const H = Math.max(0.5, o.floorHeight - o.slabMm / 1000), slab = o.slabMm / 1000;
   // walls: even-odd combination of the merged wall rings → proper polygons with holes
   let walls: MultiPolygon = [];
   for (const r of o.zoneWalls) if (r.length >= 3) { try { walls = walls.length ? polygonClipping.xor(walls, [ring(r)]) : [[ring(r)]]; } catch { /* skip */ } }
+  // doors / windows inside the walls: a hole through the wall, sill wall under a window, lintel over the opening
+  const wallBits: NonNullable<Scene3["wallBits"]> = [], glass: NonNullable<Scene3["glass"]> = [];
+  const openPieces: { op: NonNullable<typeof o.openings>[number]; sill: number; head: number }[] = [];
+  for (const op of o.openings ?? []) {
+    const e = 0.01, [nx, ny] = op.n;
+    const at = (p: Pt, d: number): [number, number] => [p[0] + nx * d, p[1] + ny * d];
+    const rect: [number, number][] = [at(op.a, -e), at(op.b, -e), at(op.b, op.thk + e), at(op.a, op.thk + e), at(op.a, -e)];
+    try { walls = polygonClipping.difference(walls, [rect]); } catch { continue; }
+    const poly: Poly2 = [rect.slice(0, -1) as Pt[]];
+    const sill = Math.min(op.sill / 1000, H), head = Math.min(op.head / 1000, H);
+    if (sill > 0.02) wallBits.push({ poly, z0: 0, z1: sill });
+    if (H - head > 0.02) wallBits.push({ poly, z0: head, z1: H });
+    const m1 = at(op.a, op.thk / 2), m2 = at(op.b, op.thk / 2);
+    glass.push({ p: [[m1[0], sill, m1[1]], [m2[0], sill, m2[1]], [m2[0], head, m2[1]], [m1[0], head, m1[1]]], door: op.door });
+    openPieces.push({ op, sill, head });
+  }
   let slabM: MultiPolygon = [];
   for (const d of o.decks) if (d.pts.length >= 3) { try { slabM = slabM.length ? polygonClipping.union(slabM, [ring(d.pts)]) : [[ring(d.pts)]]; } catch { /* skip */ } }
   const holes: MultiPolygon = o.decks.flatMap((d) => d.holes.filter((h) => h.length >= 3).map((h) => [ring(h)]));
@@ -42,11 +61,23 @@ export function buildScene3(o: {
 
   const panels: Panel3[] = [];
   let wallN = 0, special = 0;
+  // the short panels over each opening (head piece) and under each window (sill piece), on both faces of the wall
+  for (const { op, sill, head } of openPieces) {
+    const w = Math.round(Math.hypot(op.b[0] - op.a[0], op.b[1] - op.a[1]) * 1000);
+    for (const d of [-0.005, op.thk + 0.005]) {
+      const p0: Pt = [op.a[0] + op.n[0] * d, op.a[1] + op.n[1] * d], p1: Pt = [op.b[0] + op.n[0] * d, op.b[1] + op.n[1] * d];
+      const q = (z0: number, z1: number, c: string) => { panels.push({ p: [[p0[0], z0, p0[1]], [p1[0], z0, p1[1]], [p1[0], z1, p1[1]], [p0[0], z1, p0[1]]], k: "fill", c }); special++; };
+      if (H - head > 0.02) q(head, H, `over ${op.door ? "door" : "window"} · OH ${w} × ${Math.round((H - head) * 1000)}`);
+      if (sill > 0.02) q(0, sill, `under window · OS ${w} × ${Math.round(sill * 1000)}`);
+    }
+  }
   // wall panels on each face (face geometry in plan px → metres), drawn 5 mm off the concrete
   const mpp = o.mpp;
   for (const f of o.faces) {
-    if (!f.geo || !(mpp > 0)) continue;
-    const { a: A, b: B, off } = f.geo;
+    const fg = f.geo ?? f.geo3;
+    if (!fg || !(mpp > 0)) continue;
+    const base = !f.geo && f.geo3 ? f.geo3.z0 / 1000 : 0;      // a piece over / under a door or window
+    const { a: A, b: B, off } = fg;
     const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy); if (!L) continue;
     const ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
     const s = off < 0 ? -1 : 1, offM = (off * mpp) + s * 0.005;
@@ -55,7 +86,7 @@ export function buildScene3(o: {
     const at = (mm: number): Pt => { const t = Math.min(len, mm / 1000); return [a[0] + ux * t, a[1] + uy * t]; };
     const quad = (x0: number, x1: number, z0: number, z1: number, k: Panel3["k"], c: string) => {
       const p0 = at(x0), p1 = at(x1);
-      panels.push({ p: [[p0[0], z0, p0[1]], [p1[0], z0, p1[1]], [p1[0], z1, p1[1]], [p0[0], z1, p0[1]]], k, c, z: f.code });
+      panels.push({ p: [[p0[0], base + z0, p0[1]], [p1[0], base + z0, p1[1]], [p1[0], base + z1, p1[1]], [p0[0], base + z1, p0[1]]], k, c, z: f.code });
     };
     const Hm = f.height / 1000, main = Math.min(o.stdHeight / 1000, Hm), top = f.top / 1000;
     let run = 0;
@@ -69,12 +100,13 @@ export function buildScene3(o: {
   // soffit corner on every wall face: a vertical leg on the wall top and a horizontal leg under the slab into the room
   const scV = (o.scMm?.[1] ?? 125) / 1000, scH = (o.scMm?.[0] ?? 100) / 1000;
   for (const f of o.faces) {
-    if (!f.geo || !(mpp > 0)) continue;
-    const { a: A, b: B, off } = f.geo;
+    const fg = f.geo ?? (f.geo3 && f.geo3.z0 + f.height >= H * 1000 - 10 ? f.geo3 : undefined);   // pieces under a window sill have none
+    if (!fg || !(mpp > 0)) continue;
+    const { a: A, b: B, off } = fg;
     const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy); if (!L) continue;
     const ux = dx / L, uy = dy / L, nx = -uy, ny = ux, s = off < 0 ? -1 : 1, offM = (off * mpp) + s * 0.005;
     const a: Pt = [A[0] * mpp + nx * offM, A[1] * mpp + ny * offM], b: Pt = [a[0] + ux * L * mpp, a[1] + uy * L * mpp];
-    const Hf = Math.min(H, f.height / 1000);
+    const Hf = Math.min(H, (f.geo ? 0 : f.geo3!.z0 / 1000) + f.height / 1000);
     const c = `${f.code} · soffit corner ${o.scMm?.[0] ?? 100} × ${o.scMm?.[1] ?? 125}`;
     panels.push({ p: [[a[0], Hf - scV, a[1]], [b[0], Hf - scV, b[1]], [b[0], Hf, b[1]], [a[0], Hf, a[1]]], k: "sc", c, z: f.code });
     const ox = nx * s * scH, oy = ny * s * scH;      // horizontal leg, away from the concrete
@@ -166,5 +198,6 @@ export function buildScene3(o: {
     cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps,
     panels, mb: o.zones.flatMap((z) => z.mb), zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
     stats: { wall: wallN, deck: deckN, special },
+    wallBits, glass: glass.map((g) => ({ ...g, p: g.p.map((v) => [r3(v[0]), r3(v[1]), r3(v[2])]) as [number, number, number][] })),
   };
 }

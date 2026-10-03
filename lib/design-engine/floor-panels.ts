@@ -16,7 +16,7 @@ import type { LayoutRules } from "./layout-rules";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
 export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
-export type Face = { code: string; length: number; height: number; geo?: FaceGeo; part?: "above" | "below"; set?: "column" };   // part: short piece over a door/window or below a window sill
+export type Face = { code: string; length: number; height: number; geo?: FaceGeo; geo3?: FaceGeo & { z0: number }; part?: "above" | "below"; set?: "column" };   // geo3: where a piece over / under an opening sits (3D only; z0 mm above the floor)   // part: short piece over a door/window or below a window sill
 export type OpeningCut = { kind: "door" | "window"; w: number; h: number; t: number };                        // mm, one per opening (for reveals)                 // mm
 export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };                     // metres
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean; inner?: number; outer?: number; lintel?: number }; // mm; inner / outer = side-face lengths with / without slab beyond (outer faces are full depth), lintel = length formed by the wall's top panels
@@ -31,7 +31,7 @@ export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit
 export type PanelOptions = { extCorners?: number; upstands?: { h: number; length: number; label: string }[]; sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "upstand" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
-export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo; set?: "column" };
+export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo; geo3?: FaceGeo & { z0: number }; set?: "column" };
 export type PanelResult = {
   bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[]; columns: ColumnLayout[]; beams: BeamLayout[]; stairs: StairLayout[];
   summary: { specials: { types: number; pcs: number; area: number }; panelArea: number; weight: number; accessoryWeight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
@@ -150,12 +150,12 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
         if (rest >= 50) add(`col:CT-${w}-${rest}`, { code: `CT-${w}-${rest}`, description: `Column top above the first pour (${rest} mm, cast with the slab)`, group: "wall-top", w, h: rest, custom: !sysStd }, 1);
       }
       if (leftC > 0) add(`col:CF-${leftC}-${first}`, { code: `CF-${leftC}-${first}`, description: "Column filler (custom width)", group: "column", w: leftC, h: first, custom: true }, 1);
-      layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: leftC, top: rest, geo: f.geo, set: f.set });
+      layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: leftC, top: rest, geo: f.geo, geo3: f.geo3, set: f.set });
       continue;
     }
     const left = fit.left < tol ? 0 : Math.round(fit.left / 5) * 5;   // small gaps are taken up in the joints
     const top = Math.max(0, Math.round(f.height - o.stdHeight));
-    layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo, set: f.set });
+    layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels, filler: left, top, geo: f.geo, geo3: f.geo3, set: f.set });
     // ACOFORM RK panels: a wall a little taller than the standard panel (25 … 175 mm, 25 steps) gets one W(RK) panel
     // (WRA 25, WRB 50 … WRG 175) instead of a standard panel + a wall-top piece
     const rk = !sysStd && top > 0 && top <= 175 && top % 25 === 0 ? `WR${"ABCDEFG"[top / 25 - 1]}` : null;

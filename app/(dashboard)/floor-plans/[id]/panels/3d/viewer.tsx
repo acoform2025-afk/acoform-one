@@ -84,6 +84,17 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           const G = new Proxy({} as Record<Layer, InstanceType<typeof THREE.Group>>, { get: (_t, l: string) => sub(l as Layer) });
           const lift = (m: InstanceType<typeof THREE.Object3D>) => m;
           if (fl.walls.length) G.walls.add(lift(extrude(fl.walls, fl.H, 0, COLOR.wall)));
+          // sill walls under windows, lintels over doors / windows, glass in the windows
+          for (const wb of fl.wallBits ?? []) G.walls.add(extrude([wb.poly], wb.z1 - wb.z0, wb.z0, COLOR.wall));
+          if (fl.glass?.length) {
+            const gm = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, transparent: true, opacity: 0.45, side: THREE.DoubleSide, roughness: 0.1, metalness: 0.3, depthWrite: false });
+            const dm = new THREE.MeshStandardMaterial({ color: 0x5b4636, side: THREE.DoubleSide, roughness: 0.8 });
+            for (const gl of fl.glass) {
+              const [a, b, c, d] = gl.p; const g = new THREE.BufferGeometry();
+              g.setAttribute("position", new THREE.BufferAttribute(new Float32Array([...a, ...b, ...c, ...a, ...c, ...d]), 3)); g.computeVertexNormals();
+              G.walls.add(new THREE.Mesh(g, gl.door ? dm : gm));
+            }
+          }
           if (fl.slabPoly.length) G.slab.add(lift(extrude(fl.slabPoly, fl.slab, fl.H, COLOR.slab, 0.55)));
           if (fl.cols?.length) G.columns.add(lift(extrude(fl.cols.map((r) => [r]), fl.H, 0, COLOR.colC)));
           // beams drawn on the plan: their outline from the soffit down to the beam bottom
