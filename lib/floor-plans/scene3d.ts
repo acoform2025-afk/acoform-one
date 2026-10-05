@@ -17,7 +17,8 @@ export type Scene3 = {
   H: number; slab: number; box: [number, number, number, number];
   walls: Poly2[]; slabPoly: Poly2[]; beams: { a: Pt; b: Pt; w: number; d: number }[];
   cols: Pt[][]; beamSolids: { ring: Pt[]; d: number }[];
-  steps: { c: [number, number, number]; s: [number, number, number]; rot: number }[];   // stair treads / landings as boxes (centre, size x·y·z, rotation about y)
+  steps: { c: [number, number, number]; s: [number, number, number]; rot: number }[];   // stair landings as boxes (centre, size x·y·z, rotation about y)
+  stairSolids?: { prof: [number, number][]; o: [number, number]; u: [number, number]; ext: [number, number] }[];   // concrete of a flight: profile (s along the flight, y up) at plan point o, s-direction u, extruded across by ext
   panels: Panel3[]; mb: [Pt, Pt][]; zones: { code: string; at: Pt }[]; stats: { wall: number; deck: number; special: number };
   issues?: { id: string; sev: "error" | "warn"; text: string; at: Pt; y: number }[];
   wallBits?: { poly: Poly2; z0: number; z1: number; infill?: boolean }[];   // infill: block / brick wall round a window (not formed)          // concrete under windows (sill) and over openings (lintel)
@@ -176,6 +177,7 @@ export function buildScene3(o: {
   // staircases: a dog-leg stair in each stair box — flight 1 up one half of the box, landing across the far end,
   // flight 2 back down the other half to the floor above (risers ≤ 170 mm, tread 270 mm)
   const steps: Scene3["steps"] = [];
+  const stairSolids: NonNullable<Scene3["stairSolids"]> = [];
   const acc: Acc3 = { props: [], ties: [], walers: [], pushPull: [], brackets: [], heads: [] };
   const FH = o.floorHeight;
   (o.stairs ?? []).forEach(([x0, y0, x1, y1], si) => {
@@ -195,9 +197,7 @@ export function buildScene3(o: {
       steps.push({ c: [cx, (yb + yt) / 2, cz], s: along ? [du, yt - yb, dv] : [dv, yt - yb, du], rot: 0 });
     };
     const topOf = per * rise;                                 // height reached by one flight
-    for (let k = 0; k < per - 1; k++) box(k * tread, 0, tread, half, 0, (k + 1) * rise);                       // flight 1
     box(Lb - land, 0, land, Wb, topOf - 0.15, topOf);                                                           // mid landing
-    if (fl > 1) for (let k = 0; k < per - 1; k++) box(Lb - land - (k + 1) * tread, half, tread, half, topOf, topOf + (k + 1) * rise);   // flight 2
     // stair formwork: the sloping soffit panel under each flight, the riser panels, the landing soffit
     const Q = (u0: number, v0: number, u1: number, v1: number, y0: number, y1: number, k: Panel3Kind, c: string) => {
       const [ax, az] = P(u0, v0), [bx, bz] = P(u1, v0), [cx2, cz2] = P(u1, v1), [dx2, dz2] = P(u0, v1);
@@ -222,6 +222,14 @@ export function buildScene3(o: {
       const at = (s: number, v: number, y: number): [number, number, number] => { const [x, z] = P(u0 + ud * s, v); return [x, y, z]; };
       const soff = (s: number) => y0 + s * k1, inner = (s: number) => base + s * k1;      // soffit line / line through the step inner corners
       const nSteps = per - 1, sEnd = nSteps * tread;
+      // the concrete of the flight: waist slab under the steps + the steps themselves (one profile, extruded across)
+      {
+        const prof: [number, number][] = [[0, soff(0)], [0, base]];
+        for (let k = 0; k < nSteps; k++) prof.push([k * tread, base + (k + 1) * rise], [(k + 1) * tread, base + (k + 1) * rise]);
+        prof.push([sEnd, soff(sEnd)]);
+        const [ox, oz] = P(u0, vA), [sx, sz] = P(u0 + ud, vA), [ex, ez] = P(u0, vB);
+        stairSolids.push({ prof, o: [ox, oz], u: [sx - ox, sz - oz], ext: [ex - ox, ez - oz] });
+      }
       let s0 = 0;
       for (const L of algL) {
         const sa = (s0 / 1000) * cos, sb = Math.min(sEnd, ((s0 + L) / 1000) * cos); s0 += L;
@@ -338,7 +346,7 @@ export function buildScene3(o: {
   return {
     H, slab, box, walls: strip(walls), slabPoly: strip(slabM),
     beams: o.zoneGaps.map((g) => ({ a: g.a, b: g.b, w: Math.max(0.1, g.thk), d: Math.max(slab, o.beamDepthMm / 1000) })),
-    cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps,
+    cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps, stairSolids,
     panels, mb: o.zones.flatMap((z) => z.mb), zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
     stats: { wall: wallN, deck: deckN, special },
     acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map(r3) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map(r3) as Acc3["heads"][number]) },

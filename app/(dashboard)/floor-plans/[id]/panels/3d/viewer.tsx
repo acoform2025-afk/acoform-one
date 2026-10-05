@@ -148,6 +148,18 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
             const mat = new THREE.MeshStandardMaterial({ color: 0xbfbab0, roughness: 0.9, transparent: true, opacity: 0.28, depthWrite: false });   // concrete of the stair, see-through so the formwork round it shows
             for (const st of fl.steps) { const m = new THREE.Mesh(new THREE.BoxGeometry(st.s[0], st.s[1], st.s[2]), mat); m.position.set(st.c[0], st.c[1], st.c[2]); m.rotation.y = st.rot; G.stairs.add(m); }
           }
+          // concrete of each flight: the stepped profile extruded across the flight width (see-through)
+          if (fl.stairSolids?.length) {
+            const mat = new THREE.MeshStandardMaterial({ color: 0xbfbab0, roughness: 0.9, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide });
+            for (const sd of fl.stairSolids) {
+              const shape = new THREE.Shape(sd.prof.map(([x, y]) => new THREE.Vector2(x, y)));
+              const len = Math.hypot(sd.ext[0], sd.ext[1]); if (len < 0.01) continue;
+              const g = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false });
+              const X = new THREE.Vector3(sd.u[0], 0, sd.u[1]), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(sd.ext[0] / len, 0, sd.ext[1] / len);
+              g.applyMatrix4(new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(sd.o[0], 0, sd.o[1]));
+              G.stairs.add(new THREE.Mesh(g, mat));
+            }
+          }
           for (const b of fl.beams) {
             const dx = b.b[0] - b.a[0], dz = b.b[1] - b.a[1], L = Math.hypot(dx, dz), h = b.d - fl.slab; if (!L || h <= 0) continue;
             const m = new THREE.Mesh(new THREE.BoxGeometry(L, h, b.w), new THREE.MeshStandardMaterial({ color: COLOR.beam, roughness: 0.9 }));
