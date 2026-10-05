@@ -20,6 +20,13 @@ const ORANGE = "#ef9d2f", GRAY = "#6b6d68", WALLF = "#e4e2df", WALLS = "#8a8782"
 export type AsmInfo = { company: string; project: string; client: string; planName: string; drawingNo: string; rev: string; date: string; system: string; floor?: string };
 
 const PW = 1191, PH = 842, M = 20, FOOT = 46, LIST_W = 170, HEAD_H = 34;
+/** One sheet per part family: the paper grows (A3 → A2 → A1 → A0 landscape) until the whole floor fits at a readable scale. */
+const PAPERS: { name: string; w: number; h: number }[] = [{ name: "A3", w: 1191, h: 842 }, { name: "A2", w: 1684, h: 1191 }, { name: "A1", w: 2384, h: 1684 }, { name: "A0", w: 3370, h: 2384 }];
+function paperFor(box: [number, number, number, number], minSc: number): { name: string; w: number; h: number } {
+  const bw = box[2] - box[0] + 0.5, bh = box[3] - box[1] + 0.5;
+  for (const p of PAPERS) { const W = p.w - 2 * M - LIST_W - 8, H = p.h - 2 * M - FOOT - HEAD_H - 4; if (Math.min(W / bw, H / bh) >= minSc) return p; }
+  return PAPERS[PAPERS.length - 1];
+}
 const d = (pts: Pt[], closed = true) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(3)} ${p[1].toFixed(3)}`).join(" ") + (closed ? " Z" : "");
 const FILL: Record<string, string> = { std: "#3b82f6", top: "#60a5fa", fill: "#dc2626", col: "#7c3aed", ic: "#16a34a", ec: "#dc2626", sc: "#0891b2", kick: "#92400e", bside: "#db2777", bbot: "#f472b6", deck: "#22c55e", dspec: "#ef4444", keel: "#2563eb", head: "#dc2626", waler: "#ea580c", tie: "#1f2937", stair: "#22c55e", lsoff: "#16a34a", cheek: "#7c3aed", cpp: "#f59e0b", tz: "#dc2626", stp: "#0891b2", cchan: "#0891b2", riser: "#db2777" };
 const fillOf = (k: string) => FILL[k] ?? "#64748b";
@@ -30,7 +37,7 @@ function Footer({ info, page, pages, title, scale }: { info: AsmInfo; page: numb
       <Image src={LOGO} style={{ width: 70, height: 22, objectFit: "contain" }} />
       <View style={{ marginLeft: 10, flexGrow: 1 }}>
         <Text style={{ fontWeight: "bold", fontSize: 9 }}>FORMWORK ASSEMBLY DIAGRAM — {title} · {info.floor ?? "TYPICAL FLOOR"} · {info.planName}</Text>
-        <Text style={{ color: GRAY }}>{info.project} · {info.client} · {info.system} · Scale {scale} on A3</Text>
+        <Text style={{ color: GRAY }}>{info.project} · {info.client} · {info.system} · Scale {scale}</Text>
       </View>
       <View style={{ width: 230, alignItems: "flex-end" }}>
         <Text>{info.company}</Text>
@@ -129,17 +136,6 @@ function LinesDots({ items, k, width, labels }: { items: AsmItem[]; k: K; width:
   );
 }
 
-/** Tiles of the plan box so that the sheet scale stays ≥ minSc pt/m (codes readable); at most 3 × 3. */
-function tilesOf(box: [number, number, number, number], w: number, h: number, minSc: number): [number, number, number, number][] {
-  const bw = box[2] - box[0], bh = box[3] - box[1];
-  const nx = Math.min(3, Math.max(1, Math.ceil((bw * minSc) / w))), ny = Math.min(3, Math.max(1, Math.ceil((bh * minSc) / h)));
-  const out: [number, number, number, number][] = [];
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-    const ov = 0.4;
-    out.push([box[0] + (bw * i) / nx - ov, box[1] + (bh * j) / ny - ov, box[0] + (bw * (i + 1)) / nx + ov, box[1] + (bh * (j + 1)) / ny + ov]);
-  }
-  return out;
-}
 const inTile = (it: AsmItem, t: [number, number, number, number]) => Math.max(it.a[0], it.b[0]) >= t[0] - 0.3 && Math.min(it.a[0], it.b[0]) <= t[2] + 0.3 && Math.max(it.a[1], it.b[1]) >= t[1] - 0.3 && Math.min(it.a[1], it.b[1]) <= t[3] + 0.3;
 
 function scaleText(sc: number) { const s = 1000 / ((sc * 25.4) / 72); const r = s > 100 ? Math.round(s / 10) * 10 : Math.round(s / 5) * 5; return `1:${Math.max(5, r)}`; }
@@ -214,13 +210,12 @@ const SHEETS: { no: string; fam: AsmFamily | "base"; t: string; sub: string; leg
 ];
 
 export function AssemblyDocument({ m, info, notes }: { m: AsmModel; info: AsmInfo; notes: string[] }) {
-  const W = PW - 2 * M - LIST_W - 8, H = PH - 2 * M - FOOT - HEAD_H - 4;
   const pageStyle = { fontFamily: "Carlito", fontSize: 8, padding: M, paddingBottom: M + FOOT } as const;
   const box = m.base.box;
-  type Pg = { sheet: (typeof SHEETS)[number]; tile: [number, number, number, number]; part?: string; items: AsmItem[]; rows: { code: string; n: number }[]; total?: string; wide?: boolean };
+  type Pg = { sheet: (typeof SHEETS)[number]; tile: [number, number, number, number]; part?: string; items: AsmItem[]; rows: { code: string; n: number }[]; total?: string; wide?: boolean; paper: { name: string; w: number; h: number } };
   const pages: Pg[] = [];
   for (const s of SHEETS) {
-    if (s.fam === "base") { pages.push({ sheet: s, tile: [box[0] - 1.1, box[1] - 1.1, box[2] + 0.3, box[3] + 0.3], items: [], rows: [], wide: true }); continue; }
+    if (s.fam === "base") { const t: [number, number, number, number] = [box[0] - 1.1, box[1] - 1.1, box[2] + 0.3, box[3] + 0.3]; pages.push({ sheet: s, tile: t, items: [], rows: [], wide: true, paper: paperFor(t, 25) }); continue; }
     const items = m.items.filter((it) => it.fam === s.fam);
     if (!items.length) continue;
     const rows = countOf(m.items, s.fam);
@@ -235,23 +230,23 @@ export function AssemblyDocument({ m, info, notes }: { m: AsmModel; info: AsmInf
         if (bx.key === "ST") continue;
         const t: [number, number, number, number] = [bx.b[0] - 0.6, bx.b[1] - 0.6, bx.b[2] + 0.6, bx.b[3] + 0.6];
         const its = items.filter((it) => inTile(it, t));
-        pages.push({ sheet: s, tile: t, part: `${bx.key}`, items: its, rows: countOf(its, "stair"), total: `${its.filter((i) => i.shape !== "dot").length} pieces` });
+        pages.push({ sheet: s, tile: t, part: `${bx.key}`, items: its, rows: countOf(its, "stair"), total: `${its.filter((i) => i.shape !== "dot").length} pieces`, paper: PAPERS[0] });
         if (++n >= 12) break;
       }
       continue;
     }
-    const tiles = tilesOf(box, W, H, s.minSc);
-    tiles.forEach((t, i) => pages.push({ sheet: s, tile: t, part: tiles.length > 1 ? `part ${i + 1}/${tiles.length}` : undefined, items: items.filter((it) => inTile(it, t)), rows, total }));
+    // the whole floor on one sheet: bigger paper rather than several parts (a family split over sheets is hard to read)
+    pages.push({ sheet: s, tile: box, items, rows, total, paper: paperFor(box, s.minSc) });
   }
   const notesPage = 1;
   const total = pages.length + notesPage;
   return (
     <Document title={`Formwork assembly diagram — ${info.planName}`} author={info.company}>
       {pages.map((pg, pi) => {
-        const s = pg.sheet, w = W;
+        const s = pg.sheet, w = pg.paper.w - 2 * M - LIST_W - 8, H = pg.paper.h - 2 * M - FOOT - HEAD_H - 4;
         const pad = 0.25, sc = Math.min(w / (pg.tile[2] - pg.tile[0] + 2 * pad), H / (pg.tile[3] - pg.tile[1] + 2 * pad));
         return (
-          <Page key={pi} size="A3" orientation="landscape" style={pageStyle}>
+          <Page key={pi} size={[pg.paper.w, pg.paper.h]} style={pageStyle}>
             <Head no={s.no} t={s.t} sub={s.sub} part={pg.part} />
             <Sheet m={m} tile={pg.tile} w={w} h={H}>{(k) => (
               <G>
@@ -286,8 +281,8 @@ export function AssemblyDocument({ m, info, notes }: { m: AsmModel; info: AsmInf
               </View>
             )}
             {s.legend.length ? <Legend rows={s.legend} /> : null}
-            {!pg.wide ? <KeyPlan m={m} tile={pg.tile} /> : null}
-            <Footer info={info} page={pi + 1} pages={total} title={`${s.no} ${s.t}`} scale={scaleText(sc)} />
+            {s.fam === "stair" ? <KeyPlan m={m} tile={pg.tile} /> : null}
+            <Footer info={info} page={pi + 1} pages={total} title={`${s.no} ${s.t}`} scale={`${scaleText(sc)} on ${pg.paper.name}`} />
           </Page>
         );
       })}
@@ -303,7 +298,7 @@ export function AssemblyDocument({ m, info, notes }: { m: AsmModel; info: AsmInf
             return <View key={f} style={{ flexDirection: "row", justifyContent: "space-between", borderBottomWidth: 0.3, borderColor: "#eee" }}><Text>{SHEETS.find((s) => s.fam === f)?.t}</Text><Text>{n} pcs · {rows.length} codes</Text></View>;
           })}
         </View>
-        <Footer info={info} page={total} pages={total} title="7 NOTES" scale="—" />
+        <Footer info={info} page={total} pages={total} title="7 NOTES" scale="— · A3" />
       </Page>
     </Document>
   );
