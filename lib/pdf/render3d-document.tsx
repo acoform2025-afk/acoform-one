@@ -21,7 +21,7 @@ export type RenderInfo = { company: string; project: string; client: string; pla
 // the 3D viewer's colours
 const COLOR: Record<Panel3Kind, string> = {
   std: "#7aa7e0", top: "#f2c76b", fill: "#ff3fb3", deck: "#9fd3c7", dspec: "#ff8ad1", ic: "#34d399", ec: "#10b981", sc: "#a78bfa", kick: "#fb923c",
-  bside: "#d4a373", bbot: "#b08968", col: "#fcd34d", stair: "#c9b79c", riser: "#e7d3b8", cheek: "#d9a066", lsoff: "#b9c7a0", tread: "#f3e6cc", cchan: "#64748b", stp: "#a16207", tz: "#93c5fd",
+  bside: "#d4a373", bbot: "#b08968", col: "#fcd34d", stair: "#c9b79c", riser: "#e7d3b8", cheek: "#d9a066", lsoff: "#b9c7a0", tread: "#f3e6cc", cchan: "#64748b", stp: "#a16207", tz: "#93c5fd", cpp: "#64748b", trec: "#475569",
 };
 const LEGEND: { k: Panel3Kind[]; label: string }[] = [
   { k: ["std"], label: "Standard wall panels" },
@@ -34,7 +34,7 @@ const LEGEND: { k: Panel3Kind[]; label: string }[] = [
   { k: ["dspec"], label: "Deck fillers / specials" },
   { k: ["bside", "bbot"], label: "Beam sides / bottoms" },
   { k: ["col"], label: "Column panels" },
-  { k: ["stair", "cheek", "riser", "tread", "lsoff", "cchan", "stp", "tz"], label: "Staircase pieces" },
+  { k: ["stair", "cheek", "riser", "tread", "lsoff", "cchan", "stp", "tz", "cpp", "trec"], label: "Staircase pieces" },
 ];
 const WALL_KINDS = new Set<Panel3Kind>(["std", "top", "fill", "ic", "ec", "kick", "col", "tz"]);
 const DECK_KINDS = new Set<Panel3Kind>(["deck", "dspec", "sc", "bside", "bbot", "lsoff"]);

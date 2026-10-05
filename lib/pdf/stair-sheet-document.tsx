@@ -15,7 +15,7 @@ Font.register({ family: "Carlito", fonts: [{ src: path.join(PUBLIC, "fonts", "Ca
 Font.registerHyphenationCallback((w) => [w]);
 const LOGO = path.join(PUBLIC, "brand", "acoform-logo.png");
 const ORANGE = "#ef9d2f", GRAY = "#6b6d68", INK = "#1f2937", CONC = "#e7e5e4", CONCS = "#78716c";
-const C = { soffit: "#c9b79c", cheek: "#d9a066", riser: "#e7d3b8", tread: "#f3e6cc", landing: "#b9c7a0", prop: "#d97706", dim: "#2563eb", cc: "#64748b", stp: "#a16207", tz: "#93c5fd" };
+const C = { cpp: "#64748b", soffit: "#c9b79c", cheek: "#d9a066", riser: "#e7d3b8", tread: "#f3e6cc", landing: "#b9c7a0", prop: "#d97706", dim: "#2563eb", cc: "#64748b", stp: "#a16207", tz: "#93c5fd" };
 
 export type StairInfo = { company: string; project: string; client: string; planName: string; drawingNo: string; rev: string; date: string; system: string; floorMm: number; slabMm: number; propSpacing: number };
 
@@ -68,7 +68,11 @@ function geom(s: StairLayout, floorMm: number, slabMm: number) {
   const lAlong = s.landing ? s.landing.along : [W];
   const hyp = Math.hypot(rise, tread), cos = tread / hyp;
   const topOf = per * rise;                    // landing level (from the floor)
-  return { W, rise, tread, per, run, land, Lb, Wb, across, lAcross, lAlong, hyp, cos, topOf, twoFlights, floorMm, slabMm, waist: s.waist, closed: s.closed ?? true };
+  // soffit along the slope: Indian rows (D / CPP) or dog-tooth soffit lengths (mm along the slope)
+  const india = s.style === "india" && !!s.rows?.length;
+  const segs: { a: number; b: number; k: "D" | "CPP" | "SS"; L: number }[] = [];
+  { let a = 0; for (const r of india ? s.rows! : s.along.map((L) => ({ k: "SS" as const, w: L }))) { segs.push({ a, b: a + r.w, k: r.k, L: r.w }); a += r.w; } }
+  return { W, rise, tread, per, run, land, Lb, Wb, across, lAcross, lAlong, hyp, cos, topOf, twoFlights, floorMm, slabMm, waist: s.waist, closed: s.closed ?? true, india, segs };
 }
 
 function PlanView({ s, info }: { s: StairLayout; info: StairInfo }) {
@@ -83,9 +87,13 @@ function PlanView({ s, info }: { s: StairLayout; info: StairInfo }) {
           <Rect x={0} y={0} width={g.Lb} height={g.Wb} fill="#ffffff" stroke={CONCS} strokeWidth={0.6 * k} />
           {/* flight 1 soffit panels (dashed outlines) and treads */}
           {(() => {
-            const out: React.ReactNode[] = []; let v = 0;
-            for (const w of g.across) { out.push(<Rect key={`a${v}`} x={0} y={v} width={g.run} height={Math.min(w, g.W - v)} fill={C.soffit} fillOpacity={0.35} stroke={C.soffit} strokeWidth={0.5 * k} strokeDasharray={`${4 * k} ${3 * k}`} />); v += w; }
-            if (g.twoFlights) { v = g.W; for (const w of g.across) { out.push(<Rect key={`b${v}`} x={0} y={v} width={g.run} height={Math.min(w, g.Wb - v)} fill={C.soffit} fillOpacity={0.35} stroke={C.soffit} strokeWidth={0.5 * k} strokeDasharray={`${4 * k} ${3 * k}`} />); v += w; } }
+            const out: React.ReactNode[] = [];
+            for (const [fi, v0] of (g.twoFlights ? [0, g.W] : [0]).entries()) for (const sg of g.segs) {
+              const x0 = Math.min(g.run, sg.a * g.cos), x1 = Math.min(g.run, sg.b * g.cos); if (x1 - x0 < 1) continue;
+              if (sg.k === "CPP") { out.push(<Rect key={`c${fi}-${sg.a}`} x={x0} y={v0} width={x1 - x0} height={g.W} fill={C.cpp} fillOpacity={0.6} stroke={C.cpp} strokeWidth={0.5 * k} />); continue; }
+              let v = v0;
+              for (const w of g.across) { const h = Math.min(w, v0 + g.W - v); if (h <= 0) break; out.push(<Rect key={`a${fi}-${sg.a}-${v}`} x={x0} y={v} width={x1 - x0} height={h} fill={C.soffit} fillOpacity={0.35} stroke={C.soffit} strokeWidth={0.5 * k} strokeDasharray={`${4 * k} ${3 * k}`} />); v += w; }
+            }
             return out;
           })()}
           {Array.from({ length: g.per }, (_, i) => <Line key={`t1${i}`} x1={i * g.tread} y1={0} x2={i * g.tread} y2={g.W} stroke={INK} strokeWidth={0.4 * k} />)}
@@ -137,10 +145,11 @@ function SectionView({ s, info }: { s: StairLayout; info: StairInfo }) {
   const pad = 900;
   const soff: React.ReactNode[] = [];
   let s0 = 0;
-  for (const L of s.along) {
-    const du0 = s0 * g.cos, du1 = Math.min(g.run, (s0 + L) * g.cos); s0 += L;
+  for (const sg of g.segs) {
+    const du0 = sg.a * g.cos, du1 = Math.min(g.run, sg.b * g.cos); s0 = sg.b;
     const y0 = du0 * k1 - wv, y1 = du1 * k1 - wv;
-    soff.push(<G key={`s${s0}`}><Line x1={du0} y1={-y0 + 25} x2={du1} y2={-y1 + 25} stroke={C.soffit} strokeWidth={60} /><Text x={(du0 + du1) / 2} y={-(y0 + y1) / 2 + 230} style={{ fontSize: 110 }} fill="#7c6a4f" textAnchor="middle">{`SS ${L}`}</Text></G>);
+    const cpp = sg.k === "CPP";
+    soff.push(<G key={`s${sg.a}`}><Line x1={du0} y1={-y0 + 25} x2={du1} y2={-y1 + 25} stroke={cpp ? C.cpp : C.soffit} strokeWidth={cpp ? 90 : 60} />{cpp ? <G><Line x1={(du0 + du1) / 2} y1={-((du0 + du1) / 2) * k1 + wv + 80} x2={(du0 + du1) / 2} y2={300} stroke={C.prop} strokeWidth={40} /></G> : <Text x={(du0 + du1) / 2} y={-(y0 + y1) / 2 + 230} style={{ fontSize: 100 }} fill="#7c6a4f" textAnchor="middle">{g.india ? `${sg.L} D` : `SS ${sg.L}`}</Text>}</G>);
   }
   return (
     <View2 box={[-pad - 400, -(H + slab) - pad, g.Lb + pad, pad]} w={540} h={300}>
@@ -194,13 +203,14 @@ function ExplodedView({ s, info }: { s: StairLayout; info: StairInfo }) {
   // soffit panels (dropped 900 below their place)
   let s0 = 0, ai = 0;
   const seenL = new Set<string>();
-  for (const L of s.along) {
-    const du0 = s0 * g.cos + ai * 260, du1 = Math.min(g.run, (s0 + L) * g.cos) + ai * 260; s0 += L;
+  for (const sg of g.segs) {
+    const L = sg.L;
+    const du0 = sg.a * g.cos + ai * 260, du1 = Math.min(g.run, sg.b * g.cos) + ai * 260; s0 = sg.b;
     let v = 0, bi = 0;
-    for (const w of g.across) {
+    for (const w of sg.k === "CPP" ? [g.W] : g.across) {
       const vv = v + bi * 220, v1 = Math.min(g.W, v + w) + bi * 220, z0 = (du0 - ai * 260) * k1 - wv - 1100, z1 = (du1 - ai * 260) * k1 - wv - 1100;
-      const lab = `SS ${w}×${L}`, first = !seenL.has(lab); seenL.add(lab);
-      items.push({ pts: [[du0, vv, z0], [du1, vv, z1], [du1, v1, z1], [du0, v1, z0]], fill: C.soffit, label: first ? lab : undefined, at: [(du0 + du1) / 2, (vv + v1) / 2, (z0 + z1) / 2] });
+      const lab = sg.k === "CPP" ? `150 SPCPP ${g.W}` : g.india ? `${L} D ${w}` : `SS ${w}×${L}`, first = !seenL.has(lab); seenL.add(lab);
+      items.push({ pts: [[du0, vv, z0], [du1, vv, z1], [du1, v1, z1], [du0, v1, z0]], fill: sg.k === "CPP" ? C.cpp : C.soffit, label: first ? lab : undefined, at: [(du0 + du1) / 2, (vv + v1) / 2, (z0 + z1) / 2] });
       v = Math.min(g.W, v + w); bi++;
     }
     ai++;
@@ -211,12 +221,12 @@ function ExplodedView({ s, info }: { s: StairLayout; info: StairInfo }) {
     for (let j = g.per - 2; j >= 0; j--) pts.push([(j + 1) * g.tread, y, (j + 1) * g.rise], [j * g.tread, y, (j + 1) * g.rise], [j * g.tread, y, j * g.rise]);
     return pts;
   };
-  items.push({ pts: dt(-900), fill: C.cheek, label: `DT ${s.cheekH}×${s.slope} (×2)`, at: [g.run / 2, -900, g.run * k1 / 2 + s.cheekH + 250] });
+  items.push({ pts: dt(-900), fill: C.cheek, label: g.india ? `SPGUN / SPCOVER ${s.cheekH} deep` : `DT ${s.cheekH}×${s.slope} (×2)`, at: [g.run / 2, -900, g.run * k1 / 2 + s.cheekH + 250] });
   items.push({ pts: dt(g.W + 900), fill: C.cheek });
   // step panels lifted 700: L-shaped (riser + tread) on a closed stair, riser shutters on an open one
   for (let i = 0; i < g.per - 1; i++) {
     const z0 = i * g.rise + 700, z1 = (i + 1) * g.rise + 700, x0 = i * g.tread;
-    items.push({ pts: [[x0, 0, z0], [x0, g.W, z0], [x0, g.W, z1], [x0, 0, z1]], fill: C.riser, label: i === 0 ? (g.closed ? `TS L-step ${g.W}: ${g.tread}+${g.rise} (${g.per - 1} nos)` : `RS ${g.W}×${g.rise} (${g.per} nos)`) : undefined, at: [x0, -300, z0 + 250] });
+    items.push({ pts: [[x0, 0, z0], [x0, g.W, z0], [x0, g.W, z1], [x0, 0, z1]], fill: C.riser, label: i === 0 ? (g.closed ? (g.india ? `${g.tread}+${g.rise} SPTR + 65+65 SPTREC (${g.per - 1} nos)` : `TS L-step ${g.W}: ${g.tread}+${g.rise} (${g.per - 1} nos)`) : `RS ${g.W}×${g.rise} (${g.per} nos)`) : undefined, at: [x0, -300, z0 + 250] });
     if (g.closed) items.push({ pts: [[x0, 0, z1], [x0 + g.tread, 0, z1], [x0 + g.tread, g.W, z1], [x0, g.W, z1]], fill: C.tread });
   }
   // C-channel at the foot (dropped), stop panel at the top
@@ -249,6 +259,7 @@ function ExplodedView({ s, info }: { s: StairLayout; info: StairInfo }) {
 
 type Part = { code: string; desc: string; size: string; qty: number };
 function partsOf(s: StairLayout): Part[] {
+  if (s.parts?.length) return s.parts;
   const n = s.flights;
   const out = new Map<string, Part>();
   const add = (code: string, desc: string, size: string, q: number) => { const p = out.get(code); if (p) p.qty += q; else out.set(code, { code, desc, size, qty: q }); };
@@ -282,6 +293,16 @@ function partsOf(s: StairLayout): Part[] {
   return [...out.values()];
 }
 
+const SEQ_INDIA = [
+  "Deck first: fix the props of the landing and under every 150 SPCPP prop strip; lay the prop strips and the D deck rows up the slope from the C-channel at the foot (pins @ 300).",
+  "Wall side: fix the SPW special wall panels (top cut to the slope) and the triangular panel at the foot to the wall panels.",
+  "Rebar of the flight and landing, then the electrical / plumbing sleeves; inspect before closing.",
+  "Fix the side panels: SPGUN on the wall side, SPCOVER on the open (well) side, pinned to the deck rows and wall panels (pins @ 300, ≥ 3 per joint).",
+  "Fix the stop panel at the top of the flight where the flight is not cast with the landing.",
+  "Fix the SPTR step panels from the bottom step up with a 65+65 SPTREC angle at every nosing (pins @ 200), riser brackets both ends.",
+  "Check line, level, riser and tread on every step; release agent on all faces. Pour from the bottom up, vibrate through the Ø20 vent holes until slurry shows.",
+  "Strike: step panels and side panels after initial set (approx. 12–24 h), deck rows next; the prop strips and props stay until the slab support may be released.",
+];
 const SEQ = [
   "Deck first: fix the props of the landing and the flights; set the landing soffit panels and the stair soffit panels up the slope from the C-channel at the foot (pins @ 300, edge panels 200 at the free edge).",
   "Wall side: fix the triangular and trapezoidal wall panels under the flight to the wall panels, top edge on the soffit line.",
@@ -355,7 +376,7 @@ function StepDetail({ s }: { s: StairLayout }) {
 }
 
 /** Soffit panel cross-section (400) and the pin & wedge joint between two panels. */
-function SoffitPinDetail() {
+function SoffitPinDetail({ india = false }: { india?: boolean }) {
   const W = 400, F = 65, T = 4, R = 5;
   const panel = (x: number) => (
     <G key={x}>
@@ -374,7 +395,7 @@ function SoffitPinDetail() {
           {/* pin through both rails, wedge through the pin slot */}
           <Rect x={W - 45} y={40 - 8} width={90} height={16} rx={8} fill="#9ca3af" stroke={INK} strokeWidth={1} />
           <Rect x={W + 30} y={40 - 40} width={10} height={95} fill="#4b5563" />
-          <Dim x1={0} y1={0} x2={W} y2={0} off={-55} k={k} text="400 (std; 200 at free edge)" />
+          <Dim x1={0} y1={0} x2={W} y2={0} off={-55} k={k} text={india ? "450 deck row (700 across)" : "400 (std; 200 at free edge)"} />
           <Dim x1={2 * W} y1={0} x2={2 * W} y2={F} off={-30} k={k} text="65" vertical />
           <Text x={W} y={F + 55} style={{ fontSize: 6.5 * k }} fill={INK} textAnchor="middle">round pin through the rail holes (40 from skin) + flat wedge</Text>
           <Text x={W / 2} y={F + 95} style={{ fontSize: 6.5 * k }} fill={GRAY} textAnchor="middle">4 mm skin · 5 mm rails · ribs at max. 300</Text>
@@ -415,15 +436,15 @@ function DetailsPage({ s, info, si, total }: { s: StairLayout; info: StairInfo; 
   return (
     <>
       <Text style={{ fontSize: 14, fontWeight: "bold" }}>STAIRCASE {s.code} — PANEL CONSTRUCTION &amp; CONNECTION DETAILS</Text>
-      <Text style={{ color: GRAY, marginBottom: 6 }}>Dog-tooth stair system · {(s.closed ?? true) ? "closed stair (L-step panels with tread covers)" : "open stair (riser shutters, treads finished by hand)"} · sizes in mm · sheet {si * 2 + 2} of {total * 2}</Text>
+      <Text style={{ color: GRAY, marginBottom: 6 }}>{s.style === "india" ? "Indian Mivan stair system" : "Dog-tooth stair system"} · {(s.closed ?? true) ? "closed stair (L-step panels with tread covers)" : "open stair (riser shutters, treads finished by hand)"} · sizes in mm · sheet {si * 2 + 2} of {total * 2}</Text>
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <Box title="DOG-TOOTH SIDE PANEL DT — elevation (one each side of every flight)" w={565} h={420}><DogToothDetail s={s} /></Box>
+        <Box title={s.style === "india" ? "SIDE PANEL SPGUN (wall side) / SPCOVER (open side) — elevation" : "DOG-TOOTH SIDE PANEL DT — elevation (one each side of every flight)"} w={565} h={420}><DogToothDetail s={s} /></Box>
         <View style={{ width: 578, gap: 8 }}>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <Box title={(s.closed ?? true) ? "L-STEP PANEL TS — section" : "RISER SHUTTER RS — section"} w={285} h={206}><StepDetail s={s} /></Box>
+            <Box title={(s.closed ?? true) ? (s.style === "india" ? "STEP PANEL SPTR + NOSING ANGLE SPTREC — section" : "L-STEP PANEL TS — section") : "RISER SHUTTER RS — section"} w={285} h={206}><StepDetail s={s} /></Box>
             <Box title="C-CHANNEL CC — section" w={285} h={206}><CChannelDetail s={s} /></Box>
           </View>
-          <Box title="SOFFIT PANEL SS — section & PIN AND WEDGE joint" w={578} h={206}><SoffitPinDetail /></Box>
+          <Box title={s.style === "india" ? "SOFFIT DECK PANEL D — section & PIN AND WEDGE joint (150 SPCPP prop strips between the rows)" : "SOFFIT PANEL SS — section & PIN AND WEDGE joint"} w={578} h={206}><SoffitPinDetail india={s.style === "india"} /></Box>
         </View>
       </View>
       <View style={{ marginTop: 8, borderWidth: 0.8, borderColor: "#d6d3d1", padding: 6 }}>
@@ -464,11 +485,11 @@ export function StairSheetDocument({ stairs, info }: { stairs: StairLayout[]; in
               {s.assumed ? " · TYPICAL STAIR (sizes assumed) — measure the real stair for an exact sheet" : ""}
             </Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
-              <Box title="PLAN — soffit panels (dashed), landing panels (green), props (orange), dog-tooth side panels (brown), C-channel (grey)" w={565} h={330}><PlanView s={s} info={info} /></Box>
+              <Box title={s.style === "india" ? "PLAN — D deck rows (dashed), 150 SPCPP prop strips (dark grey), landing panels (green), props (orange), side panels (brown)" : "PLAN — soffit panels (dashed), landing panels (green), props (orange), dog-tooth side panels (brown), C-channel (grey)"} w={565} h={330}><PlanView s={s} info={info} /></Box>
               <Box title="EXPLODED VIEW — formwork pieces of one flight + landing" w={578} h={330}><ExplodedView s={s} info={info} /></Box>
             </View>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-              <Box title="SECTION A–A — flight 1 and landing (dog-tooth panel dashed)" w={565} h={360}><SectionView s={s} info={info} /></Box>
+              <Box title={s.style === "india" ? "SECTION A–A — flight 1 and landing (side panel dashed, prop strips with props)" : "SECTION A–A — flight 1 and landing (dog-tooth panel dashed)"} w={565} h={360}><SectionView s={s} info={info} /></Box>
               <View style={{ width: 578, height: 360, borderWidth: 0.8, borderColor: "#d6d3d1", padding: 6 }}>
                 <Text style={{ fontSize: 9, fontWeight: "bold" }}>PARTS LIST — staircase {s.code} ({s.flights} flight{s.flights > 1 ? "s" : ""}{s.sets > 1 ? `, × ${s.sets} identical staircases` : ""})</Text>
                 <View style={{ flexDirection: "row", borderBottomWidth: 0.8, marginTop: 4, paddingBottom: 2, fontWeight: "bold" }}>
@@ -480,7 +501,7 @@ export function StairSheetDocument({ stairs, info }: { stairs: StairLayout[]; in
                   </View>
                 ))}
                 <Text style={{ fontSize: 9, fontWeight: "bold", marginTop: 8 }}>ASSEMBLY SEQUENCE</Text>
-                {SEQ.map((t, i) => <Text key={i} style={{ marginTop: 2 }}>{i + 1}. {t}</Text>)}
+                {(s.style === "india" ? SEQ_INDIA : SEQ).map((t, i) => <Text key={i} style={{ marginTop: 2 }}>{i + 1}. {t}</Text>)}
                 <Text style={{ marginTop: 6, color: GRAY }}>Pins and wedges at 300 mm on soffit / side panel joints (counted in the floor parts list), 200 mm on step panels. All sizes in mm; check the riser / tread against the architect&apos;s stair detail before production.</Text>
               </View>
             </View>

@@ -46,6 +46,7 @@ export type LayoutRules = {
   columnFirstCast: number;       // height of that first column pour, mm
   coresWithColumns: boolean;     // lift cores / L-shaped shear walls drawn on column layers go with the column set (else with the walls)
   stairClosed: boolean;          // closed (fully enclosed) staircase: tread cover panels on every step as well as riser shutters
+  stairStyle: "india" | "china"; // stair panel convention: Indian Mivan (D 700 rows + 150 prop strips, SPTR/SPTREC, SPGUN/SPCOVER) or Chinese dog-tooth (400 soffit, DT, TS)
   // accessories
   lossPct: number;               // extra % on small parts (pins, wedges, ties, sleeves)
   sparePct: Record<string, number>;   // site spare % per panel family (learned from site reports), e.g. { deck: 2 }
@@ -61,7 +62,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
       system: "tierod", wallWidths: range(125, 600, 25), stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100,
       internalCorner: 100, internalCornerLeg: 125, wallEcAngles: false, columnSetPct: 100, externalCorner: 63.5, kickerMm: 150, tie: "rod", tieH: 800, tieV: 600,
       deckWidths: range(200, 600, 25), deckLengths: [1200, 1050, 900, 850, 800], midBeam: 150, propHead: [150, 300],
-      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 125, beamCapLeg: 175, bothLegs: true, kickerCornerLen: 330, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 25, columnsSeparate: true, columnFirstCast: 2400, coresWithColumns: true, stairClosed: true, lossPct: 5, sparePct: {},
+      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 125, beamCapLeg: 175, bothLegs: true, kickerCornerLen: 330, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 25, columnsSeparate: true, columnFirstCast: 2400, coresWithColumns: true, stairClosed: true, stairStyle: "india", lossPct: 5, sparePct: {},
     },
   },
   flattie: {
@@ -71,7 +72,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
       system: "flattie", wallWidths: range(100, 500, 50), stdHeight: 2700, fullHeight: true, bottomStrip: 40, minFiller: 100,
       internalCorner: 100, internalCornerLeg: 100, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 200, tie: "flat", tieH: 450, tieV: 600,
       deckWidths: range(100, 600, 50), deckLengths: [1200, 1100, 900, 800], midBeam: 100, propHead: [100, 200],
-      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 100, beamCapLeg: 100, bothLegs: true, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, lossPct: 10, sparePct: {},
+      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 100, beamCapLeg: 100, bothLegs: true, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, stairStyle: "india", lossPct: 10, sparePct: {},
     },
   },
   acoform: {
@@ -81,7 +82,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
       system: "acoform", wallWidths: [], stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100,
       internalCorner: 100, internalCornerLeg: 100, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 100, tie: "rod", tieH: 800, tieV: 800,
       deckWidths: [], deckLengths: [1200], midBeam: 100, propHead: [100, 230],
-      soffitCornerLen: 1200, soffitCornerW: 0, soffitCornerLeg: 0, beamCapLeg: 0, bothLegs: false, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 5, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, lossPct: 5, sparePct: {},
+      soffitCornerLen: 1200, soffitCornerW: 0, soffitCornerLeg: 0, beamCapLeg: 0, bothLegs: false, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 5, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, stairStyle: "india", lossPct: 5, sparePct: {},
     },
   },
 };
@@ -143,6 +144,7 @@ export function normaliseLayoutRules(raw: unknown): LayoutRules {
     columnFirstCast: num(r.columnFirstCast, d.columnFirstCast, 0, 4000),
     coresWithColumns: typeof r.coresWithColumns === "boolean" ? r.coresWithColumns : d.coresWithColumns,
     stairClosed: typeof r.stairClosed === "boolean" ? r.stairClosed : d.stairClosed,
+    stairStyle: r.stairStyle === "china" || r.stairStyle === "india" ? r.stairStyle : d.stairStyle,
     lossPct: num(r.lossPct, d.lossPct, 0, 50),
     sparePct: (() => { const o: Record<string, number> = {}; const sp = r.sparePct && typeof r.sparePct === "object" ? (r.sparePct as Record<string, unknown>) : {}; for (const [k, v] of Object.entries(sp)) { const n = Number(v); if (/^[a-z-]{2,12}$/.test(k) && Number.isFinite(n) && n > 0) o[k] = Math.min(25, n); } return o; })(),
   };

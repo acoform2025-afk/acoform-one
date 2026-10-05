@@ -11,7 +11,7 @@ import type { StairGeo, StairLayout } from "@/lib/design-engine/floor-panels";
 import { inRings } from "@/lib/design-engine/design-check";
 
 export type Poly2 = Pt[][];                         // outer ring + holes (metres)
-export type Panel3Kind = "std" | "top" | "fill" | "deck" | "dspec" | "ic" | "ec" | "sc" | "kick" | "bside" | "bbot" | "col" | "stair" | "riser" | "cheek" | "lsoff" | "tread" | "cchan" | "stp" | "tz";
+export type Panel3Kind = "std" | "top" | "fill" | "deck" | "dspec" | "ic" | "ec" | "sc" | "kick" | "bside" | "bbot" | "col" | "stair" | "riser" | "cheek" | "lsoff" | "tread" | "cchan" | "stp" | "tz" | "cpp" | "trec";
 export type Panel3 = { p: [number, number, number][]; k: Panel3Kind; c: string; z?: string };   // quad corners; z = zone / face the piece belongs to
 export type Scene3 = {
   H: number; slab: number; box: [number, number, number, number];
@@ -230,26 +230,43 @@ export function buildScene3(o: {
         const [ox, oz] = P(u0, vA), [sx, sz] = P(u0 + ud, vA), [ex, ez] = P(u0, vB);
         stairSolids.push({ prof, o: [ox, oz], u: [sx - ox, sz - oz], ext: [ex - ox, ez - oz] });
       }
-      let s0 = 0;
-      for (const L of algL) {
-        const sa = (s0 / 1000) * cos, sb = Math.min(sEnd, ((s0 + L) / 1000) * cos); s0 += L;
+      const india = sl?.style === "india" && !!sl.rows?.length;
+      const sideName = (sv: number) => (india ? (wallV != null && Math.abs(sv - wallV) < 1e-6 ? "SPGUN (wall side)" : "SPCOVER (open side)") : "dog-tooth side panel DT");
+      const cH = Math.round((sl?.cheekH ?? 0) || (waist / cos + rise) * 1000);
+      // soffit: Indian Mivan rows (450 D 700 deck panels between 150 SPCPP prop strips) or dog-tooth soffit panels
+      const segs: { a: number; b: number; k: "D" | "CPP" | "SS"; L: number }[] = [];
+      { let s0 = 0; for (const r of india ? sl!.rows! : algL.map((L) => ({ k: "SS" as const, w: L }))) { segs.push({ a: s0, b: s0 + r.w, k: r.k, L: r.w }); s0 += r.w; } }
+      const cppS: number[] = [];
+      for (const sg of segs) {
+        const sa = (sg.a / 1000) * cos, sb = Math.min(sEnd, (sg.b / 1000) * cos);
         if (sb - sa < 0.005) continue;
-        let v = vA;
-        for (const w of acrW) {
-          const v1 = Math.min(vB, v + w / 1000); if (v1 - v < 0.01) break;
-          panels.push({ p: [at(sa, v, soff(sa)), at(sb, v, soff(sb)), at(sb, v1, soff(sb)), at(sa, v1, soff(sa))], k: "stair", c: `${ST} flight ${fi} · soffit panel SS ${w} × ${L}${w === 200 ? " (edge / anti-penetration)" : ""}`, z: ST }); special++;
-          v = v1;
+        if (sg.k === "CPP") {
+          panels.push({ p: [at(sa, vA, soff(sa) - 0.004), at(sb, vA, soff(sb) - 0.004), at(sb, vB, soff(sb) - 0.004), at(sa, vB, soff(sa) - 0.004)], k: "cpp", c: `${ST} flight ${fi} · prop strip 150 SPCPP ${Math.round((vB - vA) * 1000)}`, z: ST }); special++;
+          cppS.push((sa + sb) / 2);
+        } else {
+          let v = vA;
+          for (const w of acrW) {
+            const v1 = Math.min(vB, v + w / 1000); if (v1 - v < 0.01) break;
+            panels.push({ p: [at(sa, v, soff(sa)), at(sb, v, soff(sb)), at(sb, v1, soff(sb)), at(sa, v1, soff(sa))], k: "stair", c: india ? `${ST} flight ${fi} · soffit deck panel ${sg.L} D ${w}` : `${ST} flight ${fi} · soffit panel SS ${w} × ${sg.L}${w === 200 ? " (edge / anti-penetration)" : ""}`, z: ST }); special++;
+            v = v1;
+          }
         }
-        // dog-tooth side panels on both sides: the sloping strip from the soffit up to the step corners …
-        for (const sv of [vA, vB]) { panels.push({ p: [at(sa, sv, soff(sa)), at(sb, sv, soff(sb)), at(sb, sv, inner(sb)), at(sa, sv, inner(sa))], k: "cheek", c: `${ST} flight ${fi} · dog-tooth side panel DT ${Math.round((sl?.cheekH ?? 0) || (waist / cos + rise) * 1000)} × ${L}`, z: ST }); special++; }
       }
+      // serrated side panels on both sides: the sloping strip from the soffit up to the step corners …
+      for (const sv of [vA, vB]) { const sb = sEnd; panels.push({ p: [at(0, sv, soff(0)), at(sb, sv, soff(sb)), at(sb, sv, inner(sb)), at(0, sv, inner(0))], k: "cheek", c: `${ST} flight ${fi} · ${sideName(sv)} ${cH} deep`, z: ST }); special++; }
       // … and its teeth: one triangle per step, the riser and tread edges of the step end
-      for (let k = 0; k < nSteps; k++) for (const sv of [vA, vB]) T(at(k * tread, sv, base + k * rise), at(k * tread, sv, base + (k + 1) * rise), at((k + 1) * tread, sv, base + (k + 1) * rise), "cheek", `${ST} flight ${fi} · dog-tooth side panel — tooth of step ${k + 1}`);
+      for (let k = 0; k < nSteps; k++) for (const sv of [vA, vB]) T(at(k * tread, sv, base + k * rise), at(k * tread, sv, base + (k + 1) * rise), at((k + 1) * tread, sv, base + (k + 1) * rise), "cheek", `${ST} flight ${fi} · ${sideName(sv)} — tooth of step ${k + 1}`);
       // step panels: L-shaped (riser + tread cover, Ø20 vent holes every 2nd tread) on a closed stair, riser shutters on an open one
       for (let k = 0; k < nSteps; k++) {
         const y1 = base + (k + 1) * rise, sa = k * tread, sb = (k + 1) * tread;
-        panels.push({ p: [at(sa, vA, base + k * rise), at(sa, vB, base + k * rise), at(sa, vB, y1), at(sa, vA, y1)], k: "riser", c: closedSt ? `${ST} flight ${fi} · L-step panel TS ${k + 1} — riser leg ${Math.round(rise * 1000)}` : `${ST} flight ${fi} · riser shutter RS ${k + 1}`, z: ST });
-        if (closedSt) panels.push({ p: [at(sa, vA, y1), at(sb, vA, y1), at(sb, vB, y1), at(sa, vB, y1)], k: "tread", c: `${ST} flight ${fi} · L-step panel TS ${k + 1} — tread cover ${Math.round(tread * 1000)}${k % 2 === 1 ? " · Ø20 vent holes" : ""}`, z: ST });
+        const stepName = india ? `${Math.round(tread * 1000)}+${Math.round(rise * 1000)} SPTR` : "L-step panel TS";
+        panels.push({ p: [at(sa, vA, base + k * rise), at(sa, vB, base + k * rise), at(sa, vB, y1), at(sa, vA, y1)], k: "riser", c: closedSt ? `${ST} flight ${fi} · ${stepName} step ${k + 1} — riser leg ${Math.round(rise * 1000)}` : `${ST} flight ${fi} · riser shutter RS ${k + 1}`, z: ST });
+        if (closedSt) panels.push({ p: [at(sa, vA, y1), at(sb, vA, y1), at(sb, vB, y1), at(sa, vB, y1)], k: "tread", c: `${ST} flight ${fi} · ${stepName} step ${k + 1} — tread cover ${Math.round(tread * 1000)}${k % 2 === 1 ? " · Ø20 vent holes" : ""}`, z: ST });
+        // nosing corner angle 65 + 65 (SPTREC) joining the step panels
+        if (closedSt && india) {
+          panels.push({ p: [at(sa - 0.004, vA, y1 + 0.004), at(sa + 0.065, vA, y1 + 0.004), at(sa + 0.065, vB, y1 + 0.004), at(sa - 0.004, vB, y1 + 0.004)], k: "trec", c: `${ST} flight ${fi} · 65+65 SPTREC nosing angle, step ${k + 1}`, z: ST });
+          panels.push({ p: [at(sa - 0.004, vA, y1 - 0.065), at(sa - 0.004, vB, y1 - 0.065), at(sa - 0.004, vB, y1 + 0.004), at(sa - 0.004, vA, y1 + 0.004)], k: "trec", c: `${ST} flight ${fi} · 65+65 SPTREC nosing angle, step ${k + 1}`, z: ST });
+        }
         acc.brackets.push(at(sa, vA, y1), at(sa, vB, y1));
       }
       // top riser at the landing / floor above
@@ -263,13 +280,15 @@ export function buildScene3(o: {
         const sz = Math.max(0, (lo - y0) / k1);              // where the soffit leaves the floor
         const eps = wallV === vA ? -0.004 : 0.004;
         let s = sz;
-        if (soff(s) <= lo + 0.02 && sEnd - s > 0.05) { const s1 = Math.min(sEnd, s + 0.4); T(at(s, wallV + eps, lo), at(s1, wallV + eps, lo), at(s1, wallV + eps, soff(s1)), "tz", `${ST} flight ${fi} · triangular wall panel TRI`); s = s1; }
-        while (sEnd - s > 0.02) { const s1 = Math.min(sEnd, s + 0.4); panels.push({ p: [at(s, wallV + eps, lo), at(s1, wallV + eps, lo), at(s1, wallV + eps, soff(s1)), at(s, wallV + eps, soff(s))], k: "tz", c: `${ST} flight ${fi} · trapezoidal wall panel TZ ${Math.round((s1 - s) * 1000)}`, z: ST }); s = s1; }
+        if (soff(s) <= lo + 0.02 && sEnd - s > 0.05) { const s1 = Math.min(sEnd, s + 0.4); T(at(s, wallV + eps, lo), at(s1, wallV + eps, lo), at(s1, wallV + eps, soff(s1)), "tz", `${ST} flight ${fi} · triangular wall panel ${india ? "SPW-TRI" : "TRI"}`); s = s1; }
+        while (sEnd - s > 0.02) { const s1 = Math.min(sEnd, s + 0.4); panels.push({ p: [at(s, wallV + eps, lo), at(s1, wallV + eps, lo), at(s1, wallV + eps, soff(s1)), at(s, wallV + eps, soff(s))], k: "tz", c: `${ST} flight ${fi} · special wall panel ${india ? "SPW" : "TZ"} ${Math.round((s1 - s) * 1000)} (top cut to the slope)`, z: ST }); s = s1; }
       }
-      // props under the soffit: rows every prop spacing along the flight, lines every 1.2 m across (+ both edges)
+      // props under the soffit: under every prop strip (Indian rows) or rows every prop spacing along the flight;
+      // lines every 1.2 m across (+ both edges)
       const sp = o.propSpacing ?? 1.2, nAl = Math.max(1, Math.ceil(run1 / sp)), nAc = Math.max(1, Math.ceil((vB - vA) / 1.2));
-      for (let i = 0; i <= nAl; i++) for (let j = 0; j <= nAc; j++) {
-        const du = Math.min(run1, 0.15 + (i * (run1 - 0.3)) / nAl), v = vA + 0.15 + (j * (vB - vA - 0.3)) / nAc;
+      const rowsU = india && cppS.length ? cppS : Array.from({ length: nAl + 1 }, (_, i) => Math.min(run1, 0.15 + (i * (run1 - 0.3)) / nAl));
+      for (const du of rowsU) for (let j = 0; j <= nAc; j++) {
+        const v = vA + 0.15 + (j * (vB - vA - 0.3)) / nAc;
         const [x, z] = P(u0 + ud * du, v), top = y0 + du * k1 - 0.005;
         if (top > 0.3) { acc.props.push([x, z, 0, top, 2]); acc.heads.push([x, top, z, 2]); }
       }

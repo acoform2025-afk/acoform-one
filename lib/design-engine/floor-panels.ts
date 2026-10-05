@@ -27,7 +27,9 @@ export type StairGeo = { code: string; label: string; width: number; risers: num
 export type Fit = { panels: number[]; filler: number };
 export type ColumnLayout = { code: string; w: number; d: number; h: number; qty: number; round: boolean; faceW: Fit; faceD: Fit; top: number; clamps: number };
 export type BeamLayout = { code: string; length: number; b: number; d: number; side: number; sides: number; bottom: boolean; pieces: number[]; props: number };
-export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number; closed?: boolean };
+export type StairRow = { k: "D" | "CPP"; w: number };          // a row of the stair soffit along the slope (mm)
+export type StairPart = { code: string; desc: string; size: string; qty: number };   // per staircase (all its flights)
+export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number; closed?: boolean; style?: "india" | "china"; rows?: StairRow[]; parts?: StairPart[] };
 export type PanelOptions = { extCorners?: number; upstands?: { h: number; length: number; label: string }[]; sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "upstand" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
@@ -407,79 +409,126 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     else byCode.set("PROP", { code: "PROP", description: "Adjustable steel prop (beams)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: 0, custom: false, unit: "nos" });
   }
 
-  // ---- staircases (Mivan dog-tooth system, cast with the floor):
-  //   soffit panels — 400 standard across the flight, a 200 panel at each edge (free edge support / anti-
-  //     penetration panel against a full wall), lengths 1200/900/600/300 along the slope;
-  //   dog-tooth (serrated) side panels on both sides of the flight — the teeth form the step ends;
-  //   closed stair: L-shaped step panels (tread + riser in one) on every step, Ø20 vent holes every 2nd tread;
-  //     open stair: riser shutters only;
-  //  C C-channel along the foot of the flight (std 1400), stop panel at the top / construction joint;
-  //   trapezoidal wall panels (400) + one triangular panel on each wall side under the soffit;
-  //   landing soffit panels; props under soffit and landing; pins @ ≤300 (200 on step panels)
+  // ---- staircases (aluminium-formwork stair, cast with the floor). Two drawing conventions (layout rule stairStyle):
+  //  india (Indian Mivan practice): soffit in rows along the slope — deck panels "450 D 700" (450 along the slope ×
+  //    700 across) between 150 wide prop strips "150 SPCPP {flight width}" carried on props; L-shaped step panels
+  //    "250+158 SPTR {w}" (tread + riser) with a "65+65 SPTREC" corner angle at every nosing; serrated side panels:
+  //    SPGUN on the wall side, SPCOVER on the open (well) side; special wall panels SPW under the flight;
+  //  china (dog-tooth system): soffit panels 400 across (200 at each edge — free-edge / anti-penetration), lengths
+  //    1200/900/600/300 along the slope; dog-tooth side panels DT both sides; L-step panels TS; trapezoidal TZ-400 +
+  //    triangular wall panels.
+  //  Both: riser shutter on the top step, C-channel at the foot, stop panel at the top, landing soffit panels, props,
+  //  pins @ ≤ 300 (200 on step panels). Open stair (rule stairClosed off): riser shutters only, treads by hand.
   const stairLayouts: StairLayout[] = [];
   const ALONG = [1200, 900, 600, 300];
   // a short end piece (< 300) is not made on its own: the last panel is made longer to close the run
   const along = (L: number) => { const f = fillRun(L, ALONG); const left = f.left < tol ? 0 : Math.ceil(f.left / 5) * 5; if (left && left < 300 && f.panels.length) { const p = [...f.panels]; p[p.length - 1] += left; return p; } return [...f.panels, ...(left ? [left] : [])]; };
   const acrossFit = (W: number): Fit => { const f = deckW.length ? fillRun(W, deckW) : { panels: [], left: W }; return { panels: f.panels, filler: f.left < tol ? 0 : r5(f.left) }; };
-  // soffit across the flight: 200 | 400 … 400 | (filler) | 200
+  // china: soffit across the flight: 200 | 400 … 400 | (filler) | 200
   const stairAcross = (W: number): Fit => {
     if (W < 600) return { panels: [r5(W)], filler: 0 };
     const inner = W - 400, n = Math.floor(inner / 400), left = r5(inner - n * 400);
     return { panels: [200, ...Array(n).fill(400), 200], filler: left >= 25 ? left : 0 };
   };
+  // india: rows along the slope — D 450, CPP 150, D 450, CPP 150 … D (last one made to suit); D lengths across
+  const stairRows = (L: number): StairRow[] => {
+    const k = Math.max(1, Math.ceil((L + 150) / 600)), rows: StairRow[] = [];
+    for (let i = 0; i < k - 1; i++) rows.push({ k: "D", w: 450 }, { k: "CPP", w: 150 });
+    let last = r5(L - (k - 1) * 600);
+    if (last < 150 && rows.length >= 2) { rows.pop(); const prev = rows.pop()!; last = r5(prev.w + 150 + last); }
+    rows.push({ k: "D", w: Math.max(50, last) });
+    return rows;
+  };
+  const dAcross = (W: number): Fit => { const f = fillRun(W, [700, 600, 500, 400, 300]); return { panels: f.panels, filler: f.left < tol ? 0 : r5(f.left) }; };
   const closed = R ? R.stairClosed : true;
+  const style: "india" | "china" = R?.stairStyle ?? "india";
   let stairProps = 0, riserBrackets = 0, stepPins = 0;
   for (const g of o.stairs ?? []) {
     if (!(g.width > 0 && g.risers > 0 && g.riser > 0 && g.tread > 0)) continue;
     const hyp = Math.hypot(g.riser, g.tread), slope = Math.round(g.risers * hyp), cos = g.tread / hyp;
     const cheekH = r5(g.waist / cos + g.riser);
-    const acr = stairAcross(g.width), alg = along(slope);
+    const india = style === "india";
+    const acr = india ? dAcross(g.width) : stairAcross(g.width), alg = along(slope);
+    const rows = india ? stairRows(slope) : undefined;
     let landing: StairLayout["landing"] = null;
     if (g.landingM2 > 0) {
       const lw = g.width, ll = Math.round((g.landingM2 * 1e6) / lw);
       landing = { l: ll, w: lw, across: acrossFit(ll), along: along(lw) };
     }
-    const props = (Math.ceil(slope / 1200) + 1) * (Math.ceil(g.width / 1200) + 1) + (landing ? Math.ceil(g.landingM2 / 1.44) + 1 : 0);
-    stairLayouts.push({ ...g, slope, angle: Math.round((Math.atan2(g.riser, g.tread) * 180) / Math.PI), across: acr, along: alg, cheekH, landing, props, closed });
+    const nCpp = rows ? rows.filter((r) => r.k === "CPP").length : 0;
+    const flightProps = india ? (nCpp + 1) * (Math.ceil(g.width / 1200) + 1) : (Math.ceil(slope / 1200) + 1) * (Math.ceil(g.width / 1200) + 1);
+    const props = flightProps + (landing ? Math.ceil(g.landingM2 / 1.44) + 1 : 0);
+    const parts: StairPart[] = [];
+    const lay: StairLayout = { ...g, slope, angle: Math.round((Math.atan2(g.riser, g.tread) * 180) / Math.PI), across: acr, along: alg, cheekH, landing, props, closed, style, rows, parts };
+    stairLayouts.push(lay);
     if (g.assumed) continue;                                  // area allowance only: priced as a set below, drawing shows a typical stair
-    const n = g.flights * g.sets, wallSides = Math.max(0, 2 - g.openSides);
-    for (const L of alg) {
-      for (const [i, w] of acr.panels.entries()) {
-        const edge = i === 0 || i === acr.panels.length - 1;
-        add(`SS-${w}-${L}`, { code: `SS-${w}-${L}`, description: edge && w === 200 ? "Stair soffit edge panel 200 (free-edge support / anti-penetration)" : "Stair soffit panel", group: "stair", w, h: L, custom: true }, n);
-      }
-      if (acr.filler) add(`SS-${acr.filler}-${L}`, { code: `SS-${acr.filler}-${L}`, description: `Stair soffit filler ${acr.filler} × ${L}`, group: "stair", w: acr.filler, h: L, custom: true }, n);
-      add(`DT-${cheekH}-${L}`, { code: `DT-${cheekH}-${L}`, description: "Dog-tooth (serrated) side panel — teeth form the step ends", group: "stair", w: cheekH, h: L, custom: true }, n * 2);
-    }
+    const n = g.flights * g.sets, wallSides = Math.max(0, 2 - g.openSides), openSides = Math.min(2, g.openSides);
+    // one line of this staircase: q per flight → BOM (all flights of all identical stairs) + the stair's own list
+    const put = (row: Omit<BomRow, "qty" | "area" | "weight">, q: number, unitWeight?: number) => {
+      if (q <= 0) return;
+      add(row.code, row, q * n, unitWeight);
+      const pp = parts.find((x) => x.code === row.code);
+      const size = row.w && row.h ? `${row.w} × ${row.h}` : row.h ? `L ${row.h}` : row.w ? `${row.w}` : "—";
+      if (pp) pp.qty += q * g.flights; else parts.push({ code: row.code, desc: row.description, size, qty: q * g.flights });
+    };
     const rw = r5(g.width), rh = r5(g.riser), tw = r5(g.tread);
-    // step panels: one piece up to 1200 wide, wider flights in equal pieces
-    const pieces = Math.max(1, Math.ceil(rw / 1200)), pw = r5(rw / pieces);
+    if (india && rows) {
+      // soffit rows: deck panels across each D row, one prop strip per CPP row
+      for (const r of rows) {
+        if (r.k === "CPP") { put({ code: `150 SPCPP ${rw}`, description: "Stair prop strip 150 across the flight (props under it)", group: "stair", w: 150, h: rw, custom: true }, 1); continue; }
+        for (const L of [...acr.panels, ...(acr.filler ? [acr.filler] : [])]) {
+          const std = r.w === 450 && [700, 600].includes(L);
+          put({ code: `${r.w} D ${L}`, description: std ? "Stair soffit deck panel" : "Stair soffit deck panel (special size)", group: "stair", w: r.w, h: L, custom: !std }, 1);
+        }
+      }
+      // side panels: SPGUN against the wall, SPCOVER on the open (well) side — one piece per flight up to 3 m
+      const pcs = Math.max(1, Math.ceil(slope / 3000)), pl = r5(slope / pcs);
+      if (wallSides) put({ code: `SPGUN ${cheekH}-${pl}`, description: "Stair side panel, wall side (serrated)", group: "stair", w: cheekH, h: pl, custom: true }, wallSides * pcs);
+      if (openSides) put({ code: `SPCOVER ${cheekH}-${pl}`, description: "Stair side panel, open / well side (serrated)", group: "stair", w: cheekH, h: pl, custom: true }, openSides * pcs);
+    } else {
+      for (const L of alg) {
+        for (const [i, w] of acr.panels.entries()) {
+          const edge = i === 0 || i === acr.panels.length - 1;
+          put({ code: `SS-${w}-${L}`, description: edge && w === 200 ? "Stair soffit edge panel 200 (free-edge support / anti-penetration)" : "Stair soffit panel", group: "stair", w, h: L, custom: true }, 1);
+        }
+        if (acr.filler) put({ code: `SS-${acr.filler}-${L}`, description: `Stair soffit filler ${acr.filler} × ${L}`, group: "stair", w: acr.filler, h: L, custom: true }, 1);
+        put({ code: `DT-${cheekH}-${L}`, description: "Dog-tooth (serrated) side panel — teeth form the step ends", group: "stair", w: cheekH, h: L, custom: true }, 2);
+      }
+    }
+    // step panels: one piece up to 1500 wide (5 mm clearance), wider flights in equal pieces
+    const pieces = Math.max(1, Math.ceil(rw / 1500)), pw = r5(rw / pieces) - (india ? 5 : 0);
     if (closed) {
-      add(`TS-${pw}-${tw}x${rh}`, { code: `TS-${pw}-${tw}x${rh}`, description: `L-shaped step panel (tread ${tw} + riser ${rh})${pieces > 1 ? `, ${pieces} pieces per step` : ""} — Ø20 vent holes every 2nd tread`, group: "stair", w: pw, h: tw + rh, custom: true }, n * (g.risers - 1) * pieces);
-      add(`RS-${pw}-${rh}`, { code: `RS-${pw}-${rh}`, description: "Riser shutter (top step at the landing)", group: "stair", w: pw, h: rh, custom: true }, n * pieces);
+      if (india) {
+        put({ code: `${tw}+${rh} SPTR ${pw}`, description: `Step panel (tread ${tw} + riser ${rh})${pieces > 1 ? `, ${pieces} per step` : ""}, Ø20 vents`, group: "stair", w: pw, h: tw + rh, custom: true }, (g.risers - 1) * pieces);
+        put({ code: `65+65 SPTREC ${pw}`, description: "Nosing corner angle 65 + 65 (every step)", group: "stair", w: 65, h: pw, custom: true }, (g.risers - 1) * pieces);
+      } else put({ code: `TS-${pw}-${tw}x${rh}`, description: `L-shaped step panel (tread ${tw} + riser ${rh})${pieces > 1 ? `, ${pieces} pieces per step` : ""} — Ø20 vent holes every 2nd tread`, group: "stair", w: pw, h: tw + rh, custom: true }, (g.risers - 1) * pieces);
+      put({ code: `RS-${pw}-${rh}`, description: "Riser shutter (top step at the landing)", group: "stair", w: pw, h: rh, custom: true }, pieces);
       stepPins += n * (g.risers - 1) * pieces * (2 * Math.ceil(pw / 200) + 2 * Math.ceil((tw + rh) / 200));
     } else {
-      add(`RS-${pw}-${rh}`, { code: `RS-${pw}-${rh}`, description: `Riser shutter${pieces > 1 ? ` (${pieces} pieces per step)` : ""}`, group: "stair", w: pw, h: rh, custom: true }, n * g.risers * pieces);
+      put({ code: `RS-${pw}-${rh}`, description: `Riser shutter${pieces > 1 ? ` (${pieces} pieces per step)` : ""}`, group: "stair", w: pw, h: rh, custom: true }, g.risers * pieces);
     }
     riserBrackets += 2 * n * g.risers;
     // C-channel at the foot of the flight (std 1400) and stop panel at the top
     const cc = fillRun(rw, [1400, 1200, 900, 600, 300]);
-    for (const L of [...cc.panels, ...(cc.left >= 50 ? [r5(cc.left)] : [])]) add(`CC-${L}`, { code: `CC-${L}`, description: "Stair C-channelC (foot of the flight)", group: "stair", w: 0, h: L, custom: false, unit: "nos" }, n);
-    add(`STP-${rw}-${cheekH}`, { code: `STP-${rw}-${cheekH}`, description: "Stair stop panel (top of the flight / construction joint)", group: "stair", w: rw, h: cheekH, custom: true }, n);
-    // wall side: trapezoidal wall panels 400 under the soffit + one triangular panel at the foot
+    for (const L of [...cc.panels, ...(cc.left >= 50 ? [r5(cc.left)] : [])]) put({ code: `CC-${L}`, description: "Stair C-channel (foot of the flight)", group: "stair", w: 0, h: L, custom: false, unit: "nos" }, 1);
+    put({ code: `STP-${rw}-${cheekH}`, description: "Stair stop panel (top of the flight / construction joint)", group: "stair", w: rw, h: cheekH, custom: true }, 1);
+    // wall side: special wall panels under the flight, top cut to the slope (400 wide) + a triangular one at the foot
     if (wallSides) {
       const run = (g.risers - 1) * g.tread, nT = Math.max(1, Math.floor(run / 400));
-      add("TZ-400", { code: "TZ-400", description: "Trapezoidal wall panel 400 (wall under the flight, top cut to the slope)", group: "stair", w: 400, h: 0, custom: true, unit: "nos" }, n * wallSides * nT);
-      add("TRI", { code: "TRI", description: "Triangular wall panel (foot of the flight at the wall)", group: "stair", w: 0, h: 0, custom: true, unit: "nos" }, n * wallSides);
+      put({ code: india ? "SPW-400" : "TZ-400", description: "Special wall panel 400 under the flight (top cut to the slope)", group: "stair", w: 400, h: 0, custom: true, unit: "nos" }, wallSides * nT);
+      put({ code: india ? "SPW-TRI" : "TRI", description: "Triangular wall panel (foot of the flight at the wall)", group: "stair", w: 0, h: 0, custom: true, unit: "nos" }, wallSides);
     }
     if (landing) for (const L of landing.along) {
       for (const w of landing.across.panels) {
         const dp = L === deckLen ? deckCat.find((x) => x.width_mm === w) : undefined;
-        if (dp) add(dp.panel_code, { code: dp.panel_code, description: "Deck panel", group: "deck", w, h: L, custom: false }, n, Number(dp.weight_kg));
-        else add(`LS-${w}-${L}`, { code: `LS-${w}-${L}`, description: `Landing soffit panel ${w} × ${L}`, group: "stair", w, h: L, custom: true }, n);
+        if (dp) put({ code: dp.panel_code, description: "Deck panel (landing)", group: "deck", w, h: L, custom: false }, 1, Number(dp.weight_kg));
+        else put({ code: `LS-${w}-${L}`, description: `Landing soffit panel ${w} × ${L}`, group: "stair", w, h: L, custom: true }, 1);
       }
-      if (landing.across.filler) add(`LS-${landing.across.filler}-${L}`, { code: `LS-${landing.across.filler}-${L}`, description: `Landing soffit filler ${landing.across.filler} × ${L}`, group: "stair", w: landing.across.filler, h: L, custom: true }, n);
+      if (landing.across.filler) put({ code: `LS-${landing.across.filler}-${L}`, description: `Landing soffit filler ${landing.across.filler} × ${L}`, group: "stair", w: landing.across.filler, h: L, custom: true }, 1);
     }
+    parts.push({ code: "RBR", desc: "Riser bracket / step clamp", size: "—", qty: 2 * g.flights * g.risers });
+    parts.push({ code: "PROP-ST", desc: india ? "Stair prop under the prop strips and landing" : "Stair prop with swivel head", size: "adjustable", qty: props * g.flights });
+    if (closed) parts.push({ code: "PIN-ST", desc: "Pins & wedges on step panels (@ 200)", size: "—", qty: g.flights * (g.risers - 1) * pieces * (2 * Math.ceil(pw / 200) + 2 * Math.ceil((tw + rh) / 200)) });
     stairProps += props * n;
   }
   // staircases known only as an area (company allowance / lump sum): a project-specific set

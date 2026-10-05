@@ -95,6 +95,11 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
         {n("lossPct", "Loss on small parts", "(%)")}
       </div>
       <div className="mt-3">{chk("columnsSeparate", "Columns cast first with their own formwork", "They are listed as a separate column set, panels up to the first pour height.")}</div>
+      <label className="mt-3 block max-w-md text-xs text-graphite-300">Staircase panel system
+        <select value={v.stairStyle} disabled={!canEdit} onChange={(e) => set("stairStyle", e.target.value as LayoutRules["stairStyle"])} className={input}>
+          <option value="india">Indian Mivan — 450 D 700 deck rows + 150 SPCPP prop strips, SPTR / SPTREC steps, SPGUN / SPCOVER sides</option>
+          <option value="china">Dog-tooth system — 400 soffit panels (200 edges), DT side panels, TS step panels</option>
+        </select></label>
       <div className="mt-2">{chk("stairClosed", "Closed staircase: tread cover panels on every step as well as riser shutters", "Fully enclosed stair (common practice): stepped side panels on both sides, riser shutters and tread covers with Ø20 vent holes every 2nd tread. Off = treads left open and finished by hand.")}</div>
       <div className="mt-2">{chk("coresWithColumns", "Lift cores and L-shaped shear walls (drawn on the column layer): outer faces cast first with the column set", "Shaft faces inside a lift core always stay with the walls (Cosmos / Royce One practice).")}</div>
       <div className="mt-2">{chk("wallEcAngles", "External corner angles on outside wall corners", "Off: outside corners are formed by external wall panels (WE), as Cosmos does.")}</div>
