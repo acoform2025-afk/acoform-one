@@ -11,6 +11,7 @@
  */
 import type { DxfText, DrawingPart } from "./dxf";
 import type { SectionLevels } from "./section-read";
+import { meaningOf } from "./vocab";
 
 export type LevelKind = "service" | "basement" | "stilt" | "ground" | "podium" | "floor" | "refuge" | "terrace" | "headroom" | "other";
 export type LevelUse = "typical" | "own" | "none";
@@ -72,6 +73,12 @@ export function parseLevelName(raw: string): { kind: LevelKind; nos: number[]; t
   else if (/podium/i.test(t)) kind = "podium";
   else if (/ground|\bgf\b|\bg\.f\b|plinth|首层|^一层/i.test(t) || (uniq.length === 1 && uniq[0] === 0)) kind = "ground";
   else if (uniq.length || typical || /\bfloor\b|\bflr\b|标准层/i.test(t)) kind = "floor";
+  // the drawing dictionary knows other spellings ("MUMTY", "LMR", "LOWER GROUND", "PILOTIS" …)
+  if (kind === "other") {
+    const m = meaningOf(t);
+    const k = m && ({ basement: "basement", stilt: "stilt", ground: "ground", podium: "podium", refuge: "refuge", terrace: "terrace", headroom: "headroom", typical: "floor" } as Record<string, LevelKind>)[m.key];
+    if (k) kind = k;
+  }
   if (kind === "basement" || kind === "service") {
     const bn = t.match(/\bb-?(\d)\b/i) ?? t.match(/basement\s*-?\s*(\d)\b/i) ?? t.match(/地下\s*(\d|[一二三])\s*层/);
     const n = bn ? cnNum(bn[1]) ?? +bn[1] : t.match(/^-(\d{1,2})\s/) ? +t.match(/^-(\d{1,2})\s/)![1] : kind === "service" ? 2 : 1;
@@ -277,7 +284,7 @@ export function readBuilding(inp: BuildingInput): Building {
   // floors of the tower itself must be drawings of this tower (a "SECOND FLOOR" of the clubhouse is not floor 2 of block A)
   const towerKind = (k: LevelKind) => k === "floor" || k === "refuge" || k === "terrace" || k === "headroom";
   for (const l of levels) {
-    const own = parts.find((x) => x.lv.kind === l.kind && (l.kind !== "floor" || (x.lv.nos.includes(l.no ?? -1) && towerSized(x.p))) && (!towerKind(l.kind) || !myTower || x.lv.tower === myTower) && !(x.lv.kind === "floor" && x.lv.typical && x.p.n === inp.typicalPartN));
+    const own = parts.find((x) => x.lv.kind === l.kind && (l.kind !== "floor" || (x.lv.nos.includes(l.no ?? -1) && towerSized(x.p))) && !((l.kind === "basement" || l.kind === "service") && l.no != null && x.lv.nos.length && !x.lv.nos.includes(l.no)) && (!towerKind(l.kind) || !myTower || x.lv.tower === myTower) && !(x.lv.kind === "floor" && x.lv.typical && x.p.n === inp.typicalPartN));
     const typ = l.kind === "floor" ? typicalParts.find((x) => !x.lv.nos.length || x.lv.nos.includes(l.no ?? -1)) : undefined;
     const hit = own ?? typ;
     if (hit) { l.partN = hit.p.n; l.partTitle = hit.p.title; if (own && own.p.n !== inp.typicalPartN && l.use !== "none") l.use = "own"; }

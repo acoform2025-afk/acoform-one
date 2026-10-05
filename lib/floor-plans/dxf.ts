@@ -7,11 +7,12 @@ import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clippi
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
 import { labelledSpaces, nearRings, outlineFromWalls, pairedWallStrips, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
 import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, isRailLayer, suggestLayerRole, WET_ROOM } from "./layer-rules";
+import { meaningOf, type Dictionary } from "./vocab";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
-export type DxfText = { text: string; x: number; y: number; h: number };
+export type DxfText = { text: string; x: number; y: number; h: number; layer?: string };
 /** A named drawing inside the file (Revit view / AutoCAD block), box in drawing units. */
 export type DxfView = { name: string; box: [number, number, number, number] };
 export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
@@ -250,7 +251,7 @@ export function readDxf(raw: string): DxfModel {
           }
           const clean = raw.replace(/\\P/g, " ").replace(/\\[LlOoKk]/g, "").replace(/\\[A-Za-z][^;\\]*;/g, "").replace(/[{}]/g, "").replace(/%%[cdpCDP]/g, "").replace(/\s+/g, " ").trim();
           const pos = e.position ?? e.startPoint ?? { x: 0, y: 0 };
-          if (clean && Number.isFinite(pos.x) && Number.isFinite(pos.y)) { const [x, y] = ap(m, pos.x, pos.y); texts.push({ text: clean.slice(0, 160), x, y, h: Math.abs(Number(e.height ?? e.textHeight ?? 0)) || 0 }); }
+          if (clean && Number.isFinite(pos.x) && Number.isFinite(pos.y)) { const [x, y] = ap(m, pos.x, pos.y); texts.push({ text: clean.slice(0, 160), x, y, h: Math.abs(Number(e.height ?? e.textHeight ?? 0)) || 0, layer }); }
           break;
         }
         default: break; // dimensions, hatches etc. are not needed for quantities
@@ -469,6 +470,14 @@ function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, number,
 /** Layers that never carry stairs / shafts / ducts even when generic: services, annotation, sheet. */
 const MISC_NOISE = /(^|[-\s])f-|fire|pipe|sprink|hydrant|hose|drain|plumb|sanit|elec|light|furn|text|dim|hatch|title|plot|defpoint|viewport|level|grid|tree|car|park/i;
 /** Text that names a lift well, shaft, duct or cut-out in the slab. */
+/** A lift / shaft / duct / cut-out named on the plan: by the drawing dictionary (and what the company taught), so
+ *  "LIFT LOBBY" is a lobby, not a hole; Chinese labels keep the older rule. */
+function isOpeningLabel(text: string, dict?: Dictionary): boolean {
+  if (/[\u4e00-\u9fff]/.test(text)) return SHAFT_TXT.test(text);
+  const m = meaningOf(text, dict);
+  return m ? OPENING_KEYS.has(m.key) : SHAFT_TXT.test(text);
+}
+const OPENING_KEYS = new Set(["lift", "duct", "cutout", "ots"]);
 const SHAFT_TXT = /(^|[^a-z])(p\.?|s\.?|pass(enger)?\.?|serv(ice)?\.?|fire\.?)?\s*lift|elevator|lift\s*well|shaft|(^|[^a-z])duct|cut\s*-?out|(^|[^a-z])o\.?t\.?s\.?([^a-z]|$)|open\s*to\s*sky|void/i;
 
 /** Staircases: stair-layer lines grouped (1 m apart), groups at least 2 × 2 m. Boxes in drawing units. */
@@ -672,7 +681,7 @@ function wallOpeningsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" 
 const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
-export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number } = {}): DxfAuto {
+export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary } = {}): DxfAuto {
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)));
   const u = unitToM, u2 = unitToM * unitToM;
   const tol = 0.005 / u;                                      // 5 mm in drawing units
@@ -756,7 +765,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   // bounded by the walls; boxes with an X on the generic layers — both are holes in the slab
   const extraOpen: Pt[][] = [];
   {
-    const tx = (model.texts ?? []).filter((t) => SHAFT_TXT.test(t.text) && t.text.length <= 30 && (!keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false })));
+    const tx = (model.texts ?? []).filter((t) => isOpeningLabel(t.text, opts.dict) && t.text.length <= 30 && (!keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false })));
     // lift doors are open gaps in the core walls: bridged (up to 1.3 m), and lines on the generic layers (door / sill
     // lines across the shaft front) close it too
     if (tx.length && U.rings.length) for (const sp of labelledSpaces(U.rings, [...loose, ...misc.map((p) => (p.closed ? [...p.pts, p.pts[0]] : p.pts))], tx.map((t) => [t.x, t.y] as Pt), u, 20, 0.65)) {
@@ -1083,12 +1092,16 @@ function floorsFromTitle(t: string): number | undefined {
   return undefined;
 }
 /** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
+/** Words a drawing title has ("… FLOOR PLAN", "SECTION A-A", "4BHK UNIT", "AREA TABLE") — whole words, so "DRAWING ROOM" is not a "wing". */
+const TITLE_WORDS = /plans?\b|\bsections?\b|\belevations?\b|\blayout\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\bunit\b|\bbhk\b|\barea (table|statement)\b|\bschedule\b|平面图|剖面|立面图|深化图|大样/i;
+/** Long notes / title-block lines that mention a plan but are not a title. */
+const NOT_TITLE = /^(disclaimer|notes?\b|general notes|e\s*:|email|date\b|for (review|approval|construction)|proposed\b.*\bscheme\b)/i;
 function titleFor(texts: DxfText[], box: [number, number, number, number], others: number[][] = []): string | undefined {
   const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
   const inOther = (t: DxfText) => others.some((o) => t.x > o[0] && t.x < o[2] && t.y > o[1] && t.y < o[3] && !(t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1));
   const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.25 && !inOther(t))
     .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
-    .filter((t) => /plan|section|elevation|layout|floor|block|tower|wing|平面图|剖面|立面图|深化图|大样/i.test(t.text) && !/\b(lvl|level|slab|beam)\b/i.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
+    .filter((t) => TITLE_WORDS.test(t.text) && (!/\b(lvl|level|slab|beam)\b/i.test(t.text) || /plans?\b|\bunit\b|bhk/i.test(t.text)) && !NOT_TITLE.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
   const pri = (x: string) => (/plan|section|elevation|layout|平面图|剖面|立面图|深化图/i.test(x) ? 1 : 0);
   // a big title written inside the drawing's own outline wins; otherwise "… PLAN / SECTION / ELEVATION" titles, biggest first
   const maxH = Math.max(0, ...near.map((t) => t.h));
@@ -1242,7 +1255,7 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
 
 /* ---------- separate drawings in one file ---------- */
 export type PartKind = "plan" | "section" | "elevation" | "site" | "detail" | "other";
-export type DrawingPart = { n: number; box: [number, number, number, number]; w: number; h: number; title: string; sub?: string; kind: PartKind; count: number };
+export type DrawingPart = { n: number; box: [number, number, number, number]; w: number; h: number; title: string; sub?: string; kind: PartKind; count: number; named?: "labels" };
 
 /** Readable name of a Revit view / block: "TO-01-TOWER _B_-ARCH-PD_rvt-1-01 FIRST FLOOR PLAN AJ" → "TOWER B · 01 FIRST FLOOR PLAN AJ". */
 export function viewLabel(name: string): string {
@@ -1262,7 +1275,8 @@ export function partKind(t: string): PartKind {
   if (/平面图|深化图|标准层/.test(t)) return "plan";
   if (/site|master|location|key\s*plan|layout\s*plan|parking/i.test(t)) return "site";
   if (/schedule|legend|notes?\b|title/i.test(t)) return "detail";
-  if (/plan|floor|block|tower|wing|layout/i.test(t)) return "plan";
+  if (/\b\d?\s*bhk\b|\bunit\b|\bflat\b|area (table|statement)/i.test(t) && !/floor\s*plan/i.test(t)) return "detail";
+  if (/plans?\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\blayout\b/i.test(t)) return "plan";
   if (/detail/i.test(t)) return "detail";
   return "other";
 }
@@ -1366,7 +1380,7 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
   for (const v of views) if (!raw.some((r) => boxInter(r.box, v.box) > 0.95 * Math.max(boxArea(r.box), boxArea(v.box)))) raw.push({ box: v.box, view: v.name, hits: 1000 });
   const big = clusterBoxes(model, 3 / unitToM, vBoxes);
   const small = clusterBoxes(model, 1.5 / unitToM, vBoxes).filter((c) => c.hits >= minHits && bigEnough(c.box));
-  const TITLE = /plan|section|elevation|layout|floor|block|tower|wing|平面图|剖面|立面图|深化图/i;
+  const TITLE = TITLE_WORDS;
   const cands = roles ? planCandidates(model, roles, unitToM) : [];
   const plansIn = (b: Box) => cands.filter((c) => partKind(c.title ?? "plan") === "plan" && boxInter(c.box, b) >= 0.8 * boxArea(c.box) && !views.some((v) => boxInter(c.box, v.box) >= 0.8 * boxArea(c.box)));
   const frames = sheetFrames(model, unitToM);
@@ -1387,7 +1401,7 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
     // drawings placed close together: if the group carries several drawing titles (the biggest texts in it),
     // each piece goes to its nearest title
     const subs = small.filter((s2) => boxInter(s2.box, c.box) >= 0.9 * boxArea(s2.box));
-    const tIn = texts.filter((t) => t.x >= c.box[0] && t.x <= c.box[2] && t.y >= c.box[1] && t.y <= c.box[3] && TITLE.test(t.text) && !/\b(lvl|level|slab|beam)\b/i.test(t.text) && t.text.length >= 4);
+    const tIn = texts.filter((t) => t.x >= c.box[0] && t.x <= c.box[2] && t.y >= c.box[1] && t.y <= c.box[3] && TITLE.test(t.text) && (!/\b(lvl|level|slab|beam)\b/i.test(t.text) || /plans?\b|\bunit\b|bhk/i.test(t.text)) && !NOT_TITLE.test(t.text) && t.text.length >= 4);
     const maxH = Math.max(0, ...tIn.map((t) => t.h));
     const heads = maxH > 0 ? tIn.filter((t) => t.h >= 0.7 * maxH).filter((t, i, a) => a.findIndex((u) => u.text === t.text && Math.hypot(u.x - t.x, u.y - t.y) < maxH * 3) === i) : [];
     const pl = plansIn(c.box);
@@ -1457,7 +1471,38 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
   }
   const ordered = rows.flatMap((r) => r.sort((a, b) => a.box[0] - b.box[0])).filter(keepPart).slice(0, 80);
   ordered.forEach((p, i) => { p.n = i + 1; if (!p.title) p.title = `Drawing ${i + 1}`; });
+  if (roles) nameUntitledPlans(ordered, model, roles);
   return ordered;
+}
+/**
+ * Drawings with no title of their own (basement plans often have none): a drawing with walls and lifts / stairs /
+ * lobbies written in it is a floor plan, and its level is the one all its "BASEMENT-2 TO BASEMENT-3" ramp / stair
+ * labels share — settled ones first, the rest by elimination (each level once).
+ */
+function nameUntitledPlans(parts: DrawingPart[], model: DxfModel, roles: Record<string, LayerRole>) {
+  const LV = /\b(basement|basemet|bsmt)\s*-?\s*(\d)\b|\b(ground|stilt|podium|terrace)\s+(?:floor|level|lvl)\b|\b(\d{1,2})\s*(?:st|nd|rd|th)\s*floor\b/gi;
+  const levelsIn = (s: string) => { const out: string[] = []; for (const m of s.matchAll(LV)) out.push(m[2] ? `BASEMENT-${m[2]}` : m[3] ? m[3].toUpperCase() : `${m[4]} FLOOR`); return [...new Set(out)]; };
+  const texts = model.texts ?? [];
+  const guess = new Map<DrawingPart, string[]>();
+  for (const p of parts) {
+    if (!/^Drawing \d+$/.test(p.title) && p.kind !== "other") continue;
+    const b = p.box; const inB = (x: number, y: number) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3];
+    let walls = 0; for (const q of model.paths) if (roles[q.layer] === "walls" && inB(q.pts[0][0], q.pts[0][1]) && ++walls >= 30) break;
+    if (walls < 30) continue;
+    const tIn = texts.filter((t) => inB(t.x, t.y));
+    if (!tIn.some((t) => { const k = meaningOf(t.text)?.key; return k === "lift" || k === "stair" || k === "lobby"; })) continue;
+    p.kind = "plan";
+    const sets = tIn.map((t) => levelsIn(t.text)).filter((v) => v.length);
+    if (!sets.length) continue;
+    let common = sets[0].filter((v) => sets.every((s2) => s2.includes(v)));
+    if (!common.length) common = [...new Set(sets.flat())];
+    guess.set(p, common);
+  }
+  const taken = new Set(parts.filter((p) => !guess.has(p)).map((p) => p.title.toUpperCase()));
+  for (let pass = 0; pass < 3; pass++) for (const [p, c] of guess) {
+    const free = c.filter((v) => !taken.has(`${v} PLAN`) && ![...taken].some((t) => t.startsWith(v)));
+    if (free.length === 1) { p.title = `${free[0]} PLAN`; p.named = "labels"; taken.add(p.title); guess.delete(p); }
+  }
 }
 function keepPart(p: { title: string; w: number; h: number; count: number }) {
   // untitled strips (notes, title blocks, text rows) are not drawings

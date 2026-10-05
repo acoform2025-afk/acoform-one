@@ -11,6 +11,8 @@ import { createClient } from "@/lib/supabase/client";
 import { ScopePanel } from "./scope-panel";
 import { BuildingPanel, type SiblingPlan } from "./building-panel";
 import { readBuilding, type Building } from "@/lib/floor-plans/building";
+import { EMPTY_DICT, layerKey, learnedRole, type Dictionary } from "@/lib/floor-plans/vocab";
+import { teachDrawing } from "../dictionary-actions";
 import { measureQuestions } from "@/lib/floor-plans/questions";
 import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
@@ -79,7 +81,7 @@ function normalise(t: Partial<Takeoff> | null): Takeoff {
   };
 }
 
-export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = DEFAULT_RULES, siblings = [] }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[] }) {
+export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = DEFAULT_RULES, siblings = [], dict = EMPTY_DICT }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[]; dict?: Dictionary }) {
   const router = useRouter();
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -194,7 +196,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           modelRef.current = model;
           const saved = normalise(plan.takeoff);
           const roles: Record<string, LayerRole> = {};
-          for (const l of model.layers) roles[l.name] = saved.dxf?.layerRoles?.[l.name] ?? l.suggested;
+          // what the estimator set on this plan wins; otherwise what the company taught for this layer name, then the name rule
+          for (const l of model.layers) {
+            const own = saved.dxf?.layerRoles?.[l.name], learned = learnedRole(l.name, dict);
+            roles[l.name] = own != null && (own !== l.suggested || !learned) ? own : learned ?? l.suggested;
+          }
           const units = (saved.dxf?.units ?? model.units) as DxfUnits;
           const frame = dxfFrame(model, MAX_SIDE); frameRef.current = frame;
           const c = canvasRef.current!; c.width = frame.width; c.height = frame.height;
@@ -289,7 +295,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0 });
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0, dict });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|")]);
   const totals: Totals = useMemo(() => computeTotals(t, auto, rules), [t, auto, rules]);
@@ -300,7 +306,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: altMin });
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: altMin, dict });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, altMin]);
   const totalsAlt: Totals | null = useMemo(() => (autoAlt ? computeTotals({ ...t, params: { ...t.params, minWallMm: altMin || undefined } }, autoAlt, rules) : null), [t, autoAlt, altMin, rules]);
@@ -977,7 +983,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
                     <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: ROLE_COLOR[role] }} />
                     <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({l.count})</span></span>
                     <select value={role} disabled={!canEdit} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-0.5 text-xs text-graphite-100"
-                      onChange={(e) => { const r = e.target.value as LayerRole; update((p) => ({ ...p, dxf: { ...p.dxf!, layerRoles: { ...p.dxf!.layerRoles, [l.name]: r } } })); setLayerVersion((v) => v + 1); }}>
+                      onChange={(e) => { const r = e.target.value as LayerRole; update((p) => ({ ...p, dxf: { ...p.dxf!, layerRoles: { ...p.dxf!.layerRoles, [l.name]: r } } })); setLayerVersion((v) => v + 1);
+                        // remembered for the next drawing with a layer of this name (the company dictionary)
+                        if (canEdit) void teachDrawing({ layers: { [layerKey(l.name)]: r === l.suggested ? null : r } }); }}>
                       <option value="ignore">Ignore</option><option value="slab">Slab outline</option><option value="opening">Openings / ducts</option><option value="walls">Walls</option><option value="columns">Columns</option><option value="beams">Beams</option><option value="upstand">Upstands / planters</option>
                     </select>
                   </div>

@@ -719,6 +719,12 @@ export type Database = {
         Update: { tenant_id?: string; rules?: Json; layout?: Json | null; updated_at?: string; updated_by?: string | null }
         Relationships: []
       }
+      drawing_dictionary: {
+        Row: { tenant_id: string; terms: Json; layers: Json; updated_at: string; updated_by: string | null }
+        Insert: { tenant_id?: string; terms?: Json; layers?: Json; updated_at?: string; updated_by?: string | null }
+        Update: { tenant_id?: string; terms?: Json; layers?: Json; updated_at?: string; updated_by?: string | null }
+        Relationships: []
+      }
       engineering_parameters: {
         Row: {
           certification_note: string | null
