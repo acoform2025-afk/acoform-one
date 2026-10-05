@@ -856,14 +856,19 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     // balcony parapets / railings mark slab edges outside the walls
     const edgeHints = model.paths.filter((p) => SLAB_EDGE_HINT.test(p.layer) && (!keep || keep(p)));
     const frame = beamRings.length ? [...beamRings.map((pts) => ({ pts, closed: true })), ...colAll.map((c) => ({ pts: c.p.pts, closed: true }))] : [];
-    const base = [...wallPaths, ...colWalls.map((pts) => ({ pts, closed: true })), ...frame, ...edgeHints];
+    // doors and windows sit in the wall line: the slab runs on under them, so they close the outline too
+    const dwLines = (model.dw ?? []).filter((p) => !keep || keep(p));
+    const base = [...wallPaths, ...colWalls.map((pts) => ({ pts, closed: true })), ...frame, ...edgeHints, ...dwLines];
     let o = outlineFromWalls(base, 1 / u);
-    // lobbies, lift lobbies and corridors are often bounded by lines on generic layers (flat walls, door / sill lines,
-    // slab edges drawn on "ELE-01"-type layers): with them the outline closes round the whole floor. Taken when it
-    // adds no more than a third to the outline from the walls alone (it must not run out into the site)
-    if (misc.length) {
+    // lobbies, lift lobbies, corridors and rooms behind wide openings are often bounded by lines on generic layers
+    // (flat walls, sill / balcony lines, slab edges drawn on "ELE-01"-type layers): with them the outline closes round
+    // the whole floor. Taken when it stays within the walls' extent (+ 2 m for balconies) — it must not run out into the site
+    if (misc.length && wallPaths.length) {
       const o2 = outlineFromWalls([...base, ...misc], 1 / u);
-      if (o2.area > o.area * 1.02 && o2.area <= o.area * 1.35) o = o2;
+      const wx = wallPaths.flatMap((p) => p.pts.map((q) => q[0])), wy = wallPaths.flatMap((p) => p.pts.map((q) => q[1]));
+      const m2 = 2 / u, bx = [Math.min(...wx) - m2, Math.min(...wy) - m2, Math.max(...wx) + m2, Math.max(...wy) + m2];
+      const within = o2.loops.every((l) => l.every((q) => q[0] >= bx[0] && q[0] <= bx[2] && q[1] >= bx[1] && q[1] <= bx[3]));
+      if (within && o2.area > o.area * 1.02) o = o2;
     }
     const outer = o.loops.filter((l) => polyArea(l) > 0);
     if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }

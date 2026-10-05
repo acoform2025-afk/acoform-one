@@ -49,6 +49,9 @@ export function suggestLayerRole(name: string): Role {
   // inverted / drop pardi (down-stand walls under the slab) are formed like beams
   if (/inverted|drop-?pardi|down-?stand|吊挂/.test(n)) return "beams";
   if (/beam|(^|[^a-z])bm([^a-z]|$)|梁/.test(n)) return "beams";
+  // a wall layer with its height in the name ("R.C.C Wall (+775) - MSA", "WALL +1230"): a low wall / kerb on the
+  // slab — formed as an upstand of that height on both faces, not as a full-height wall
+  if (/wall|(^|[^a-z])rcc([^a-z]|$)/.test(n.replace(/\./g, "")) && /\+\s*\d{2,4}(?!\d)/.test(n) && !/full/.test(n)) return "upstand";
   // "R.C.C", "R.C.C-MSA", "g-r.c.c": reinforced concrete (lift / stair walls, shear walls) — dots ignored
   if (/wall|shear|pardi|brick|masonry|(^|[^a-z])rcc([^a-z]|$)|-rcc$|(^|[^a-z])wl([^a-z]|$)|墙/.test(n.replace(/\./g, ""))) return "walls";
   if (/^[a-z]-flor$|^a-flor-mcut$/.test(n)) return "slab";          // Revit floor edges
