@@ -37,6 +37,9 @@ export type Role = "ignore" | "walls" | "columns" | "slab" | "opening" | "beams"
 /** First guess of what a layer is, from its name (the user can change every layer on the measuring screen). */
 export function suggestLayerRole(name: string): Role {
   // layers of an attached drawing are named "<file>$0$<layer>": only the layer part tells what it is
+  // an xref'd detail / section / legend drawing (its name is the prefix before "$0$") brings its own walls and slab
+  // lines: not the plan's
+  if (name.includes("$0$") && /大样|详图|示意|节点|剖面|detail|section|legend/i.test(name.slice(0, name.lastIndexOf("$0$")))) return "ignore";
   const n = normLayer(name.includes("$0$") ? name.slice(name.lastIndexOf("$0$") + 3) : name);
   // never formwork geometry: annotation, sheet furniture, sections / elevations, steel, sleeves, projections …
   if (/parapet|compound|hatch|elev(?!ational)|(^|-)elv|sec(tion)?(-|$)|text|txt|(^|-)dim|furn|door|win(dow)?(-|$)|grid|axis|template|title|border|frame|table|legend|name-?plate|nmplt|revision|slab-?thk|thk-text|projection|leader|steel|reinf|sleeve|(^|-)level|symbol|note|defpoints|drip|mould|企口|文字|标注|轴|图框|说明|标高|门|窗|填充|索引|修改|问题|钢筋|信息|分界/.test(n)) return "ignore";

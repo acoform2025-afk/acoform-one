@@ -891,6 +891,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
 
   // slab: slab layer outlines; if none, the outer face of the walls (with columns and beams: a framed building's
   // slab runs out to its beams)
+  let onFloor2 = (_r: Pt[]) => true;              // set once the floor outline is known: is this geometry on the floor?
   let slab = outermost(loops("slab"));
   let slabFromWalls = false;
   // a slab layer that covers only a small corner of the walls (a detail, a balcony) is not the floor outline
@@ -924,7 +925,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     const byArea = [...outer].sort((p1, p2) => Math.abs(polyArea(p2)) - Math.abs(polyArea(p1)));
     const floor: Pt[][] = byArea.length ? [byArea[0]] : [];
     for (let grew = true; grew;) { grew = false; for (const o2 of byArea) if (!floor.includes(o2) && o2.some((q) => nearRings(q, floor, 0.5 / u) || floor.some((f0) => inside(q, f0)))) { floor.push(o2); grew = true; } }
-    const onFloor2 = (r: Pt[]) => r.some((q) => floor.some((f0) => inside(q, f0)) || nearRings(q, floor, 1 / u));
+    onFloor2 = (r: Pt[]) => !floor.length || r.some((q) => floor.some((f0) => inside(q, f0)) || nearRings(q, floor, 1 / u));
     if (floor.length && U.rings.some((r, i) => !U.isHole?.[i] && !onFloor2(r))) {
       const keepR = U.rings.map((r, i) => !!U.isHole?.[i] || onFloor2(r));
       U.rings = U.rings.filter((_, i) => keepR[i]); if (U.isHole) U.isHole = U.isHole.filter((_, i) => keepR[i]);
@@ -1032,7 +1033,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     wallTopArea: U.area * u2,
     ...(paired ? { wallPairs: { byThk: paired.byThk, unpaired: unpairedLen } } : {}),
     beamLineLength: unsizedLen,
-    beamSized, beamRings, beamRingDepth,
+    beamSized, beamRings: beamRings.filter((r) => onFloor2(r)), beamRingDepth: beamRingDepth.filter((_, i) => onFloor2(beamRings[i])),
     // upstands / planters: closed outlines → perimeter = both faces; height from the layer name ("UPSTAND 250", "PLANTER 1050H")
     upstands: (() => {
       const out: { label: string; h: number; length: number; parapet?: boolean }[] = [];
@@ -1048,7 +1049,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     })(),
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
-    wallRings: U.rings, wallLoose: loose,
+    wallRings: U.rings, wallLoose: loose.filter((l) => onFloor2(l)),
     // sunk slabs (toilets, balconies): their edge is formed with drop (suspended) formwork
     sunk: (() => {
       const out: { depth: number; perimeter: number; area: number }[] = [];
@@ -1061,7 +1062,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       return out;
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
-    dwGaps: dwGapsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
+    dwGaps: dwGapsOf(U.rings, (model.dw ?? []).filter((p) => (!keep || keep(p)) && onFloor2(p.pts)), u),
     // wet rooms (toilet / kitchen / balcony names on the plan): the room around the label, bounded by the walls —
     // a concrete kerb (upstand / sunk-slab edge) runs along its walls and is formed on both faces
     wetRooms: (() => {
