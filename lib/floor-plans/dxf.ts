@@ -410,6 +410,67 @@ export function closedLoops(paths: DxfPath[], tol: number, closeGaps = false): P
   return out;
 }
 
+/**
+ * Staircases drawn on layers with no stair name (architects often use generic layers): runs of at least 5 parallel
+ * lines of the same length (0.7–2.5 m) at a regular 200–360 mm spacing are tread lines. Flights closer than 1.5 m
+ * make one staircase. Returns the staircase boxes (drawing units) round the flights.
+ */
+function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, number, number][] {
+  const mm = u * 1000;
+  type Seg = { a: Pt; b: Pt; L: number; ang: number };
+  const segs: Seg[] = [];
+  for (const p of paths) for (let i = 1; i < p.pts.length; i++) {
+    const a = p.pts[i - 1], b = p.pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]) * mm;
+    if (L < 700 || L > 2500) continue;
+    let ang = Math.atan2(b[1] - a[1], b[0] - a[0]); if (ang < 0) ang += Math.PI; if (ang >= Math.PI - 0.02) ang = 0;
+    segs.push({ a, b, L, ang });
+  }
+  const groups = new Map<string, Seg[]>();
+  for (const sg of segs) { const k = `${Math.round(sg.ang / (Math.PI / 36))}:${Math.round(Math.log(sg.L) / 0.1)}`; (groups.get(k) ?? groups.set(k, []).get(k)!).push(sg); }
+  const flights: [number, number, number, number][] = [];
+  for (const g of groups.values()) {
+    if (g.length < 5) continue;
+    const ux = Math.cos(g[0].ang), uy = Math.sin(g[0].ang);
+    const rows = g.map((sg) => ({ sg, off: ((sg.a[0] + sg.b[0]) / 2) * -uy + ((sg.a[1] + sg.b[1]) / 2) * ux, along: ((sg.a[0] + sg.b[0]) / 2) * ux + ((sg.a[1] + sg.b[1]) / 2) * uy }));
+    // lines side by side along their own direction belong to different flights
+    rows.sort((p1, p2) => p1.along - p2.along);
+    const cls: (typeof rows)[] = [];
+    for (const r of rows) { const c = cls.find((c2) => Math.abs(c2[0].along - r.along) * mm <= 0.4 * r.sg.L); if (c) c.push(r); else cls.push([r]); }
+    for (const cl of cls) {
+      const rs = cl.sort((p1, p2) => p1.off - p2.off).filter((r, i, arr) => i === 0 || (r.off - arr[i - 1].off) * mm >= 20);
+      let run: typeof rs = [];
+      const flush = () => {
+        if (run.length >= 5) {
+          const xs = run.flatMap((r) => [r.sg.a[0], r.sg.b[0]]), ys = run.flatMap((r) => [r.sg.a[1], r.sg.b[1]]);
+          flights.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+        }
+        run = [];
+      };
+      for (const r of rs) {
+        if (!run.length) { run.push(r); continue; }
+        const gap = (r.off - run[run.length - 1].off) * mm;
+        const prev = run.length >= 2 ? (run[run.length - 1].off - run[run.length - 2].off) * mm : gap;
+        if (gap >= 200 && gap <= 360 && Math.abs(gap - prev) <= 0.15 * prev) run.push(r); else { flush(); run.push(r); }
+      }
+      flush();
+    }
+  }
+  // flights near each other (dog-leg: side by side) → one staircase
+  const g = 1.5 / u, parent = flights.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < flights.length; i++) for (let j = i + 1; j < flights.length; j++) {
+    const a = flights[i], b = flights[j];
+    if (a[0] - g <= b[2] && b[0] - g <= a[2] && a[1] - g <= b[3] && b[1] - g <= a[3]) parent[find(i)] = find(j);
+  }
+  const out = new Map<number, [number, number, number, number]>();
+  flights.forEach((b, i) => { const r = find(i), c = out.get(r) ?? [Infinity, Infinity, -Infinity, -Infinity]; out.set(r, [Math.min(c[0], b[0]), Math.min(c[1], b[1]), Math.max(c[2], b[2]), Math.max(c[3], b[3])]); });
+  return [...out.values()];
+}
+/** Layers that never carry stairs / shafts / ducts even when generic: services, annotation, sheet. */
+const MISC_NOISE = /(^|[-\s])f-|fire|pipe|sprink|hydrant|hose|drain|plumb|sanit|elec|light|furn|text|dim|hatch|title|plot|defpoint|viewport|level|grid|tree|car|park/i;
+/** Text that names a lift well, shaft, duct or cut-out in the slab. */
+const SHAFT_TXT = /(^|[^a-z])(p\.?|s\.?|pass(enger)?\.?|serv(ice)?\.?|fire\.?)?\s*lift|elevator|lift\s*well|shaft|(^|[^a-z])duct|cut\s*-?out|(^|[^a-z])o\.?t\.?s\.?([^a-z]|$)|open\s*to\s*sky|void/i;
+
 /** Staircases: stair-layer lines grouped (1 m apart), groups at least 2 × 2 m. Boxes in drawing units. */
 function stairClusters(paths: DxfPath[], u: number): [number, number, number, number][] {
   const boxes = paths.map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; });
@@ -664,9 +725,17 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   // thin walls built in block (option "walls under N mm in block"): closed wall outlines thinner than that are left out
   const minWall = Number(opts.minWallMm) || 0;
   const thinClosed = (poly: Pt[]) => { if (minWall <= 75) return false; const per = polyLength(poly, true); return per > 0 && ((2 * Math.abs(polyArea(poly))) / per) * u * 1000 < minWall - 5; };
-  for (const poly of wallPaths.filter((p) => p.closed).map((p) => p.pts)) { if (thinClosed(poly)) continue; (isParapet(poly) ? parapetPolys : wallPolys).push(poly); }
+  // a closed wall loop lying inside another one (odd nesting, at least 0.5 m²) is the inside of a core — a hole
+  const closedW = wallPaths.filter((p) => p.closed).map((p) => p.pts);
+  const areaW = closedW.map((p) => Math.abs(polyArea(p)));
+  const wallHoles: Pt[][] = [];
+  for (const [i, poly] of closedW.entries()) {
+    const depth = closedW.filter((q, j) => j !== i && areaW[j] > areaW[i] && poly.every((pt) => inside(pt, q))).length;
+    if (depth % 2 === 1 && areaW[i] * u2 >= 0.5) { wallHoles.push(poly); continue; }
+    if (thinClosed(poly)) continue; (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
+  }
   for (const poly of paired?.strips ?? []) (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
-  const U = wallUnion([...wallPolys, ...colWalls]);
+  const U = wallUnion([...wallPolys, ...colWalls], wallHoles);
   const UP = parapetPolys.length ? wallUnion(parapetPolys) : null;
   let looseLen = 0, unpairedLen = 0; const loose: Pt[][] = [];
   for (const p of wallPaths) {
@@ -681,7 +750,25 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
 
   // openings: closed loops + boxes marked with an X
   // IS 1200-5: openings under 0.4 m² are not deducted
-  const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]).filter((x) => x.a * u2 >= minOpeningM2);
+  // generic layers (not walls, not services / annotation): lifts, ducts and stairs are often drawn on them
+  const misc = model.paths.filter((p) => (roles[p.layer] ?? "ignore") === "ignore" && (!keep || keep(p)) && !MISC_NOISE.test(p.layer));
+  // lifts, shafts, ducts, cut-outs named on the plan (P.LIFT, S.LIFT, SHAFT, DUCT, OTS …): the space round the name,
+  // bounded by the walls; boxes with an X on the generic layers — both are holes in the slab
+  const extraOpen: Pt[][] = [];
+  {
+    const tx = (model.texts ?? []).filter((t) => SHAFT_TXT.test(t.text) && t.text.length <= 30 && (!keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false })));
+    // lift doors are open gaps in the core walls: bridged (up to 1.3 m), and lines on the generic layers (door / sill
+    // lines across the shaft front) close it too
+    if (tx.length && U.rings.length) for (const sp of labelledSpaces(U.rings, [...loose, ...misc.map((p) => (p.closed ? [...p.pts, p.pts[0]] : p.pts))], tx.map((t) => [t.x, t.y] as Pt), u, 20, 0.65)) {
+      if (sp.area < 0.5 || sp.area > 20) continue;
+      const [x0, y0, x1, y1] = sp.box; extraOpen.push([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    }
+    for (const b of xMarkedBoxes(misc, 0.02 / u)) {
+      const w = Math.abs(b[2][0] - b[0][0]) * u, h = Math.abs(b[2][1] - b[0][1]) * u;
+      if (w >= 0.4 && h >= 0.4 && w * h >= 0.25 && w * h <= 12) extraOpen.push(b);
+    }
+  }
+  const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath), ...extraOpen.map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]).filter((x) => x.a * u2 >= minOpeningM2);
 
   // beams: outlines on beam layers. A size in the layer name ("BEAM 300X750H") gives each beam its own width and
   // depth: the part clear of walls / columns is its length → both sides (depth − slab) and the bottom. Beam layers
@@ -769,7 +856,15 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     // balcony parapets / railings mark slab edges outside the walls
     const edgeHints = model.paths.filter((p) => SLAB_EDGE_HINT.test(p.layer) && (!keep || keep(p)));
     const frame = beamRings.length ? [...beamRings.map((pts) => ({ pts, closed: true })), ...colAll.map((c) => ({ pts: c.p.pts, closed: true }))] : [];
-    const o = outlineFromWalls([...wallPaths, ...colWalls.map((pts) => ({ pts, closed: true })), ...frame, ...edgeHints], 1 / u);
+    const base = [...wallPaths, ...colWalls.map((pts) => ({ pts, closed: true })), ...frame, ...edgeHints];
+    let o = outlineFromWalls(base, 1 / u);
+    // lobbies, lift lobbies and corridors are often bounded by lines on generic layers (flat walls, door / sill lines,
+    // slab edges drawn on "ELE-01"-type layers): with them the outline closes round the whole floor. Taken when it
+    // adds no more than a third to the outline from the walls alone (it must not run out into the site)
+    if (misc.length) {
+      const o2 = outlineFromWalls([...base, ...misc], 1 / u);
+      if (o2.area > o.area * 1.02 && o2.area <= o.area * 1.35) o = o2;
+    }
     const outer = o.loops.filter((l) => polyArea(l) > 0);
     if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
   }
@@ -914,8 +1009,22 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     })(),
     ...(() => {
       const sp = model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)|楼梯/i.test(p.layer) && !/lift|elev|note|text|anno|iden/i.test(p.layer) && (!keep || keep(p)));
-      const s = stairClusters(sp, u);
-      return { stairCount: s.length, stairBoxes: s, stairsMeasured: measureStairs(sp, s, u) };
+      let s = stairClusters(sp, u), src = sp;
+      // no stair layer: tread lines on the generic layers; the staircase is the walled space round its flights
+      if (!s.length) {
+        const fl = treadFlightBoxes(misc, u);
+        if (fl.length) {
+          src = misc;
+          s = fl.map((b) => {
+            const c: Pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+            const sp2 = U.rings.length ? labelledSpaces(U.rings, loose, [c], u, 60, 0.3)[0] : undefined;
+            const fa = (b[2] - b[0]) * (b[3] - b[1]) * u2;
+            if (sp2 && sp2.area >= fa * 0.9 && sp2.area <= 60) return sp2.box;
+            const e = 0.15 / u; return [b[0] - e, b[1] - e, b[2] + e, b[3] + e] as [number, number, number, number];
+          });
+        }
+      }
+      return { stairCount: s.length, stairBoxes: s, stairsMeasured: measureStairs(src, s, u) };
     })(),
     ...(() => {
       const g = wallGaps(U.rings, u, paired ? 1.2 : 0);

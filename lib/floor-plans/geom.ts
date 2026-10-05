@@ -8,7 +8,7 @@
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type Pt } from "./calc";
 
-export function wallUnion(polys: Pt[][]): { area: number; perimeter: number; rings: Pt[][]; isHole?: boolean[] } {
+export function wallUnion(polys: Pt[][], holes: Pt[][] = []): { area: number; perimeter: number; rings: Pt[][]; isHole?: boolean[] } {
   const input: Polygon[] = [];
   for (const p of polys) if (p.length >= 3 && Math.abs(polyArea(p)) > 0) input.push([[...p, p[0]] as [number, number][]]);
   if (!input.length) return { area: 0, perimeter: 0, rings: [] };
@@ -19,6 +19,9 @@ export function wallUnion(polys: Pt[][]): { area: number; perimeter: number; rin
     // a bad polygon: add them one by one, skipping the ones that fail
     for (const p of input) { try { U = polygonClipping.union(U.length ? U : p, p); } catch { /* skip */ } }
   }
+  // loops drawn inside a wall outline (the inner face of a lift / stair core drawn as its own closed polyline) are
+  // the space inside, not more wall
+  if (holes.length) { try { U = polygonClipping.difference(U, ...holes.filter((h) => h.length >= 3).map((h) => [[...h, h[0]] as [number, number][]] as Polygon)); } catch { /* keep the union */ } }
   let area = 0, perimeter = 0; const rings: Pt[][] = []; const isHole: boolean[] = [];
   for (const poly of U) poly.forEach((ring, i) => {
     const r = ring.slice(0, -1) as Pt[]; const a = Math.abs(polyArea(r));
