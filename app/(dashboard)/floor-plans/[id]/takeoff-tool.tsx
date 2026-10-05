@@ -377,7 +377,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   // a plan measured before this existed: its levels are read once, without touching anything else
   const levelsDone = useRef(false);
   useEffect(() => {
-    if (levelsDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size || t.building || t.parentPlan || !t.auto?.done || !parts.length) return;
+    if (levelsDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size || (t.building && (t.building.edited || !t.building.levels.every((l) => l.src === "assumed"))) || t.parentPlan || !t.auto?.done || !parts.length) return;
     levelsDone.current = true;
     const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n);
     if (b) update((p) => ({ ...p, building: b }));

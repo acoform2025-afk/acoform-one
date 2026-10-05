@@ -2,9 +2,10 @@
  * The whole building, level by level — read from the drawing so a quote / set size / 3D covers every floor, not only
  * the typical one. Three readings, best first:
  *   1. a level table (Chinese drawings: 层号 / 标高 / 层高 columns; also "LEVEL | FFL | HEIGHT" schedules),
- *   2. the level names written down the side of a section ("-01 BASEMENT LVL", "00 STILT LVL", "01 FIRST FLOOR LVL" …
+ *   2. level marks down a section ("LVL +4500" / "FFL +7.830" with its name "1ST FLOOR" written just above or below),
+ *   3. the level names written down the side of a section ("-01 BASEMENT LVL", "00 STILT LVL", "01 FIRST FLOOR LVL" …
  *      "13 TERRACE FLOOR LVL") — their spacing on the section is the floor height,
- *   3. nothing readable: the stated floors × floor height (ground + N floors + terrace).
+ *   4. nothing readable: the stated floors × floor height (ground + N floors + terrace).
  * Every level is then matched to its drawing in the file (BASEMENT FLOOR PLAN, STILT FLOOR PLAN, 2ND TO 12TH FLOOR
  * PLAN …). What could not be found becomes a question for the architect / structural engineer.
  */
@@ -65,7 +66,7 @@ export function parseLevelName(raw: string): { kind: LevelKind; nos: number[]; t
   if (/service\s*(floor|lvl|level)|below\s*basement|\bb2\b|plant\s*room\s*lvl/i.test(t)) kind = "service";
   else if (/basement|bsmt|cellar|\bb-?\d\b|地下/i.test(t)) kind = "basement";
   else if (/stilt|pilotis|parking\s*(floor|lvl|level|plan)/i.test(t)) kind = "stilt";
-  else if (/head\s*room|\blmr\b|machine\s*room|\boht\b|屋顶构架|roof\s*slab\s*plan|above\s*terrace/i.test(t)) kind = "headroom";
+  else if (/head\s*room|stair\s*cabin|mumty|mumtee|\blmr\b|machine\s*room|\boht\b|屋顶构架|roof\s*slab\s*plan|above\s*terrace/i.test(t)) kind = "headroom";
   else if (/terrace|\broof\b|屋面/i.test(t)) kind = "terrace";
   else if (/refuge/i.test(t)) kind = "refuge";
   else if (/podium/i.test(t)) kind = "podium";
@@ -136,7 +137,53 @@ function levelTable(texts: DxfText[], unitToM: number): Level[] | null {
   return dedupe(out);
 }
 
-/* ---------- reading 2: level names down a section ---------- */
+/* ---------- reading 2: level marks down a section ---------- */
+/** "LVL +4500", "LVL 00", "FFL +7.830", "EL. -5000", "+3.000 LVL" → the level in mm (a dot = metres, else mm). */
+export function levelMark(raw: string): number | undefined {
+  const s = raw.replace(/\\[A-Za-z]/g, "").replace(/\s+/g, " ").trim();
+  const m = s.match(/^(?:lvl|level|lev|ffl|sfl|tos|el\.?)\s*:?\s*([+-]?)\s*(\d{1,6}(?:\.\d{1,3})?)\s*(?:mm|m)?$/i) ?? s.match(/^([+-]?)\s*(\d{1,6}(?:\.\d{1,3})?)\s*(?:lvl|level|ffl|sfl)$/i);
+  if (!m) return undefined;
+  const v = m[2].includes(".") ? Math.round(+m[2] * 1000) : +m[2];
+  return m[1] === "-" ? -v : v;
+}
+function levelMarks(texts: DxfText[], unitToM: number): Level[] | null {
+  type M = { t: DxfText; mm: number };
+  const marks: M[] = [];
+  for (const t of texts) { const mm = levelMark(t.text); if (mm != null && Math.abs(mm) < 400000) marks.push({ t, mm }); }
+  if (marks.length < 4) return null;
+  const col = new Map<number, M[]>();
+  for (const k of marks) { const c = Math.round((k.t.x * unitToM) / 1.5); col.set(c, [...(col.get(c) ?? []), k]); }
+  const columns = [...col.values()].map((c) => c.filter((k, i) => c.findIndex((o) => o.mm === k.mm) === i).sort((a, b) => a.mm - b.mm)).filter((c) => c.length >= 4).sort((a, b) => b.length - a.length);
+  if (!columns.length) return null;
+  // the name of each mark: the nearest other text in the same column, just above or below (within 3 text heights)
+  const isMark = (t: DxfText) => levelMark(t.text) != null;
+  const read = (c: M[]): Level[] => {
+    const out: Level[] = [];
+    for (const k of c) {
+      const h = k.t.h || 1;
+      const name = texts.filter((t) => t !== k.t && !isMark(t) && Math.abs(t.x - k.t.x) <= h * 4 && Math.abs(t.y - k.t.y) <= h * 3 && t.text.trim().length <= 40)
+        .sort((a, b) => Math.abs(a.y - k.t.y) + Math.abs(a.x - k.t.x) * 0.5 - (Math.abs(b.y - k.t.y) + Math.abs(b.x - k.t.x) * 0.5))[0];
+      const label = name?.text.trim() ?? "";
+      if (/road|ngl|existing\s*ground|water|sump|tank|o\.?h\.?w\.?t|parapet|lintel|sill|beam|footing|raft|pcc/i.test(label) && !/floor|basement|stilt|terrace|plinth/i.test(label)) continue;
+      const p = parseLevelName(label);
+      let kind = p.kind, no = p.nos[0];
+      if (kind === "floor" && no == null) kind = "other";
+      if (kind === "other") continue;          // a mark without a level name (a beam top, a sill) is not a floor
+      out.push({ key: keyOf(kind, no), name: label || KIND_LABEL[kind], kind, no, elevMm: k.mm, use: "typical", src: "names" });
+    }
+    return out;
+  };
+  const main = read(columns[0]);
+  for (const c of columns.slice(1)) for (const l of read(c)) if (!main.some((m) => m.key === l.key)) main.push(l);
+  if (main.length < 3) return null;
+  const ls = dedupe(main);
+  // the floor height of each level = the next level mark up
+  const up = [...ls].filter((l) => l.elevMm != null).sort((a, b) => a.elevMm! - b.elevMm!);
+  up.forEach((l, i) => { const n = up[i + 1]; if (n && l.kind !== "terrace" && l.kind !== "headroom") { const d = n.elevMm! - l.elevMm!; if (d >= 1500 && d <= 9000) l.floorMm = d; } });
+  return ls;
+}
+
+/* ---------- reading 3: level names down a section ---------- */
 function levelNames(texts: DxfText[], unitToM: number): Level[] | null {
   type L = { t: DxfText; p: ReturnType<typeof parseLevelName>; lead?: number };
   const ls: L[] = [];
@@ -180,7 +227,7 @@ function dedupe(ls: Level[]): Level[] {
   return [...seen.values()].sort((a, b) => levelRank(a) - levelRank(b));
 }
 
-/* ---------- reading 3: assumed from the stated figures ---------- */
+/* ---------- reading 4: assumed from the stated figures ---------- */
 function assumedLevels(floors: number, floorMm: number): Level[] {
   const out: Level[] = [{ key: "g", name: "Ground floor", kind: "ground", floorMm, use: "typical", src: "assumed" }];
   for (let i = 1; i <= floors - 1; i++) out.push({ key: `f${i}`, name: `Floor ${i}`, kind: "floor", no: i, floorMm, use: "typical", src: "assumed" });
@@ -201,6 +248,7 @@ export function readBuilding(inp: BuildingInput): Building {
   const myTower = inp.planName ? parseLevelName(inp.planName).tower : undefined;
   let levels = levelTable(inp.texts, inp.unitToM);
   let note = levels ? "levels from the level table on the drawing" : "";
+  if (!levels) { levels = levelMarks(inp.texts, inp.unitToM); if (levels) note = "levels from the level marks on the section"; }
   if (!levels) { levels = levelNames(inp.texts, inp.unitToM); if (levels) note = "levels from the level names on the section"; }
   const Q: Question[] = [];
   const ask = (to: Question["to"], text: string, why: string) => Q.push({ id: `q${Q.length + 1}`, to, text, why });
