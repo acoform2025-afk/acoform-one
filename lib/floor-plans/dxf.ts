@@ -930,7 +930,9 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       U.rings = U.rings.filter((_, i) => keepR[i]); if (U.isHole) U.isHole = U.isHole.filter((_, i) => keepR[i]);
       U.area = U.rings.reduce((s2, r, i) => s2 + (U.isHole?.[i] ? -1 : 1) * Math.abs(polyArea(r)), 0); U.perimeter = U.rings.reduce((s2, r) => s2 + polyLength(r, true), 0);
     }
-    const walled = (pts: Pt[]) => U.rings.some((r, i) => !U.isHole?.[i] && r.some((q) => inside(q, pts) || nearRings(q, [pts], 0.1 / u)));
+    // an outline is a floor slab only when walls stand inside it (not just along its edge): at least 0.5 m² of wall
+    // with its centre inside the outline — an empty box closed by section lines, notes or leaders beside the plan is not
+    const walled = (pts: Pt[]) => { let a = 0; U.rings.forEach((r, i) => { if (U.isHole?.[i]) return; const c: Pt = [r.reduce((x, q) => x + q[0], 0) / r.length, r.reduce((x, q) => x + q[1], 0) / r.length]; if (inside(c, pts)) a += Math.abs(polyArea(r)); }); return a * u2 >= 0.5; };
     const kept = outer.filter((pts) => walled(pts) && Math.abs(polyArea(pts)) * u2 >= 1);
     const use = kept.length ? kept : outer;
     if (use.length) { slab = use.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
