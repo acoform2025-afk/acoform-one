@@ -315,12 +315,19 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   const zoneBeam3: { ring: Pt[]; d: number }[] = frame ? (auto?.beamRings ?? []).map((r, i) => ({ ring: r.map((q) => toM(frame!.toPx(q))), d: auto?.beamRingDepth?.[i] ?? (t.params.beamDepthMm ?? 600) })) : [];
   const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : [];
   // which way each stair climbs and at which end its mid-landing is (read from the tread lines and the UP / DN arrows)
-  const zoneStairOrient: ({ along: boolean; landHigh: boolean; upHigh?: boolean } | null)[] = zoneStairs.map((zb, i) => {
-    const m = (auto as { stairsMeasured?: { run?: "x" | "y"; landPt?: Pt; upPt?: Pt }[] } | undefined)?.stairsMeasured?.[i];
+  const zoneStairOrient: ({ along: boolean; landHigh: boolean; upHigh?: boolean; spans?: [number, number][] } | null)[] = zoneStairs.map((zb, i) => {
+    const m = (auto as { stairsMeasured?: { run?: "x" | "y"; landPt?: Pt; upPt?: Pt; flights: { span?: [number, number] }[] }[] } | undefined)?.stairsMeasured?.[i];
     if (!frame || !m?.run || !m.landPt) return null;
     const lp = toM(frame.toPx(m.landPt)), along = m.run === "x";
     const up = m.upPt ? toM(frame.toPx(m.upPt)) : null;
-    return { along, landHigh: along ? lp[0] > (zb[0] + zb[2]) / 2 : lp[1] > (zb[1] + zb[3]) / 2, upHigh: up ? (along ? up[1] > (zb[1] + zb[3]) / 2 : up[0] > (zb[0] + zb[2]) / 2) : undefined };
+    // where each flight lies across the climb (metres, box-relative): from its tread lines, so a flight never runs into a wall
+    const spans = m.flights.map((f) => f.span).filter((v): v is [number, number] => !!v).map((v) => {
+      // the span is measured along the tread lines: x when the climb runs along y, y when it runs along x
+      const a = toM(frame!.toPx(along ? [zb[0], v[0]] as Pt : [v[0], zb[1]] as Pt)), b = toM(frame!.toPx(along ? [zb[0], v[1]] as Pt : [v[1], zb[1]] as Pt));
+      const va = along ? a[1] - zb[1] : a[0] - zb[0], vb = along ? b[1] - zb[1] : b[0] - zb[0];
+      return [Math.min(va, vb), Math.max(va, vb)] as [number, number];
+    });
+    return { along, landHigh: along ? lp[0] > (zb[0] + zb[2]) / 2 : lp[1] > (zb[1] + zb[3]) / 2, upHigh: up ? (along ? up[1] > (zb[1] + zb[3]) / 2 : up[0] > (zb[0] + zb[2]) / 2) : undefined, spans: spans.length ? spans : undefined };
   });
   // doors / windows inside the walls, for the 3D model: the opening across the wall (metres), sill and head (mm)
   const zoneOpenings: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean; free?: boolean }[] = [];

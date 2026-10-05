@@ -7,7 +7,7 @@ import polygonClipping, { type MultiPolygon } from "polygon-clipping";
 import type { Pt } from "./calc";
 import type { FaceLayout } from "@/lib/design-engine/floor-panels";
 import type { Zone } from "./zones";
-import type { StairGeo, StairLayout } from "@/lib/design-engine/floor-panels";
+import { fillRun, type StairGeo, type StairLayout } from "@/lib/design-engine/floor-panels";
 import { inRings } from "@/lib/design-engine/design-check";
 
 export type Poly2 = Pt[][];                         // outer ring + holes (metres)
@@ -42,13 +42,14 @@ const strip = (m: MultiPolygon): Poly2[] => m.map((poly) => poly.map((r) => r.sl
 export function buildScene3(o: {
   zoneWalls: Pt[][]; zoneGaps: { a: Pt; b: Pt; thk: number }[]; decks: { pts: Pt[]; holes: Pt[][] }[];
   zones: Zone[]; faces: FaceLayout[]; mpp: number; floorHeight: number; slabMm: number; stdHeight: number; beamDepthMm: number;
-  cols?: Pt[][]; beams3?: { ring: Pt[]; d: number }[]; stairs?: [number, number, number, number][]; stairOrient?: ({ along: boolean; landHigh: boolean; upHigh?: boolean } | null)[];
+  cols?: Pt[][]; beams3?: { ring: Pt[]; d: number }[]; stairs?: [number, number, number, number][]; stairOrient?: ({ along: boolean; landHigh: boolean; upHigh?: boolean; spans?: [number, number][] } | null)[];
   stairGeo?: StairGeo[]; kickerMm?: number; scMm?: [number, number]; icMm?: number; ecMm?: number;
   openings?: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean; free?: boolean }[];
   arch?: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[];
   stairLay?: StairLayout[];                 // the stair panels the layout chose (soffit / cheek / landing pieces)
   propSpacing?: number; tieH?: number; tieV?: number;   // m, mm, mm
   midBeamMm?: number;                       // keel (mid beam) width; it carries the deck panels and the prop heads sit in it
+  beamSideWidths?: number[];                // panel widths used for the beam side panels (the wall panel widths)
 }): Scene3 {
   const H = Math.max(0.5, o.floorHeight - o.slabMm / 1000), slab = o.slabMm / 1000;
   // walls: even-odd combination of the merged wall rings → proper polygons with holes
@@ -159,14 +160,60 @@ export function buildScene3(o: {
   // external kicker along the slab edge (outside face of the slab, above the wall panels)
   const kick = (o.kickerMm ?? 0) / 1000;
   if (kick > 0) for (const poly of slabM) { const r = poly[0]; for (let i = 0; i < r.length - 1; i++) { const a = r[i], b = r[i + 1]; panels.push({ p: [[a[0], H, a[1]], [b[0], H, b[1]], [b[0], H + slab + kick, b[1]], [a[0], H + slab + kick, a[1]]], k: "kick", c: `kicker ${o.kickerMm} mm` }); } }
-  // beams: side panels on every edge of the beam outline, bottom panel under it
+  // beams drawn on a beam layer: side panels on every edge of the beam outline (rails outwards), bottom panel under it
   for (const b3 of o.beams3 ?? []) {
     const d = Math.max(slab, b3.d / 1000), h = d - slab; if (h <= 0.01 || b3.ring.length < 3) continue;
-    const r = b3.ring;
-    for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.15) continue; panels.push({ p: [[a[0], H - h, a[1]], [b[0], H - h, b[1]], [b[0], H, b[1]], [a[0], H, a[1]]], k: "bside", c: `beam ${Math.round(b3.d)} deep · side ${Math.round(h * 1000)}` }); }
+    const r = b3.ring, cx = r.reduce((x, q) => x + q[0], 0) / r.length, cy = r.reduce((x, q) => x + q[1], 0) / r.length;
+    for (let i = 0; i < r.length; i++) {
+      const a = r[i], b = r[(i + 1) % r.length]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 0.15) continue;
+      let nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L;             // outward: away from the beam's middle
+      if (((a[0] + b[0]) / 2 - cx) * nx + ((a[1] + b[1]) / 2 - cy) * ny < 0) { nx = -nx; ny = -ny; }
+      panels.push({ p: [[a[0], H - h, a[1]], [b[0], H - h, b[1]], [b[0], H, b[1]], [a[0], H, a[1]]], k: "bside", c: `beam ${Math.round(b3.d)} deep · side panel BS ${Math.round(h * 1000)} × ${Math.round(L * 1000)} — soffit corner above, pinned to the beam bottom rail below`, n: [nx, 0, ny] });
+    }
     // bottom: the ring as a rectangle (beams are narrow strips)
     const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]);
-    panels.push({ p: [[Math.min(...xs), H - h, Math.min(...ys)], [Math.max(...xs), H - h, Math.min(...ys)], [Math.max(...xs), H - h, Math.max(...ys)], [Math.min(...xs), H - h, Math.max(...ys)]], k: "bbot", c: `beam ${Math.round(b3.d)} deep · bottom` });
+    panels.push({ p: [[Math.min(...xs), H - h, Math.min(...ys)], [Math.max(...xs), H - h, Math.min(...ys)], [Math.max(...xs), H - h, Math.max(...ys)], [Math.min(...xs), H - h, Math.max(...ys)]], k: "bbot", c: `beam ${Math.round(b3.d)} deep · bottom panel BB — on beam prop heads`, n: [0, -1, 0] });
+  }
+  // lintel beams over the door / window gaps in the walls (no beam layer): the beam side panel on each face continues
+  // the wall face above the opening — pinned to the wall panels at both ends and to the soffit corner on top; the beam
+  // bottom panel spans the opening between the two wall ends, pinned to the side panels' bottom rails, carried on beam
+  // prop heads; the rails of all three face outwards
+  {
+    const bw = o.beamSideWidths?.length ? o.beamSideWidths : [600, 500, 400, 300, 200, 100];
+    const d = Math.max(slab, o.beamDepthMm / 1000), h = d - slab;
+    if (h > 0.01) for (const g of o.zoneGaps) {
+      const L = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1]); if (L < 0.2) continue;
+      const ux = (g.b[0] - g.a[0]) / L, uy = (g.b[1] - g.a[1]) / L, nx = -uy, ny = ux, t = Math.max(0.1, g.thk) / 2;
+      const code = `LB ${Math.round(L * 1000)}`;
+      for (const sgn of [1, -1]) {
+        const ax = g.a[0] + nx * sgn * (t + 0.005), ay = g.a[1] + ny * sgn * (t + 0.005);
+        const fit = fillRun(Math.round(L * 1000), bw);
+        let run = 0;
+        const put = (w: number, custom: boolean) => {
+          const x0 = run / 1000, x1 = Math.min(L, (run + w) / 1000);
+          const p0: Pt = [ax + ux * x0, ay + uy * x0], p1: Pt = [ax + ux * x1, ay + uy * x1];
+          panels.push({ p: [[p0[0], H - h, p0[1]], [p1[0], H - h, p1[1]], [p1[0], H, p1[1]], [p0[0], H, p0[1]]], k: "bside", c: `${code} · beam side panel BS ${Math.round(h * 1000)} × ${w}${custom ? " (made to size)" : ""} — pinned to the wall panels at its ends, soffit corner above, beam bottom rail below`, n: [nx * sgn, 0, ny * sgn] });
+          run += w; if (custom) special++;
+        };
+        for (const w of fit.panels) put(w, false);
+        if (fit.left > 20) put(Math.round(fit.left / 5) * 5, true);
+        // soffit corner on top of the beam side (joins it to the deck), same as on a wall
+        const b0: Pt = [ax, ay], b1: Pt = [ax + ux * L, ay + uy * L], ox = nx * sgn * scH, oy = ny * sgn * scH;
+        panels.push({ p: [[b0[0], H - scV, b0[1]], [b1[0], H - scV, b1[1]], [b1[0], H, b1[1]], [b0[0], H, b0[1]]], k: "sc", c: `${code} · soffit corner over the beam side`, n: [nx * sgn, 0, ny * sgn] });
+        panels.push({ p: [[b0[0], H, b0[1]], [b1[0], H, b1[1]], [b1[0] + ox, H, b1[1] + oy], [b0[0] + ox, H, b0[1] + oy]], k: "sc", c: `${code} · soffit corner over the beam side`, n: [0, -1, 0] });
+      }
+      // beam bottom panel(s) between the two wall ends, 5 mm under the concrete
+      const y = H - h - 0.005, c0: Pt = [g.a[0] - nx * t, g.a[1] - ny * t], c1: Pt = [g.a[0] + nx * t, g.a[1] + ny * t];
+      const fit = fillRun(Math.round(L * 1000), [1200, 1050, 900, 600, 300]);
+      let run = 0;
+      const putB = (w: number, custom: boolean) => {
+        const x0 = run / 1000, x1 = Math.min(L, (run + w) / 1000);
+        panels.push({ p: [[c0[0] + ux * x0, y, c0[1] + uy * x0], [c0[0] + ux * x1, y, c0[1] + uy * x1], [c1[0] + ux * x1, y, c1[1] + uy * x1], [c1[0] + ux * x0, y, c1[1] + uy * x0]], k: "bbot", c: `${code} · beam bottom panel BB ${Math.round(t * 2000)} × ${w}${custom ? " (made to size)" : ""} — pinned to both side panels, on beam prop heads`, n: [0, -1, 0] });
+        run += w; if (custom) special++;
+      };
+      for (const w of fit.panels) putB(w, false);
+      if (fit.left > 20) putB(Math.round(fit.left / 5) * 5, true);
+    }
   }
   // columns: a panel on every face
   for (const r of o.cols ?? []) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 0.05) continue; panels.push({ p: [[a[0], 0, a[1]], [b[0], 0, b[1]], [b[0], H, b[1]], [a[0], H, a[1]]], k: "col", c: `column face ${Math.round(L * 1000)} × ${Math.round(H * 1000)}` }); }
@@ -197,8 +244,14 @@ export function buildScene3(o: {
     const half = g ? Math.min(g.width / 1000, Wb / 2) : Wb / 2;
     const fl = g ? Math.max(1, Math.min(2, g.flights)) : 2;
     const flipU = ori ? !ori.landHigh : false;               // landing at the low end: the plan is mirrored along the climb
-    const flipV = !!ori?.upHigh;                              // the first flight on the side of the "UP" arrow
+    // where the two flights lie across the stairwell: from their tread lines when the drawing gave them (so a flight
+    // never runs into a wall of a stepped stairwell), else one at each side; the first flight on the "UP" arrow side
+    const sp2 = (ori?.spans ?? []).map(([a, b]) => [Math.max(0, a), Math.min(Wb, b)] as [number, number]).filter(([a, b]) => b - a >= 0.6).sort((p1, p2) => p1[0] - p2[0]);
+    const spanLo = sp2[0], spanHi = sp2.length > 1 ? sp2[sp2.length - 1] : undefined;
+    const flipV = !!ori?.upHigh && !spanLo;                   // (with spans the sides are picked directly)
     const P = (u0: number, v0: number): [number, number] => { const u = flipU ? Lb - u0 : u0, v = flipV ? Wb - v0 : v0; return along ? [x0 + u, y0 + v] : [x0 + v, y0 + u]; };
+    const f1 = ori?.upHigh && spanHi ? spanHi : spanLo, f2 = ori?.upHigh && spanHi ? spanLo : spanHi;
+    const v1A = f1 ? f1[0] : 0, v1B = f1 ? f1[1] : half, v2A = f2 ? f2[0] : Math.max(half, Wb - half), v2B = f2 ? f2[1] : Wb;
     const box = (u: number, v: number, du: number, dv: number, yb: number, yt: number) => {
       const [cx, cz] = P(u + du / 2, v + dv / 2);
       steps.push({ c: [cx, (yb + yt) / 2, cz], s: along ? [du, yt - yb, dv] : [dv, yt - yb, du], rot: 0 });
@@ -300,7 +353,7 @@ export function buildScene3(o: {
         if (top > 0.3) { acc.props.push([x, z, 0, top, 2]); acc.heads.push([x, top, z, 2]); }
       }
     };
-    flight(1, 0, 1, 0, half, 0, -waist, 0);
+    flight(1, 0, 1, v1A, v1B, 0, -waist, v1A < Wb - v1B ? v1A : v1B);
     // landing soffit: panels across the landing at its underside, props under it
     const ly = topOf - 0.15;
     {
@@ -317,7 +370,7 @@ export function buildScene3(o: {
         acc.props.push([x, z, 0, ly - 0.005, 2]); acc.heads.push([x, ly - 0.005, z, 2]);
       }
     }
-    if (fl > 1) flight(2, Lb - land, -1, Math.max(half, Wb - half), Wb, topOf, topOf - waist, Wb);      // the far side; the gap between the flights stays open
+    if (fl > 1) flight(2, Lb - land, -1, v2A, v2B, topOf, topOf - waist, v2A < Wb - v2B ? v2A : v2B);      // the other side; the gap between the flights stays open
   });
   // ---- accessories (the same rules as the parts list) ----
   // deck props: a prop with a drop head under every mid-beam end and along it at the prop spacing
@@ -330,6 +383,15 @@ export function buildScene3(o: {
     const n = Math.max(1, Math.ceil((L - 0.3) / sp)), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
     const ts = n === 1 ? [0.5] : Array.from({ length: n - 1 }, (_, i) => (i + 1) / n);
     for (const t of ts) addProp(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, H - KEEL_D, 0, ang);
+  }
+  // beam props: under every lintel beam over a wall gap, at the prop spacing (ends 150 mm in)
+  {
+    const d = Math.max(slab, o.beamDepthMm / 1000), h = d - slab;
+    if (h > 0.01) for (const g of o.zoneGaps) {
+      const L = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1]); if (L < 0.2) continue;
+      const n = Math.max(1, Math.ceil((L - 0.3) / sp));
+      for (let i = 0; i <= n; i++) { const t = L <= 0.5 ? 0.5 : (0.15 + (i * (L - 0.3)) / n) / L; addProp(g.a[0] + (g.b[0] - g.a[0]) * t, g.a[1] + (g.b[1] - g.a[1]) * t, H - h - 0.005, 1); if (L <= 0.5) break; }
+    }
   }
   // beam props: under every beam bottom along its length
   for (const b3 of o.beams3 ?? []) {

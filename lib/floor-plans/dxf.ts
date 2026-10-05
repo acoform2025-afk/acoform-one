@@ -500,7 +500,7 @@ function stairClusters(paths: DxfPath[], u: number): [number, number, number, nu
  * The landing is what is left of the box beside the flights. Units: mm (via u).
  */
 export type StairMeasure = {
-  box: [number, number, number, number]; flights: { width: number; treads: number; tread: number; ang?: number }[]; landingM2: number;
+  box: [number, number, number, number]; flights: { width: number; treads: number; tread: number; ang?: number; span?: [number, number] }[]; landingM2: number;   // span: where the flight lies across the climb (drawing units along the tread lines)
   run?: "x" | "y";            // the flights climb along x or y (across their tread lines)
   landPt?: Pt;               // a point on the mid-landing (drawing units): the landing is at that end of the stairwell
   upPt?: Pt;                 // the "UP" arrow text: the first flight (up from this floor) is on its side
@@ -527,7 +527,7 @@ export function measureStairs(paths: DxfPath[], boxes: [number, number, number, 
       if (g.length < 3) continue;
       const ux = Math.cos(g[0].ang), uy = Math.sin(g[0].ang);
       // offset of each line across its direction; lines that overlap along the direction belong to the same flight
-      const all = g.map((sg) => ({ off: ((sg.a[0] + sg.b[0]) / 2) * -uy + ((sg.a[1] + sg.b[1]) / 2) * ux, along: ((sg.a[0] + sg.b[0]) / 2) * ux + ((sg.a[1] + sg.b[1]) / 2) * uy, L: sg.L })).sort((p1, p2) => p1.along - p2.along);
+      const all = g.map((sg) => ({ off: ((sg.a[0] + sg.b[0]) / 2) * -uy + ((sg.a[1] + sg.b[1]) / 2) * ux, along: ((sg.a[0] + sg.b[0]) / 2) * ux + ((sg.a[1] + sg.b[1]) / 2) * uy, L: sg.L, s0: Math.min(sg.a[0] * ux + sg.a[1] * uy, sg.b[0] * ux + sg.b[1] * uy), s1: Math.max(sg.a[0] * ux + sg.a[1] * uy, sg.b[0] * ux + sg.b[1] * uy) })).sort((p1, p2) => p1.along - p2.along);
       // flights side by side (same direction, different position along the lines) are split first
       const clusters: (typeof all)[] = [];
       for (const r2 of all) { const c = clusters[clusters.length - 1]; if (c && Math.abs(r2.along - c[c.length - 1].along) * mm <= 0.5 * r2.L) c.push(r2); else clusters.push([r2]); }
@@ -538,7 +538,8 @@ export function measureStairs(paths: DxfPath[], boxes: [number, number, number, 
           if (run.length >= 3) {
             const sp = run.slice(1).map((r2, i) => (r2.off - run[i].off) * mm), tread = sp.reduce((s2, v) => s2 + v, 0) / sp.length;
             const width = run.reduce((s2, r2) => s2 + r2.L, 0) / run.length;
-            flights.push({ width: Math.round(width / 5) * 5, treads: run.length, tread: Math.round(tread / 5) * 5, ang: g[0].ang });
+            const s0 = run.reduce((m, r2) => Math.min(m, r2.s0), Infinity), s1 = run.reduce((m, r2) => Math.max(m, r2.s1), -Infinity);
+            flights.push({ width: Math.round(width / 5) * 5, treads: run.length, tread: Math.round(tread / 5) * 5, ang: g[0].ang, span: [s0, s1] });
             flightArea += (run.length * tread) * width;
           }
           run = [];

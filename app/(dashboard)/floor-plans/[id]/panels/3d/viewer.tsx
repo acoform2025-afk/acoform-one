@@ -227,8 +227,8 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
               const layer = KIND_LAYER[q.k]; let arr = byLayer.get(layer); if (!arr) { arr = []; byLayer.set(layer, arr); }
               const [A, B, C, D] = q.p, n = q.n;
               plate(arr, A, B, n); plate(arr, B, C, n); plate(arr, C, D, n); plate(arr, D, A, n);
-              const deckLike = q.k === "deck" || q.k === "dspec";
-              const wallLike = q.k === "std" || q.k === "top" || q.k === "fill";
+              const deckLike = q.k === "deck" || q.k === "dspec" || q.k === "bbot";
+              const wallLike = q.k === "std" || q.k === "top" || q.k === "fill" || q.k === "bside" || q.k === "col";
               if (!deckLike && !wallLike) continue;
               // ribs run parallel to the short side (deck) / horizontally (wall: parallel to A→B, the bottom edge)
               const ab = dist(A, B), bc = dist(B, C);

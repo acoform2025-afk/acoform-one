@@ -11,7 +11,7 @@ export function sceneOf(r: Ran, floorMm?: number): Scene3 | null {
     zoneWalls: r.inp.zoneWalls, zoneGaps: r.inp.zoneGaps, decks: r.inp.decks, zones: ck.zones, faces: r.result.faces, mpp: r.shell.mpp,
     floorHeight: floorMm ? floorMm / 1000 : Number(r.t.params.floorHeight) || 3, slabMm: Number(r.t.params.slabMm) || 150, stdHeight: r.opt.stdHeight, beamDepthMm: Number(r.t.params.beamDepthMm) || 600,
     cols: r.inp.zoneCols, beams3: r.inp.zoneBeam3, stairs: r.inp.zoneStairs, stairOrient: r.inp.zoneStairOrient,
-    stairGeo: r.inp.stairs, kickerMm: r.layoutRules?.kickerMm ?? 0, scMm: r.layoutRules ? [r.layoutRules.soffitCornerW, r.layoutRules.soffitCornerLeg] : undefined, icMm: r.layoutRules?.internalCorner, midBeamMm: r.layoutRules?.midBeam, ecMm: r.layoutRules?.externalCorner,
+    stairGeo: r.inp.stairs, kickerMm: r.layoutRules?.kickerMm ?? 0, scMm: r.layoutRules ? [r.layoutRules.soffitCornerW, r.layoutRules.soffitCornerLeg] : undefined, icMm: r.layoutRules?.internalCorner, midBeamMm: r.layoutRules?.midBeam, beamSideWidths: r.layoutRules?.wallWidths, ecMm: r.layoutRules?.externalCorner,
     openings: r.inp.zoneOpenings, arch: r.inp.zoneArch, stairLay: r.result.stairs, propSpacing: r.opt.propSpacing, tieH: r.layoutRules?.tieH, tieV: r.layoutRules?.tieV,
   });
   scene.issues = ck.check.issues.filter((i) => i.at).map((i) => ({ id: i.id, sev: i.sev, text: `${i.where}: ${i.detail}`, at: [Math.round(i.at![0] * 1000) / 1000, Math.round(i.at![1] * 1000) / 1000], y: i.z ?? scene.H }));
