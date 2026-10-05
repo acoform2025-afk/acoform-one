@@ -370,6 +370,16 @@ function outermost(paths: DxfPath[]) {
  * chained; a chain whose ends meet is closed. With `closeGaps` (columns), a 3-sided outline whose missing
  * side is no longer than its longest side is also closed — many drawings leave the last column side undrawn.
  */
+/** A revision cloud: a closed (or nearly closed) chain of many short arc segments, a few metres round at most. */
+export function isRevCloud(pts: Pt[], unitToM: number): boolean {
+  if (pts.length < 24) return false;
+  const segs: number[] = []; let per = 0;
+  for (let i = 1; i < pts.length; i++) { const L = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) * unitToM; segs.push(L); per += L; }
+  if (per > 12) return false;
+  const short = segs.filter((L) => L < 0.04).length;
+  return short >= 0.7 * segs.length;
+}
+
 export function closedLoops(paths: DxfPath[], tol: number, closeGaps = false): Pt[][] {
   const out: Pt[][] = [];
   const open: Pt[][] = [];
@@ -688,8 +698,12 @@ const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
 export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary } = {}): DxfAuto {
-  const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)));
   const u = unitToM, u2 = unitToM * unitToM;
+  // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
+  const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m] as [number, number, number, number]; });
+  const inCloud = (q: Pt) => clouds.some((b) => q[0] >= b[0] && q[0] <= b[2] && q[1] >= b[1] && q[1] <= b[3]);
+  const markup = (p: DxfPath) => clouds.length > 0 && (isRevCloud(p.pts, u) || (!p.closed && p.pts.length <= 3 && (inCloud(p.pts[0]) || inCloud(p.pts[p.pts.length - 1]))));
+  const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)) && !markup(p));
   const tol = 0.005 / u;                                      // 5 mm in drawing units
   const loops = (r: LayerRole, gaps = false) => closedLoops(of(r), tol, gaps).map((pts) => ({ layer: r, pts, closed: true }) as DxfPath);
 
@@ -704,7 +718,20 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   const colWalls = colAll.filter((c) => !c.isCol && c.area > 0.05).map((c) => c.p.pts);
 
   // walls: closed outlines merged (duplicates / overlaps once) → wall tops + face length; loose lines add their length
-  const wallPaths = of("walls");
+  // drawn outside the floor slab (a detail sketch or legend beside the plan) they are not walls of this floor
+  const slabEarly = outermost(loops("slab"));
+  let onFloor = (_pts: Pt[]) => true;
+  { const wp = of("walls");
+    if (slabEarly.length && wp.length) {
+      const xs = wp.flatMap((p) => p.pts.map((q) => q[0])), ys = wp.flatMap((p) => p.pts.map((q) => q[1]));
+      const wallBox = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+      if (slabEarly.reduce((s2, x) => s2 + x.a, 0) >= 0.25 * wallBox) {
+        const rings = slabEarly.map((x) => x.p.pts);
+        onFloor = (pts: Pt[]) => { const c: Pt = [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length]; return rings.some((r) => inside(c, r)) || nearRings(c, rings, 0.8 / u); };
+      }
+    } }
+  const wallPaths = of("walls").filter((p) => onFloor(p.pts));
+  for (const c of colAll) if (c.isCol && !onFloor(c.p.pts)) c.isCol = false;
   // walls drawn only as loose lines (no closed outlines): rebuild the outlines from pairs of parallel lines
   let openWallLen = 0, closedWallLen = 0;
   for (const p of wallPaths) { const L = polyLength(p.pts, p.closed); if (p.closed) closedWallLen += L; else openWallLen += L; }
@@ -749,7 +776,12 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     if (depth % 2 === 1 && areaW[i] * u2 >= 0.5) { wallHoles.push(poly); continue; }
     if (thinClosed(poly)) continue; (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
   }
-  for (const poly of paired?.strips ?? []) (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
+  for (const poly of paired?.strips ?? []) if (onFloor(poly)) (isParapet(poly) ? parapetPolys : wallPolys).push(poly);
+  // a column touching a wall (hidden column / 构造柱 at a wall end or junction) is part of that wall: it is formed with
+  // the wall panels and gets no column set of its own
+  { const wallRef = [...wallPolys, ...colWalls];
+    const touches = (pts: Pt[]) => pts.some((q) => nearRings(q, wallRef, 0.03 / u) || wallRef.some((w) => inside(q, w)));
+    for (const c of colAll) if (c.isCol && wallRef.length && touches(c.p.pts)) { c.isCol = false; colWalls.push(c.p.pts); } }
   const U = wallUnion([...wallPolys, ...colWalls], wallHoles);
   const UP = parapetPolys.length ? wallUnion(parapetPolys) : null;
   let looseLen = 0, unpairedLen = 0; const loose: Pt[][] = [];
@@ -886,7 +918,22 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       if (within && o2.area > o.area * 1.02) o = o2;
     }
     const outer = o.loops.filter((l) => polyArea(l) > 0);
-    if (outer.length) { slab = outer.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
+    // the floor is the biggest outline and the outlines touching it (wings, cores); "walls" standing more than a metre
+    // outside it (installation details, legends and sketches drawn beside the plan inside its region) are not walls of
+    // this floor, and an outline closed by such lines carries no wall: both are left out
+    const byArea = [...outer].sort((p1, p2) => Math.abs(polyArea(p2)) - Math.abs(polyArea(p1)));
+    const floor: Pt[][] = byArea.length ? [byArea[0]] : [];
+    for (let grew = true; grew;) { grew = false; for (const o2 of byArea) if (!floor.includes(o2) && o2.some((q) => nearRings(q, floor, 0.5 / u) || floor.some((f0) => inside(q, f0)))) { floor.push(o2); grew = true; } }
+    const onFloor2 = (r: Pt[]) => r.some((q) => floor.some((f0) => inside(q, f0)) || nearRings(q, floor, 1 / u));
+    if (floor.length && U.rings.some((r, i) => !U.isHole?.[i] && !onFloor2(r))) {
+      const keepR = U.rings.map((r, i) => !!U.isHole?.[i] || onFloor2(r));
+      U.rings = U.rings.filter((_, i) => keepR[i]); if (U.isHole) U.isHole = U.isHole.filter((_, i) => keepR[i]);
+      U.area = U.rings.reduce((s2, r, i) => s2 + (U.isHole?.[i] ? -1 : 1) * Math.abs(polyArea(r)), 0); U.perimeter = U.rings.reduce((s2, r) => s2 + polyLength(r, true), 0);
+    }
+    const walled = (pts: Pt[]) => U.rings.some((r, i) => !U.isHole?.[i] && r.some((q) => inside(q, pts) || nearRings(q, [pts], 0.1 / u)));
+    const kept = outer.filter((pts) => walled(pts) && Math.abs(polyArea(pts)) * u2 >= 1);
+    const use = kept.length ? kept : outer;
+    if (use.length) { slab = use.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
   }
 
   // beam faces: each long side of the clear part of a beam is
@@ -1044,6 +1091,23 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
           });
         }
       }
+      // a stair drawn only as a labelled room ("楼梯 另详" — flights detailed on another sheet; "LT1", "ST-1", "TB2/D/180"
+      // stair slab labels): the walled space round the label is the staircase, with no measured flights
+      {
+        const lab = (model.texts ?? []).filter((t) => (!keep || keep({ pts: [[t.x, t.y]], layer: t.layer ?? "", closed: false } as DxfPath)) && meaningOf(t.text, opts.dict)?.key === "stair" && !/^(up|dn)$/i.test(t.text.trim()));
+        for (const t of lab) {
+          if (s.some((b) => t.x >= b[0] && t.x <= b[2] && t.y >= b[1] && t.y <= b[3])) continue;
+          // the stairwell is closed by walls, and on its open side often only by a beam or the slab edge
+          const stBounds = [...loose, ...beamRings.map((r) => [...r, r[0]]), ...looseBeam.map((p) => p.pts), ...slab.map((x) => [...x.p.pts, x.p.pts[0]])];
+          const sp2 = U.rings.length ? labelledSpaces(U.rings, stBounds, [[t.x, t.y]], u, 60, 0.3)[0] : undefined;
+          if (!sp2 || sp2.area < 5 || sp2.area > 45) continue;
+          const w = (sp2.box[2] - sp2.box[0]) * u, h = (sp2.box[3] - sp2.box[1]) * u;
+          if (Math.min(w, h) < 1.8 || Math.max(w, h) < 3.5 || Math.max(w, h) > 9) continue;
+          s.push(sp2.box);
+        }
+      }
+      // a "stair" outside the floor slab (a detail sketch beside the plan) is not a staircase of this floor
+      if (slab.length) s = s.filter((b) => { const c: Pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; return slab.some((x) => inside(c, x.p.pts)); });
       const meas = measureStairs(src, s, u);
       // the stairwell is the flights AND the mid-landing: the climb runs across the tread lines; the landing is at the
       // end away from the "UP" / "DN" arrows (both sit at the floor end of a dog-leg stair). A box that holds only the

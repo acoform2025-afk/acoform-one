@@ -19,7 +19,7 @@ export const CONCEPTS: Concept[] = [
   { key: "cutout", label: "Cut-out / void", group: "opening", words: ["mm cut", "cut", "cut out", "cutout", "c/o", "void", "opening", "open below", "slab cut out", "slab opening", "double height", "dbl ht", "洞口", "预留洞"] },
   { key: "ots", label: "Open to sky", group: "opening", words: ["ots", "o t s", "open to sky", "open terrace", "light well", "lightwell"] },
   // ---- stairs / ramps ----
-  { key: "stair", label: "Staircase", group: "circulation", words: ["stair", "stairs", "staircase", "stair case", "fire stair", "fire escape", "escape stair", "stairwell", "楼梯"], re: /^(up|dn)$/ },
+  { key: "stair", label: "Staircase", group: "circulation", words: ["stair", "stairs", "staircase", "stair case", "fire stair", "fire escape", "escape stair", "stairwell", "楼梯", "楼梯间", "疏散楼梯", "剪刀梯"], re: /^(up|dn)$|^(\d+ )?lt\d*$|^st ?\d+$|^tb\d*( [a-z0-9]+)*$/ },     // LT1 / 3-LT1 (楼梯 number), TB2/D/180 (梯板 stair slab label)
   { key: "ramp", label: "Ramp", group: "circulation", words: ["ramp", "ramp up", "ramp down", "坡道"] },
   // ---- levels of the building ----
   { key: "basement", label: "Basement", group: "level", words: ["basement", "basemet", "bsmt", "cellar", "lower ground", "lg", "lgf", "地下室"] },

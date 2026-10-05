@@ -160,19 +160,39 @@ export function buildScene3(o: {
   // external kicker along the slab edge (outside face of the slab, above the wall panels)
   const kick = (o.kickerMm ?? 0) / 1000;
   if (kick > 0) for (const poly of slabM) { const r = poly[0]; for (let i = 0; i < r.length - 1; i++) { const a = r[i], b = r[i + 1]; panels.push({ p: [[a[0], H, a[1]], [b[0], H, b[1]], [b[0], H + slab + kick, b[1]], [a[0], H + slab + kick, a[1]]], k: "kick", c: `kicker ${o.kickerMm} mm` }); } }
-  // beams drawn on a beam layer: side panels on every edge of the beam outline (rails outwards), bottom panel under it
+  // beams drawn on a beam layer: side panels along every edge of the beam outline in standard widths (rails outwards),
+  // bottom panels in standard lengths under it, made-to-size pieces where the run does not fill
+  const bsW = (o.beamSideWidths ?? [600, 500, 450, 400, 300, 250, 200, 150, 100]).filter((w) => w > 0);
+  const bbL = [1200, 1050, 900, 600, 300];
   for (const b3 of o.beams3 ?? []) {
     const d = Math.max(slab, b3.d / 1000), h = d - slab; if (h <= 0.01 || b3.ring.length < 3) continue;
     const r = b3.ring, cx = r.reduce((x, q) => x + q[0], 0) / r.length, cy = r.reduce((x, q) => x + q[1], 0) / r.length;
+    const hMm = Math.round(h * 1000);
     for (let i = 0; i < r.length; i++) {
       const a = r[i], b = r[(i + 1) % r.length]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 0.15) continue;
       let nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L;             // outward: away from the beam's middle
       if (((a[0] + b[0]) / 2 - cx) * nx + ((a[1] + b[1]) / 2 - cy) * ny < 0) { nx = -nx; ny = -ny; }
-      panels.push({ p: [[a[0], H - h, a[1]], [b[0], H - h, b[1]], [b[0], H, b[1]], [a[0], H, a[1]]], k: "bside", c: `beam ${Math.round(b3.d)} deep · side panel BS ${Math.round(h * 1000)} × ${Math.round(L * 1000)} — soffit corner above, pinned to the beam bottom rail below`, n: [nx, 0, ny] });
+      const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L;
+      const run = fillRun(Math.round(L * 1000), bsW);
+      const pieces = [...run.panels.map((w) => ({ w, custom: false })), ...(run.left > 20 ? [{ w: run.left, custom: true }] : [])];
+      let t = 0;
+      for (const pc of pieces) {
+        const p0: Pt = [a[0] + ux * t, a[1] + uy * t]; t += pc.w / 1000; const p1: Pt = [a[0] + ux * Math.min(L, t), a[1] + uy * Math.min(L, t)];
+        panels.push({ p: [[p0[0], H - h, p0[1]], [p1[0], H - h, p1[1]], [p1[0], H, p1[1]], [p0[0], H, p0[1]]], k: "bside", c: `beam ${Math.round(b3.d)} deep · beam side panel BS ${hMm} × ${pc.w}${pc.custom ? " (made to size)" : ""} — soffit corner above, pinned to the beam bottom rail below`, n: [nx, 0, ny] });
+      }
     }
-    // bottom: the ring as a rectangle (beams are narrow strips)
+    // bottom: the ring as a rectangle (beams are narrow strips), split along its length into standard bottom panels
     const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]);
-    panels.push({ p: [[Math.min(...xs), H - h, Math.min(...ys)], [Math.max(...xs), H - h, Math.min(...ys)], [Math.max(...xs), H - h, Math.max(...ys)], [Math.min(...xs), H - h, Math.max(...ys)]], k: "bbot", c: `beam ${Math.round(b3.d)} deep · bottom panel BB — on beam prop heads`, n: [0, -1, 0] });
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), alongX = x1 - x0 >= y1 - y0;
+    const Lb = alongX ? x1 - x0 : y1 - y0, wb = Math.round((alongX ? y1 - y0 : x1 - x0) * 1000);
+    const runB = fillRun(Math.round(Lb * 1000), bbL);
+    const piecesB = [...runB.panels.map((w) => ({ w, custom: false })), ...(runB.left > 20 ? [{ w: runB.left, custom: true }] : [])];
+    let tb = 0;
+    for (const pc of piecesB) {
+      const s0 = tb, s1 = Math.min(Lb, tb + pc.w / 1000); tb = s1;
+      const q = alongX ? [[x0 + s0, y0], [x0 + s1, y0], [x0 + s1, y1], [x0 + s0, y1]] : [[x0, y0 + s0], [x1, y0 + s0], [x1, y0 + s1], [x0, y0 + s1]];
+      panels.push({ p: q.map((v) => [v[0], H - h, v[1]] as [number, number, number]), k: "bbot", c: `beam ${Math.round(b3.d)} deep · beam bottom panel BB ${wb} × ${pc.w}${pc.custom ? " (made to size)" : ""} — pinned to both side panels, on beam prop heads`, n: [0, -1, 0] });
+    }
   }
   // lintel beams over the door / window gaps in the walls (no beam layer): the beam side panel on each face continues
   // the wall face above the opening — pinned to the wall panels at both ends and to the soffit corner on top; the beam

@@ -43,6 +43,8 @@ export function suggestLayerRole(name: string): Role {
   // Chinese formwork design drawings: layers that hold the formwork parts themselves (wall panels, corners, kickers,
   // foot boards, walers, prop heads, corner angles, beam side / bottom panels, cover plates) are not concrete
   if (/模板|转角|起脚|背楞|撑头|角铝|旁板|梁底板|盖板|方管|方通|拉片|贴片|配模|吊模|锯齿板|封边板|挡板/.test(n)) return "ignore";
+  // mark-up layers: revision clouds, drawing issues / suggestions, review notes
+  if (/云线|问题|建议|修改|审图|revcloud|cloud|markup|mark-up|review|comment/i.test(n)) return "ignore";
   // Chinese: block / brick walls are not cast (unless "changed to cast-in-place" 改现浇)
   if (/砌块|砖/.test(n) && !/现浇/.test(n)) return "ignore";
   if (/shaft|cut-?out|opening|(^|-)duct|(^|-)lift|stair-?open|洞|管井|风井|电梯井/.test(n)) return "opening";

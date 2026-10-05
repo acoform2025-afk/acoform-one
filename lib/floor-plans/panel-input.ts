@@ -5,7 +5,7 @@
 import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals, autoStairRows } from "./calc";
 import { isRailLayer } from "./layer-rules";
-import { closedLoops, dxfAuto, dxfFrame, separateAreas, type DxfModel } from "./dxf";
+import { closedLoops, drawingParts, dxfAuto, dxfFrame, separateAreas, type DxfModel } from "./dxf";
 import { nearRings, wallUnion } from "./geom";
 import { buildShell } from "./shell";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
@@ -35,7 +35,18 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   let frame: ReturnType<typeof dxfFrame> | null = null;
   if (model && t.dxf) {
     const f = dxfFrame(model, 2400); frame = f; const reg = t.dxf.region;
-    const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
+    // small detail sketches / legends / sections drawn inside the plan region (installation details beside the plan)
+    // are their own drawings — the plan is read without them
+    let details: [number, number, number, number][] = [];
+    if (reg) {
+      try {
+        const regA = (reg[2] - reg[0]) * (reg[3] - reg[1]);
+        details = drawingParts(model, UNIT_TO_M[t.dxf.units], t.dxf.layerRoles).filter((d) => d.kind !== "plan").map((d) => { const a = f.toPx([d.box[0], d.box[1]]), b = f.toPx([d.box[2], d.box[3]]); return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] as [number, number, number, number]; })
+          .filter((b) => b[0] >= reg[0] - 2 && b[1] >= reg[1] - 2 && b[2] <= reg[2] + 2 && b[3] <= reg[3] + 2 && (b[2] - b[0]) * (b[3] - b[1]) < 0.15 * regA);
+      } catch { details = []; }
+    }
+    const inDetail = (x: number, y: number) => details.some((b) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]);
+    const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3] && !inDetail(x, y); }) : undefined;
     auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0 });
     // architecture around the formwork, for the 3D model only: balcony railings, parapet walls, sunshades / projections
     const roles = t.dxf.layerRoles ?? {};
@@ -212,10 +223,15 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     // the staircase well (flights + mid landing) is not decked: the stair has its own formwork
     ...(frame ? (auto?.stairBoxes ?? []).map((bx): Pt[] => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); const x0 = Math.min(p[0], q[0]), y0 = Math.min(p[1], q[1]), x1 = Math.max(p[0], q[0]), y1 = Math.max(p[1], q[1]); return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]; }).filter((r) => (r[1][0] - r[0][0]) >= 1.5 && (r[2][1] - r[1][1]) >= 1.5) : []),
   ];
+  const sw: DeckPoly[] = auto?.slabFromWalls ? fromAuto(auto.slabLoops).map((pts, i) => ({ code: `SW${i + 1}`, pts, holes })) : [];
+  // closed loops on the slab layers: a loop under 1 m², or one outside the floor outline when that outline came from the
+  // walls (label boxes, detail sketches beside the plan), is not a slab
+  const slabLoopsM = closedLoops((g.dxf.slab ?? []).map((l) => ({ layer: "s", ...l })), tolPx).filter((pts) => pts.length > 2).map((pts) => pts.map(toM))
+    .filter((pts) => Math.abs(polyArea(pts)) >= 1 && (!sw.length || pts.some((q) => sw.some((d) => inRingsM(q, [d.pts])))));
   const decks: DeckPoly[] = [
-    ...(auto?.slabFromWalls ? fromAuto(auto.slabLoops).map((pts, i) => ({ code: `SW${i + 1}`, pts, holes })) : []),
+    ...sw,
     ...g.shapes.filter((s) => s.kind === "slab").map((s) => ({ code: s.code, pts: s.pts.map(toM), holes })),
-    ...closedLoops((g.dxf.slab ?? []).map((l) => ({ layer: "s", ...l })), tolPx).filter((pts) => pts.length > 2).map((pts, i) => ({ code: `SL${i + 1}`, pts: pts.map(toM), holes })),
+    ...slabLoopsM.map((pts, i) => ({ code: `SL${i + 1}`, pts, holes })),
   ];
 
   // beams
