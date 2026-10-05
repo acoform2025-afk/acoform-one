@@ -84,7 +84,8 @@ export function assemblyModel(scene: Scene3, o: { codes?: Partial<CodeFor>; stdH
   if (acc) {
     for (const h of acc.heads) { const kind = h[3]; items.push({ fam: kind === 1 ? "beam" : kind === 2 ? "stair" : "deck", k: "head", code: kind === 1 ? cf.beamHead : kind === 2 ? cf.stairHead : cf.head, shape: "dot", a: [h[0], h[2]], b: [h[0], h[2]] }); }
     for (const w of acc.walers) if (Math.abs(w[1] - 0.6) < 0.05) items.push({ fam: "waler", k: "waler", code: `WL-${mm(Math.hypot(w[3] - w[0], w[4] - w[2]))}`, shape: "line", a: [w[0], w[2]], b: [w[3], w[4]] });
-    for (const t of acc.ties) if (t[1] < 0.35) items.push({ fam: "waler", k: "tie", code: "TIE", shape: "dot", a: [t[0], t[2]], b: [t[0], t[2]] });
+    // ties: drawn once per tie as a short line through the wall (lowest row stands for the rows above)
+    for (const t of acc.ties) if (t[1] < 0.35 && t[5]) items.push({ fam: "waler", k: "tie", code: "TIE", shape: "line", a: [t[0], t[2]], b: [t[0] - t[3] * t[5], t[2] - t[4] * t[5]] });
   }
   const stairs: Pt[][] = (scene.stairSolids ?? []).map((s) => {
     const s0 = Math.min(...s.prof.map((q) => q[0])), s1 = Math.max(...s.prof.map((q) => q[0]));

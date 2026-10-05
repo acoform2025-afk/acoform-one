@@ -29,7 +29,7 @@ export type Scene3 = {
 /** Accessories, each as a straight piece between two points (x, y, z; metres) — drawn as a rod / tube of its kind. */
 export type Acc3 = {
   props: [number, number, number, number, number][];    // x, z, bottom y, top y, kind (0 deck · 1 beam · 2 stair)
-  ties: [number, number, number, number, number][];     // x, y, z, normal x, normal z (tie end on a wall face)
+  ties: [number, number, number, number, number, number?][];   // x, y, z, normal x, normal z (tie end on a wall face); 6th = wall thickness it passes through (on the tie's first face only)
   walers: [number, number, number, number, number][];   // x0, y, z0, x1, z1
   pushPull: [number, number, number, number, number, number][];   // wall point x, y, z → floor point x, 0, z
   brackets: [number, number, number][];                 // riser brackets
@@ -401,31 +401,48 @@ export function buildScene3(o: {
     const L = along ? x1 - x0 : y1 - y0, n = Math.max(1, Math.ceil(L / 1.2));
     for (let i = 0; i <= n; i++) { const t = 0.1 + (i * (L - 0.2)) / n; addProp(along ? x0 + t : (x0 + x1) / 2, along ? (y0 + y1) / 2 : y0 + t, H - h - 0.005, 1); }
   }
-  // wall faces: ties at the panel joints in rows, walers (2 rows) and push-pull props on one face of each wall
+  // wall ties go THROUGH the wall: at the panel joints of one face, in rows up the wall, with their other end on the
+  // opposite face (same position). Walers (2 rows) on both faces; push-pull props on one face of each wall.
   const tH = (o.tieH ?? 800) / 1000, tV = (o.tieV ?? 800) / 1000;
   for (const f of o.faces) {
     if (!f.geo || !(mpp > 0) || f.set === "column") continue;
     const { a: A, b: B, off } = f.geo;
     const dx = B[0] - A[0], dy = B[1] - A[1], Lp = Math.hypot(dx, dy); if (!Lp) continue;
-    const ux = dx / Lp, uy = dy / Lp; let nx = -uy, ny = ux; const s2 = off < 0 ? -1 : 1;
+    const ux = dx / Lp, uy = dy / Lp; let nx = -uy, ny = ux;
     const a: Pt = [A[0] * mpp + nx * (off * mpp), A[1] * mpp + ny * (off * mpp)], L = Lp * mpp;
     // the face looks away from its wall: the side where the wall is not
     const probe: Pt = [a[0] + ux * L / 2 + nx * 0.03, a[1] + uy * L / 2 + ny * 0.03];
     if (inRings(probe, o.zoneWalls)) { nx = -nx; ny = -ny; }
-    void s2;
     const hF = Math.min(H, f.height / 1000);
-    const nT = Math.max(1, Math.ceil(L / tH)), rows = Math.max(1, Math.floor(hF / tV));
-    for (let i = 0; i < nT; i++) {
-      const t = ((i + 0.5) * L) / nT;
-      for (let j = 0; j < rows; j++) acc.ties.push([a[0] + ux * t, Math.min(hF - 0.2, 0.3 + j * tV), a[1] + uy * t, nx, ny]);
-    }
-    // one face of each wall carries the walers / push-pull props (the face looking +x, or +y when square to it)
+    // one face of each wall carries the ties (the face looking +x, or +y when square to it); the other gets their far ends
     const pick = nx > 0.01 || (Math.abs(nx) <= 0.01 && ny > 0);
-    if (pick && L >= 0.6) {
+    if (pick) {
+      // wall thickness behind this face (probe into the wall, up to 600 mm)
+      const mx = a[0] + ux * L / 2, my = a[1] + uy * L / 2;
+      let thk = 0; for (let d = 0.02; d <= 0.6; d += 0.01) { if (!inRings([mx - nx * d, my - ny * d], o.zoneWalls)) break; thk = d; }
+      if (thk < 0.05) thk = 0.2;
+      const rows = Math.max(1, Math.floor(hF / tV));
+      // tie positions along the wall: at the joints between the wall panels (ties pass through the panel edge ribs),
+      // else at the tie spacing
+      const pos: number[] = [];
+      if (f.panels.length > 1) { let run = 0; for (let i = 0; i < f.panels.length - 1; i++) { run += f.panels[i] / 1000; pos.push(run); } if (f.filler) pos.push(run + f.panels[f.panels.length - 1] / 1000); }
+      else { const nT = Math.max(1, Math.ceil(L / tH)); for (let i = 0; i < nT; i++) pos.push(((i + 0.5) * L) / nT); }
+      for (const t of pos) {
+        if (t > L - 0.03) continue;
+        for (let j = 0; j < rows; j++) {
+          const y = Math.min(hF - 0.2, 0.3 + j * tV), x = a[0] + ux * t, z = a[1] + uy * t;
+          acc.ties.push([x, y, z, nx, ny, thk]);                                        // this face, with the wall thickness
+          acc.ties.push([x - nx * thk, y, z - ny * thk, -nx, -ny]);                     // its far end on the opposite face
+        }
+      }
+    }
+    if (L >= 0.6) {
       const o2 = 0.09;
       for (const y of [0.6, Math.max(1.2, hF - 0.7)]) acc.walers.push([a[0] + nx * o2, y, a[1] + ny * o2, a[0] + ux * L + nx * o2, a[1] + uy * L + ny * o2]);
-      const nP = Math.floor(L / 3);
-      for (let i = 1; i <= nP; i++) { const t = (i * L) / (nP + 1), wx = a[0] + ux * t + nx * o2, wz = a[1] + uy * t + ny * o2; acc.pushPull.push([wx, Math.min(2.1, hF - 0.4), wz, wx + nx * 1.6, wz + ny * 1.6, 0]); }
+      if (pick) {
+        const nP = Math.floor(L / 3);
+        for (let i = 1; i <= nP; i++) { const t = (i * L) / (nP + 1), wx = a[0] + ux * t + nx * o2, wz = a[1] + uy * t + ny * o2; acc.pushPull.push([wx, Math.min(2.1, hF - 0.4), wz, wx + nx * 1.6, wz + ny * 1.6, 0]); }
+      }
     }
   }
   const xs: number[] = [], ys: number[] = [];
@@ -440,7 +457,7 @@ export function buildScene3(o: {
     cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps, stairSolids,
     panels, mb: o.zones.flatMap((z) => z.mb), keel: { w: (o.midBeamMm ?? 150) / 1000, d: 0.1 }, zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
     stats: { wall: wallN, deck: deckN, special },
-    acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map(r3) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map((x) => r3(x ?? 0)) as Acc3["heads"][number]) },
+    acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map((x) => (x === undefined ? x : r3(x))) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map((x) => r3(x ?? 0)) as Acc3["heads"][number]) },
     arch: (o.arch ?? []).map((x) => ({ k: x.k, ...(x.a ? { a: [r3(x.a[0]), r3(x.a[1])] as Pt } : {}), ...(x.b ? { b: [r3(x.b[0]), r3(x.b[1])] as Pt } : {}), ...(x.ring ? { ring: x.ring.map((q) => [r3(q[0]), r3(q[1])] as Pt) } : {}) })),
     wallBits, glass: glass.map((g) => ({ ...g, p: g.p.map((v) => [r3(v[0]), r3(v[1]), r3(v[2])]) as [number, number, number][] })),
   };

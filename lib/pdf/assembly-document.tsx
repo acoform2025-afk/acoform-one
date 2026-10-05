@@ -115,12 +115,12 @@ function LinesDots({ items, k, width, labels }: { items: AsmItem[]; k: K; width:
   return (
     <G>
       {items.filter((it) => it.shape === "line").map((it, i) => {
-        const L = Math.hypot(it.b[0] - it.a[0], it.b[1] - it.a[1]), sw = Math.max(width, k.lw(1)), thick = sw * k.sc >= 6;
+        const L = Math.hypot(it.b[0] - it.a[0], it.b[1] - it.a[1]), sw = it.k === "tie" ? k.lw(1.3) : Math.max(width, k.lw(1)), thick = sw * k.sc >= 6;
         const px = -(it.b[1] - it.a[1]) / L, py = (it.b[0] - it.a[0]) / L, off = thick ? 0 : sw / 2 + fs * 0.7;
         return (
           <G key={`l${i}`}>
-            <Line x1={it.a[0]} y1={it.a[1]} x2={it.b[0]} y2={it.b[1]} stroke={fillOf(it.k)} strokeWidth={sw} strokeOpacity={0.75} />
-            {labels && L > 0.45 ? <Lbl at={[(it.a[0] + it.b[0]) / 2 + px * off, (it.a[1] + it.b[1]) / 2 + py * off]} deg={ang(it.a, it.b)} fs={thick ? Math.min(fs, sw * 0.8) : fs * 0.85} text={it.code} color={thick ? "#ffffff" : "#9a3412"} /> : null}
+            <Line x1={it.a[0]} y1={it.a[1]} x2={it.b[0]} y2={it.b[1]} stroke={fillOf(it.k)} strokeWidth={sw} strokeOpacity={it.k === "tie" ? 1 : 0.75} />
+            {labels && L > 0.45 && it.k !== "tie" ? <Lbl at={[(it.a[0] + it.b[0]) / 2 + px * off, (it.a[1] + it.b[1]) / 2 + py * off]} deg={ang(it.a, it.b)} fs={thick ? Math.min(fs, sw * 0.8) : fs * 0.85} text={it.code} color={thick ? "#ffffff" : "#9a3412"} /> : null}
           </G>
         );
       })}
@@ -209,7 +209,7 @@ const SHEETS: { no: string; fam: AsmFamily | "base"; t: string; sub: string; leg
   { no: "2", fam: "corner", t: "CORNERS, SOFFIT CORNERS & KICKERS", sub: "Internal corners (green) and external corners (red) at every wall corner, soffit corner along the top of every face (cyan), kicker along the slab edge (brown).", legend: [["ic", "internal corner"], ["ec", "external corner"], ["sc", "soffit corner"], ["kick", "kicker"]], minSc: 44 },
   { no: "3", fam: "beam", t: "BEAM SIDE & BOTTOM PANELS", sub: "Beam side panels on both faces of every beam (pink strips, code BS-height-width) and beam bottom panels (code BB-width-length) on beam prop heads (red dots).", legend: [["bside", "beam side panel"], ["bbot", "beam bottom panel"], ["head", "beam prop head"]], minSc: 48 },
   { no: "4", fam: "deck", t: "DECK PANELS, KEELS & PROP HEADS", sub: "Deck panels zone by zone with their codes (red = made-to-size pieces), keels / mid beams between the rows (blue, code with length) and prop heads in the keel line (red dots).", legend: [["deck", "deck panel"], ["dspec", "special deck"], ["keel", "keel / mid beam"], ["head", "prop head"]], minSc: 52 },
-  { no: "5", fam: "waler", t: "WALERS & TIES", sub: "Waler (back stiffener) rows along the wall faces with their lengths and the tie positions of the lowest row — the rows above repeat at the tie spacing of the layout rules.", legend: [["waler", "waler"], ["tie", "tie"]], minSc: 40 },
+  { no: "5", fam: "waler", t: "WALERS & TIES", sub: "Walers (back stiffeners) on both faces of every wall with their lengths; wall ties drawn through the wall at the panel joints (the lowest row shown — the rows above repeat at the row spacing of the layout rules).", legend: [["waler", "waler (both faces)"], ["tie", "wall tie through the wall"]], minSc: 40 },
   { no: "6", fam: "stair", t: "STAIRCASE FORMWORK", sub: "Each stair at a large scale: flight soffit panels, side (cheek) panels, prop strips, special wall panels cut to the slope, stop panel and C-channel; step covers and nosing angles are listed in the stair sheet.", legend: [["stair", "flight / landing soffit"], ["cheek", "cheek panel"], ["cpp", "prop strip"], ["tz", "special wall panel"], ["stp", "stop panel / C-channel"], ["riser", "riser"], ["head", "stair prop head"]], minSc: 0 },
 ];
 
