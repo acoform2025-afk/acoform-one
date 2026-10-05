@@ -15,7 +15,7 @@ const ROLE_LABEL: Record<LayerRole, string> = { ignore: "Not counted", walls: "W
 const ROLE_COL: Record<LayerRole, string> = { ignore: "#59606b", walls: "#4f8cff", columns: "#22c3a6", slab: "#e8b04a", opening: "#b06cf0", beams: "#ff8a3d", upstand: "#f25f8a" };
 const KIND_TXT: Record<string, string> = { plan: "Floor plan", section: "Section", elevation: "Elevation", site: "Site plan", detail: "Detail / table", other: "Other" };
 const MARK_COL: Record<string, string> = { lift: "#b06cf0", duct: "#ff8a3d", cutout: "#f25f8a", ots: "#f25f8a", stair: "#3ccf6e", ramp: "#3ccf6e" };
-const GROUP_LABEL: Record<string, string> = { opening: "Openings in the slab", circulation: "Stairs / ramps", level: "Levels", room: "Rooms", structure: "Structure", "door-window": "Doors / windows", annotation: "Titles, notes, site", services: "Services", ignore: "Not needed" };
+const GROUP_LABEL: Record<string, string> = { opening: "Openings in the slab", circulation: "Stairs / ramps", level: "Levels", room: "Rooms", structure: "Structure", "door-window": "Doors / windows", annotation: "Titles, notes, site", services: "Services", formwork: "Formwork parts (design drawings)", ignore: "Not needed" };
 const SHOWN_FOUND = ["lift", "duct", "cutout", "ots", "stair", "ramp", "toilet", "kitchen", "balcony", "utility", "bedroom", "living", "lobby"];
 
 type Props = { planId: string; planName: string; fileUrl: string; indexPath: string; dict: Dictionary; canEdit: boolean; roles: Record<string, LayerRole>; units?: string; said: { floors?: number; floorMm?: number; slabMm?: number } };
@@ -258,7 +258,9 @@ function PartCard({ p, ix, model }: { p: IndexPart; ix: DrawingIndex; model: Dxf
     for (const l of p.labels) { const col = MARK_COL[l.key]; if (!col) continue; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(l.x), Y(l.y), 3, 0, Math.PI * 2); ctx.fill(); }
   }, [p, model, roleOf]);
   const lvl = p.kind === "plan" && p.level.kind !== "other" ? `${KIND_LABEL[p.level.kind]}${p.level.nos.length ? ` ${p.level.nos.length > 1 ? `${p.level.nos[0]}–${p.level.nos[p.level.nos.length - 1]}` : p.level.nos[0]}` : ""}${p.level.typical ? " (typical)" : ""}` : null;
-  const chips = SHOWN_FOUND.filter((k) => p.found[k]).map((k) => `${p.found[k]} ${CONCEPT_BY_KEY.get(k)?.label.split(" /")[0].toLowerCase()}`);
+  // formwork design drawings (a Chinese assembly diagram, a production drawing): the parts counted on the sheet
+  const fwKeys = Object.keys(p.found).filter((k) => k.startsWith("fw-") && k !== "fw-sheet").sort((a, b) => p.found[b] - p.found[a]);
+  const chips = [...SHOWN_FOUND.filter((k) => p.found[k]).map((k) => `${p.found[k]} ${CONCEPT_BY_KEY.get(k)?.label.split(" /")[0].toLowerCase()}`), ...fwKeys.map((k) => `${p.found[k]} ${CONCEPT_BY_KEY.get(k)?.label ?? k}`)];
   return (
     <div className="rounded-md border border-graphite-800 bg-graphite-900/50 p-2">
       <div className="flex items-start justify-between gap-2">

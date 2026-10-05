@@ -67,12 +67,12 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
   },
   flattie: {
     label: "Flat-tie system · full-height panel",
-    note: "Chinese practice (e.g. Guangzhou Motian): one full-height wall panel on a 40–50 mm bottom strip, widths in 50 mm steps up to 500, flat ties, 100 mm mid beam, 100 × 200 support heads, 200 mm external kicker, props kept for 3 floors, 10 % loss on small parts.",
+    note: "Chinese practice (Guangzhou Motian, Poly Linyu 3# package): full-height wall panels Q (2700 outside, 2600 + 40/50 foot board R inside), widths in 50 mm steps up to 500, flat ties, keel ZL 100 × 1000 + end keels DL, prop heads PH 100 × 200, slab corner C 100 × 150, internal corner QZ 150 × 150, external K-board 200, beam side L / bottom LD / corner E, walers FT in 4 rows, props kept for 3 floors, 10 % loss on small parts.",
     rules: {
       system: "flattie", wallWidths: range(100, 500, 50), stdHeight: 2700, fullHeight: true, bottomStrip: 40, minFiller: 100,
-      internalCorner: 100, internalCornerLeg: 100, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 200, tie: "flat", tieH: 450, tieV: 600,
-      deckWidths: range(100, 600, 50), deckLengths: [1200, 1100, 900, 800], midBeam: 100, propHead: [100, 200],
-      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 100, beamCapLeg: 100, bothLegs: true, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, stairStyle: "india", lossPct: 10, sparePct: {},
+      internalCorner: 150, internalCornerLeg: 150, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 200, tie: "flat", tieH: 450, tieV: 600,
+      deckWidths: range(100, 600, 50), deckLengths: [1200, 1100, 900, 800, 600], midBeam: 100, propHead: [100, 200],
+      soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 150, beamCapLeg: 150, bothLegs: true, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, stairStyle: "china", lossPct: 10, sparePct: {},
     },
   },
   acoform: {

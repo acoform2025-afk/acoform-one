@@ -40,6 +40,9 @@ export function suggestLayerRole(name: string): Role {
   const n = normLayer(name.includes("$0$") ? name.slice(name.lastIndexOf("$0$") + 3) : name);
   // never formwork geometry: annotation, sheet furniture, sections / elevations, steel, sleeves, projections …
   if (/parapet|compound|hatch|elev(?!ational)|(^|-)elv|sec(tion)?(-|$)|text|txt|(^|-)dim|furn|door|win(dow)?(-|$)|grid|axis|template|title|border|frame|table|legend|name-?plate|nmplt|revision|slab-?thk|thk-text|projection|leader|steel|reinf|sleeve|(^|-)level|symbol|note|defpoints|drip|mould|企口|文字|标注|轴|图框|说明|标高|门|窗|填充|索引|修改|问题|钢筋|信息|分界/.test(n)) return "ignore";
+  // Chinese formwork design drawings: layers that hold the formwork parts themselves (wall panels, corners, kickers,
+  // foot boards, walers, prop heads, corner angles, beam side / bottom panels, cover plates) are not concrete
+  if (/模板|转角|起脚|背楞|撑头|角铝|旁板|梁底板|盖板|方管|方通|拉片|贴片|配模|吊模|锯齿板|封边板|挡板/.test(n)) return "ignore";
   // Chinese: block / brick walls are not cast (unless "changed to cast-in-place" 改现浇)
   if (/砌块|砖/.test(n) && !/现浇/.test(n)) return "ignore";
   if (/shaft|cut-?out|opening|(^|-)duct|(^|-)lift|stair-?open|洞|管井|风井|电梯井/.test(n)) return "opening";

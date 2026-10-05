@@ -1141,16 +1141,16 @@ function floorsFromTitle(t: string): number | undefined {
 }
 /** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
 /** Words a drawing title has ("… FLOOR PLAN", "SECTION A-A", "4BHK UNIT", "AREA TABLE") — whole words, so "DRAWING ROOM" is not a "wing". */
-const TITLE_WORDS = /plans?\b|\bsections?\b|\belevations?\b|\blayout\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\bunit\b|\bbhk\b|\barea (table|statement)\b|\bschedule\b|平面图|剖面|立面图|深化图|大样/i;
+const TITLE_WORDS = /plans?\b|\bsections?\b|\belevations?\b|\blayout\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\bunit\b|\bbhk\b|\barea (table|statement)\b|\bschedule\b|平面图|剖面|立面图|深化图|大样|配模图|布置图|放线图|贴片尺寸|背楞|墙板|飘板|清单/i;
 /** Long notes / title-block lines that mention a plan but are not a title. */
 const NOT_TITLE = /^(disclaimer|notes?\b|general notes|e\s*:|email|date\b|for (review|approval|construction)|proposed\b.*\bscheme\b)/i;
 function titleFor(texts: DxfText[], box: [number, number, number, number], others: number[][] = []): string | undefined {
   const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
   const inOther = (t: DxfText) => others.some((o) => t.x > o[0] && t.x < o[2] && t.y > o[1] && t.y < o[3] && !(t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1));
-  const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.25 && t.y <= y1 + h * 0.25 && !inOther(t))
+  const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.4 && t.y <= y1 + h * 0.25 && !inOther(t))
     .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
     .filter((t) => TITLE_WORDS.test(t.text) && (!/\b(lvl|level|slab|beam)\b/i.test(t.text) || /plans?\b|\bunit\b|bhk/i.test(t.text)) && !NOT_TITLE.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
-  const pri = (x: string) => (/plan|section|elevation|layout|平面图|剖面|立面图|深化图/i.test(x) ? 1 : 0);
+  const pri = (x: string) => (/plan|section|elevation|layout|平面图|剖面|立面图|深化图|配模图|布置图|放线图/i.test(x) ? 1 : 0);
   // a big title written inside the drawing's own outline wins; otherwise "… PLAN / SECTION / ELEVATION" titles, biggest first
   const maxH = Math.max(0, ...near.map((t) => t.h));
   const own = (t: DxfText) => (t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1 && t.h >= 0.6 * maxH ? 1 : 0);
@@ -1323,6 +1323,8 @@ export function partKind(t: string): PartKind {
   if (/elevation|\belev\b|立面/i.test(t)) return "elevation";
   if (/大样|详图/.test(t)) return "detail";
   if (/总平面/.test(t)) return "site";
+  if (/配模图|布置图|放线图|背楞$|墙板$|飘板$/.test(t)) return "plan";       // formwork layout sheets (wall / beam / deck / waler layouts)
+  if (/贴片尺寸|清单/.test(t)) return "detail";
   if (/平面图|深化图|标准层/.test(t)) return "plan";
   if (/site|master|location|key\s*plan|layout\s*plan|parking/i.test(t)) return "site";
   if (/schedule|legend|notes?\b|title/i.test(t)) return "detail";
@@ -1520,7 +1522,22 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
     const row = rows.find((r) => p.box[3] <= r[0].box[3] && p.box[3] >= r[0].box[1]);
     if (row) row.push(p); else rows.push([p]);
   }
-  const ordered = rows.flatMap((r) => r.sort((a, b) => a.box[0] - b.box[0])).filter(keepPart).slice(0, 80);
+  let ordered = rows.flatMap((r) => r.sort((a, b) => a.box[0] - b.box[0])).filter(keepPart);
+  // a sheet frame round one named drawing (a Revit view / block such as "底图" placed in a title-block frame): the
+  // drawing takes the sheet's caption and the frame is dropped
+  {
+    const drop = new Set<typeof ordered[number]>();
+    for (const o of ordered) {
+      if (!o.title || /^Drawing \d+$/.test(o.title) || drop.has(o)) continue;
+      const inner = ordered.filter((p) => p !== o && boxArea(p.box) >= 0.35 * boxArea(o.box) && boxArea(p.box) < boxArea(o.box) && boxInter(o.box, p.box) >= 0.95 * boxArea(p.box));
+      if (inner.length !== 1) continue;
+      const p = inner[0];
+      const generic = !p.title || p.title === o.title || /^Drawing \d+$/.test(p.title) || /^底图|^base\b/i.test(p.title) || p.title === p.sub || (p.sub && p.title === viewLabel(p.sub));
+      if (!generic) continue;
+      p.sub = p.sub ?? (p.title && p.title !== o.title ? p.title : undefined); p.title = o.title; p.kind = partKind(`${p.title} ${p.sub ?? ""}`); p.count += o.count; drop.add(o);
+    }
+    ordered = ordered.filter((p) => !drop.has(p)).slice(0, 80);
+  }
   ordered.forEach((p, i) => { p.n = i + 1; if (!p.title) p.title = `Drawing ${i + 1}`; });
   if (roles) nameUntitledPlans(ordered, model, roles);
   markFormworkScope(ordered, texts, unitToM);

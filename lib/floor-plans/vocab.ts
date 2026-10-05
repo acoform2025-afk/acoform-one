@@ -7,7 +7,7 @@
  */
 import type { LayerRole } from "./calc";
 
-export type ConceptGroup = "opening" | "circulation" | "room" | "level" | "structure" | "door-window" | "annotation" | "services";
+export type ConceptGroup = "opening" | "circulation" | "room" | "level" | "structure" | "door-window" | "annotation" | "services" | "formwork";
 export type Concept = { key: string; label: string; group: ConceptGroup; words: string[]; re?: RegExp };
 
 /* words are matched as whole words on the normalised text (lower case, "." "_" "-" "/" read as spaces, and also with
@@ -59,6 +59,35 @@ export const CONCEPTS: Concept[] = [
   { key: "note", label: "Notes / legend / title block", group: "annotation", words: ["structure", "as per tender", "option", "width", "height", "no", "nos", "proposed", "scheme", "for review", "for approval", "for construction", "gfc", "good for construction", "area table", "area statement", "total", "remarks", "sheet", "sheet no", "title", "note", "notes", "legend", "general notes", "drawing no", "dwg no", "revision", "rev", "date", "drawn", "checked", "approved", "client", "project", "architect", "consultant", "disclaimer", "说明", "图例"] },
   // ---- site / landscape (outside the building) ----
   { key: "site", label: "Site / road / parking / landscape", group: "annotation", words: ["drive way", "wide drive way", "slope", "ridge line", "ridge", "road", "wide road", "internal road", "common plot", "plot", "plot boundary", "setback", "margin", "compound wall", "gate", "entry gate", "exit gate", "car", "cars", "car parking", "parking", "parking space", "visitor parking", "two wheeler", "2 wheeler", "regular", "mechanical", "back to back", "nos of car", "total car", "space", "for", "swimming pool", "pool", "garden", "landscape", "lawn", "tree", "driveway", "fire tender", "fire tender path", "ground coverage", "fsi", "far"] },
+  // ---- formwork components on a formwork design drawing (Chinese Mivan convention, e.g. Guangzhou Motian: the code
+  //      is the part type + its size, "Q500X2700" = wall panel 500 wide × 2700 high) ----
+  { key: "fw-wall-panel", label: "Wall panel (Q)", group: "formwork", words: ["墙模板", "墙板", "外墙板"], re: /^d?q\d{3}x\d{3,4}/ },
+  { key: "fw-bottom-strip", label: "Bottom strip / foot board (R)", group: "formwork", words: ["起脚板"], re: /^r\d{3}x\d{2,3}$/ },
+  { key: "fw-kicker", label: "External kicker K-board (K)", group: "formwork", words: ["外墙起脚板", "k板"], re: /^k\d{3,4}x\d{3}/ },
+  { key: "fw-kicker-corner", label: "Kicker internal corner (KZ)", group: "formwork", words: ["外墙起脚内转角", "外墙起脚板内转角"], re: /^kz\(\d+\+\d+\)x\d+/ },
+  { key: "fw-wall-corner", label: "Wall / column internal corner (QZ, QZR, PZ)", group: "formwork", words: ["墙柱阴角模板", "墙柱阴角", "带起脚墙柱阴角", "墙板转角"], re: /^(qzr?|pzr?)\d{4}x\d+/ },
+  { key: "fw-wall-end", label: "Wall end / stop end panel (F)", group: "formwork", words: ["墙端模板", "墙端板", "封边板", "挡板"], re: /^f\d{3}x\d{3,4}/ },
+  { key: "fw-corner-angle", label: "External corner angle (W)", group: "formwork", words: ["角铝"], re: /^w\d{3,4}(-h)?$/ },
+  { key: "fw-soffit-corner", label: "Slab / soffit corner (C)", group: "formwork", words: ["楼面转角"], re: /^c\d{4}x\d+/ },
+  { key: "fw-soffit-ic", label: "Slab internal corner (CZ)", group: "formwork", words: ["楼面内转角"], re: /^cz\d{4}x\(/ },
+  { key: "fw-soffit-ec", label: "Slab external corner (C0)", group: "formwork", words: ["楼面外转角"], re: /^c0\d{4}x/ },
+  { key: "fw-deck", label: "Deck / slab panel (D)", group: "formwork", words: ["楼面模板", "楼面板"], re: /^d\d{3}x\d{3,4}$/ },
+  { key: "fw-keel", label: "Keel / mid beam (ZL, DL)", group: "formwork", words: ["中梁", "端梁"], re: /^(zl|dl)\d{3}x\d{3,4}/ },
+  { key: "fw-prop-head", label: "Deck prop head (PH)", group: "formwork", words: ["板撑头", "板底撑头"], re: /^ph\d{3}x\d{3}$/ },
+  { key: "fw-beam-side", label: "Beam side panel (L)", group: "formwork", words: ["梁旁板", "梁侧板"], re: /^l\d{3,4}x\d{2,3}$/ },
+  { key: "fw-beam-bottom", label: "Beam bottom panel (LD, LDD)", group: "formwork", words: ["梁底板", "无翼梁底板"], re: /^ldd?\d{3}x\d{3,4}/ },
+  { key: "fw-beam-corner", label: "Beam bottom corner (E)", group: "formwork", words: ["梁底转角"], re: /^e\d{4}x\d+/ },
+  { key: "fw-beam-ic", label: "Beam side internal corner (LZ)", group: "formwork", words: ["梁旁内转角", "梁转角"], re: /^lz\(\d+\+\d+\)x\d+/ },
+  { key: "fw-beam-head", label: "Beam prop head (LC)", group: "formwork", words: ["梁底撑头"], re: /^lc\d{3}x\d{3,4}/ },
+  { key: "fw-cover", label: "Cover plate (GB, GBB)", group: "formwork", words: ["盖板", "无翼盖板", "下飘盖板", "上飘盖板"], re: /^gbb?\d{3}x\d{3,4}/ },
+  { key: "fw-cover-head", label: "Cover plate prop head (GC)", group: "formwork", words: ["盖板撑头"], re: /^gc\d{3}x\d{3}/ },
+  { key: "fw-waler", label: "Waler / square tube (FT, WL)", group: "formwork", words: ["背楞", "方管", "方通", "方管总布置图"], re: /^(ft|wlc?)\s?\d{3,4}/ },
+  { key: "fw-stair-tooth", label: "Stair dog-tooth side panel (G)", group: "formwork", words: ["楼梯锯齿板"], re: /^g\d\(\d+x\d+\)/ },
+  { key: "fw-stair-step", label: "Stair step cover (GS)", group: "formwork", words: ["梯级盖板"], re: /^gs\(\d+\+\d+\)x\d+/ },
+  { key: "fw-stair-edge", label: "Stair edge panel (S)", group: "formwork", words: ["楼梯封边板"], re: /^s\d\(\d+x\d+\)/ },
+  { key: "fw-stair-head", label: "Stair prop head (SPH)", group: "formwork", words: ["楼梯支撑头"], re: /^sph\d{3}x\d{3,4}/ },
+  { key: "fw-hanging", label: "Hanging formwork (吊模)", group: "formwork", words: ["吊模", "吊模平板", "吊模内转角", "吊模方通", "吊模配模图"] },
+  { key: "fw-sheet", label: "Formwork layout sheet", group: "formwork", words: ["配模图", "墙柱配模图", "梁侧配模图", "梁底配模图", "飘板配模图", "阳台配模图", "楼面板配模图", "k板配模图", "放线图", "贴片尺寸", "方管布置图", "生产清单", "配模清单", "铝模施工图", "铝模"] },
   // ---- services (not formwork) ----
   { key: "services", label: "Services (MEP)", group: "services", words: ["raising main", "rising main", "fan", "exhaust", "exhaust fan", "pressurization", "pressurisation", "smoke vent", "vrv", "v r v", "stp", "space for stp", "bore", "bore well", "borewell", "transformer", "dg", "d g", "dg set", "meter", "panel room", "pump room", "lt room", "ht room", "solar", "fhc", "fire hose", "hydrant", "sprinkler", "db", "ac", "odu", "ac ledge", "drain", "rwp", "swp", "svp", "pipe", "geyser"] },
 ];

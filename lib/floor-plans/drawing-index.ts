@@ -50,7 +50,7 @@ export type DrawingIndex = {
   building: Building | null; checks: string[];
 };
 
-const SHOWN_GROUPS = new Set(["opening", "circulation", "room", "level", "structure"]);
+const SHOWN_GROUPS = new Set(["opening", "circulation", "room", "level", "structure", "formwork"]);
 
 /* ---------- geometry evidence per layer ---------- */
 type Seg = { o: 0 | 1; c: number; a: number; b: number };   // orientation (0 = along x), offset, from, to
@@ -153,9 +153,11 @@ export function buildDrawingIndex(model: DxfModel, unitToM: number, opts: { dict
   const textLayers: string[] = []; const tlIdx = new Map<string, number>();
   const terms = new Map<string, IndexTerm>();
   const rows: IndexTextRow[] = texts.map((t, i) => {
-    const cat = textCategory(t.text, t.h, maxHIn.get(tp[i]) ?? 0);
+    let cat = textCategory(t.text, t.h, maxHIn.get(tp[i]) ?? 0);
     const wordy = cat === "words" || cat === "title" || cat === "tag" || cat === "grid";
-    const m = wordy ? meaningOf(t.text, dict) : null;
+    // a formwork part code ("Q500X2700", "CZ1015X(400+400)") reads like a size; the dictionary knows it as a part
+    let m = wordy ? meaningOf(t.text, dict) : null;
+    if (!m && (cat === "size" || cat === "dimension")) { const fm = meaningOf(t.text, dict); if (fm?.group === "formwork") { m = fm; cat = "tag"; } }
     const layer = t.layer ?? "0";
     if (!tlIdx.has(layer)) { tlIdx.set(layer, textLayers.length); textLayers.push(layer); }
     if (wordy && /[a-z一-鿿]/i.test(t.text) && t.text.length <= 40) {
