@@ -51,6 +51,8 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
         const ctr = new TrackballControls(cam, renderer.domElement); ctr.target.set(cx, totalH / 2, cz);
         ctr.rotateSpeed = 3; ctr.zoomSpeed = 1.2; ctr.panSpeed = 0.8; ctr.dynamicDampingFactor = 0.15;
         ctr.minDistance = 0.5; ctr.maxDistance = Math.max(span, totalH) * 6;
+        // test pages only: hand the camera out so a check can look at a set spot
+        if ((window as unknown as { __a3dTest?: boolean }).__a3dTest) (window as unknown as { __a3d?: unknown }).__a3d = { cam, ctr };
         sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
         const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(cx + span, totalH + span * 1.5, cz + span * 0.7); sc.add(sun);
         const groups: Record<Layer, InstanceType<typeof THREE.Group>> = { walls: new THREE.Group(), columns: new THREE.Group(), wallPanels: new THREE.Group(), fillers: new THREE.Group(), corners: new THREE.Group(), deck: new THREE.Group(), slab: new THREE.Group(), beams: new THREE.Group(), stairs: new THREE.Group(), acc: new THREE.Group(), arch: new THREE.Group(), issues: new THREE.Group() };
@@ -121,7 +123,20 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
               G.acc.add(im);
             };
             rod(A.props.map((p) => [[p[0], p[2], p[1]], [p[0], p[3] - 0.06, p[1]]]), 0.024, 0xd97706);            // steel props
-            blocks(A.heads.map((h) => [h[0], h[1] - 0.03, h[2]]), [0.12, 0.06, 0.2], 0x6b7280);                // prop heads / drop heads
+            // prop heads: a deck head sits in the keel line — its top plate (joint bar) flush with the deck skin between
+            // the keel ends, the head block under the keel on the prop; beam / stair heads are a plate on the prop
+            const deckH = A.heads.filter((h) => h[3] === 0), otherH = A.heads.filter((h) => h[3] !== 0);
+            const turned = (pts: number[][], s3: [number, number, number], color: number) => {
+              if (!pts.length) return;
+              const im = new THREE.InstancedMesh(new THREE.BoxGeometry(...s3), new THREE.MeshStandardMaterial({ color, metalness: 0.4, roughness: 0.5 }), pts.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1), at = new THREE.Vector3();
+              pts.forEach((p, i) => { e.set(0, -(p[3] ?? 0), 0); q.setFromEuler(e); at.set(p[0], p[1], p[2]); m4.compose(at, q, one); im.setMatrixAt(i, m4); });
+              G.acc.add(im);
+            };
+            const kw = fl.keel?.w ?? 0.15, kd = fl.keel?.d ?? 0.1;
+            turned(deckH.map((h) => [h[0], h[1] + kd - 0.012, h[2], h[4] ?? 0]), [0.4, 0.008, kw], 0xc8a96a);      // joint bar / head plate in the soffit
+            turned(deckH.map((h) => [h[0], h[1] - 0.025, h[2], h[4] ?? 0]), [0.2, 0.05, kw + 0.03], 0x6b7280);     // head block under the keel
+            blocks(deckH.map((h) => [h[0], h[1] - 0.06, h[2]]), [0.06, 0.04, 0.06], 0x374151);                   // stem / pin into the prop
+            blocks(otherH.map((h) => [h[0], h[1] - 0.03, h[2]]), [0.12, 0.06, 0.2], 0x6b7280);
             blocks(A.props.map((p) => [p[0], 0.005, p[1]]), [0.15, 0.01, 0.15], 0x52525b);                      // base plates
             rod(A.ties.map((t) => [[t[0], t[1], t[2]], [t[0] + t[3] * 0.12, t[1], t[2] + t[4] * 0.12]]), 0.008, 0x111827);   // tie ends
             blocks(A.ties.map((t) => [t[0] + t[3] * 0.07, t[1], t[2] + t[4] * 0.07]), [0.05, 0.05, 0.05], 0x374151);      // wing nut / wedge
@@ -191,11 +206,41 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
             const lines = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x1f2937 }));
             G[KIND_LAYER[kk as Scene3["panels"][number]["k"]]].add(mesh, lines); pickables.push({ mesh, list: c.list, base: c.base, colors: c.colors, level: levelName });
           }
+          // keels (mid beams): an aluminium beam the width of the gap between the deck rows, its top flush with the deck
+          // skin, running wall to wall
           if (fl.mb.length) {
-            const arr = new Float32Array(fl.mb.length * 6);
-            fl.mb.forEach(([a, b], i) => arr.set([a[0], fl.H - 0.02, a[1], b[0], fl.H - 0.02, b[1]], i * 6));
-            const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
-            G.deck.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x2563eb })));
+            const kw = fl.keel?.w ?? 0.15, kd = fl.keel?.d ?? 0.1;
+            const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x8e9aa8, metalness: 0.35, roughness: 0.5 }), fl.mb.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sz = new THREE.Vector3(), at = new THREE.Vector3();
+            fl.mb.forEach(([a, b], i) => { const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 0.01; e.set(0, -Math.atan2(b[1] - a[1], b[0] - a[0]), 0); q.setFromEuler(e); sz.set(L, kd, kw); at.set((a[0] + b[0]) / 2, fl.H - 0.005 - kd / 2, (a[1] + b[1]) / 2); m4.compose(at, q, sz); im.setMatrixAt(i, m4); });
+            G.deck.add(im);
+          }
+          // panel frames: the 65 mm rails round every panel and its ribs (deck: across the panel every 300; wall: across
+          // every 300 up the panel) on the side away from the concrete — so each piece reads like the real panel
+          {
+            const RAIL = 0.065, STEP = 0.3;
+            const byLayer = new Map<Layer, number[]>();
+            const plate = (arr: number[], a: number[], b: number[], n: number[]) => { const a2 = [a[0] + n[0] * RAIL, a[1] + n[1] * RAIL, a[2] + n[2] * RAIL], b2 = [b[0] + n[0] * RAIL, b[1] + n[1] * RAIL, b[2] + n[2] * RAIL]; arr.push(...a, ...b, ...b2, ...a, ...b2, ...a2); };
+            const lerp = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+            const dist = (a: number[], b: number[]) => Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+            for (const q of fl.panels) {
+              if (!q.n || q.p.length < 4) continue;
+              const layer = KIND_LAYER[q.k]; let arr = byLayer.get(layer); if (!arr) { arr = []; byLayer.set(layer, arr); }
+              const [A, B, C, D] = q.p, n = q.n;
+              plate(arr, A, B, n); plate(arr, B, C, n); plate(arr, C, D, n); plate(arr, D, A, n);
+              const deckLike = q.k === "deck" || q.k === "dspec";
+              const wallLike = q.k === "std" || q.k === "top" || q.k === "fill";
+              if (!deckLike && !wallLike) continue;
+              // ribs run parallel to the short side (deck) / horizontally (wall: parallel to A→B, the bottom edge)
+              const ab = dist(A, B), bc = dist(B, C);
+              const across = wallLike ? "ab" : ab <= bc ? "ab" : "bc";
+              const len = across === "ab" ? bc : ab, k = Math.max(0, Math.floor(len / STEP - 0.2));
+              for (let i = 1; i <= k; i++) {
+                const t = (i * STEP) / len; if (t >= 0.98) break;
+                if (across === "ab") plate(arr, lerp(A, D, t), lerp(B, C, t), n); else plate(arr, lerp(A, B, t), lerp(D, C, t), n);
+              }
+            }
+            const fm = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.45, roughness: 0.5, side: THREE.DoubleSide });
+            for (const [layer, arr] of byLayer) { if (!arr.length) continue; const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(arr), 3)); g.computeVertexNormals(); G[layer].add(new THREE.Mesh(g, fm)); }
           }
           // design-check markers: a red (error) / amber (warning) ball on a pole at the spot (on the lowest floor drawn from this scene)
           if (withIssues) for (const is of fl.issues ?? []) {

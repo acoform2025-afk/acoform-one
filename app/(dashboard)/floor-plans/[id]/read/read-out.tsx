@@ -88,10 +88,11 @@ export function ReadOut({ planName, fileUrl, indexPath, dict: dict0, canEdit, un
   return (
     <div className="space-y-6">
       {/* summary */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         {[
           ["Drawings in the file", ix.counts.drawings],
           ["Floor plans", ix.parts.filter((p) => p.kind === "plan").length],
+          ["Marked for formwork", ix.parts.filter((p) => p.scope === "formwork").length],
           ["Levels of the building", levels.length],
           ["Layers", ix.counts.layers],
           ["Words understood", ix.counts.known],
@@ -122,7 +123,7 @@ export function ReadOut({ planName, fileUrl, indexPath, dict: dict0, canEdit, un
       {/* drawings */}
       <section>
         <h2 className="mb-2 text-sm font-semibold text-graphite-100">1 · Drawings in the file</h2>
-        <p className="mb-2 text-xs text-graphite-400">Each drawing found in the file, its type and level, and what is written inside it. Blue = walls, purple dots = lifts, orange = ducts, green = stairs.</p>
+        <p className="mb-2 text-xs text-graphite-400">Each drawing found in the file, its type and level, and what is written inside it. Blue = walls, purple dots = lifts, orange = ducts, green = stairs. A drawing the architect put under a caption such as &quot;FOR Alu. Formwork&quot; is tagged <span className="rounded bg-brand-orange/20 px-1 text-brand-orange">for formwork</span> and is used first.</p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {ix.parts.map((p) => <PartCard key={p.n} p={p} ix={ix} model={model.current!} />)}
         </div>
@@ -262,7 +263,7 @@ function PartCard({ p, ix, model }: { p: IndexPart; ix: DrawingIndex; model: Dxf
     <div className="rounded-md border border-graphite-800 bg-graphite-900/50 p-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-graphite-100" title={p.title}>#{p.n} · {p.title}</div>
+          <div className="truncate text-xs font-medium text-graphite-100" title={p.title}>#{p.n} · {p.title}{p.scope === "formwork" ? <span className="ml-1.5 rounded bg-brand-orange/20 px-1 text-[10px] text-brand-orange" title={p.scopeNote}>for formwork</span> : null}</div>
           <div className="text-[11px] text-graphite-400">{KIND_TXT[p.kind] ?? p.kind}{lvl ? ` · ${lvl}` : ""}{p.levelFrom === "labels" ? " (no title — level read from its labels)" : ""} · {p.wM} × {p.hM} m{p.scale ? ` · ${p.scale}` : ""}</div>
         </div>
       </div>

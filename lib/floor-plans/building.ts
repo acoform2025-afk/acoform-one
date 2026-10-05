@@ -276,7 +276,8 @@ export function readBuilding(inp: BuildingInput): Building {
     if (l.kind === "basement" || l.kind === "service") l.use = "none";
   }
   // drawings of this tower (or of no tower) matched to the levels
-  const parts = inp.parts.filter((p) => p.kind === "plan" || p.kind === "other").map((p) => ({ p, lv: parseLevelName(`${p.title} ${p.sub ?? ""}`) }))
+  // drawings the architect marked for the formwork ("FOR Alu. Formwork") are matched to the levels first
+  const parts = [...inp.parts].sort((a, b) => (b.scope === "formwork" ? 1 : 0) - (a.scope === "formwork" ? 1 : 0)).filter((p) => p.kind === "plan" || p.kind === "other").map((p) => ({ p, lv: parseLevelName(`${p.title} ${p.sub ?? ""}`) }))
     .filter((x) => !x.lv.tower || !myTower || x.lv.tower === myTower);
   const typicalParts = parts.filter((x) => x.lv.typical || (x.p.n === inp.typicalPartN));
   const tp = inp.parts.find((p) => p.n === inp.typicalPartN);

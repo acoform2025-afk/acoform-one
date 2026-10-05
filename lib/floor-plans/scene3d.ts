@@ -12,14 +12,14 @@ import { inRings } from "@/lib/design-engine/design-check";
 
 export type Poly2 = Pt[][];                         // outer ring + holes (metres)
 export type Panel3Kind = "std" | "top" | "fill" | "deck" | "dspec" | "ic" | "ec" | "sc" | "kick" | "bside" | "bbot" | "col" | "stair" | "riser" | "cheek" | "lsoff" | "tread" | "cchan" | "stp" | "tz" | "cpp" | "trec";
-export type Panel3 = { p: [number, number, number][]; k: Panel3Kind; c: string; z?: string };   // quad corners; z = zone / face the piece belongs to
+export type Panel3 = { p: [number, number, number][]; k: Panel3Kind; c: string; z?: string; n?: [number, number, number] };   // quad corners; z = zone / face the piece belongs to; n = the side away from the concrete (its rails and ribs stand out that way)
 export type Scene3 = {
   H: number; slab: number; box: [number, number, number, number];
   walls: Poly2[]; slabPoly: Poly2[]; beams: { a: Pt; b: Pt; w: number; d: number }[];
   cols: Pt[][]; beamSolids: { ring: Pt[]; d: number }[];
   steps: { c: [number, number, number]; s: [number, number, number]; rot: number }[];   // stair landings as boxes (centre, size x·y·z, rotation about y)
   stairSolids?: { prof: [number, number][]; o: [number, number]; u: [number, number]; ext: [number, number] }[];   // concrete of a flight: profile (s along the flight, y up) at plan point o, s-direction u, extruded across by ext
-  panels: Panel3[]; mb: [Pt, Pt][]; zones: { code: string; at: Pt }[]; stats: { wall: number; deck: number; special: number };
+  panels: Panel3[]; mb: [Pt, Pt][]; keel?: { w: number; d: number }; zones: { code: string; at: Pt }[]; stats: { wall: number; deck: number; special: number };
   issues?: { id: string; sev: "error" | "warn"; text: string; at: Pt; y: number }[];
   wallBits?: { poly: Poly2; z0: number; z1: number; infill?: boolean }[];   // infill: block / brick wall round a window (not formed)          // concrete under windows (sill) and over openings (lintel)
   glass?: { p: [number, number, number][]; door: boolean }[];     // window panes / door leaves in the openings
@@ -33,7 +33,7 @@ export type Acc3 = {
   walers: [number, number, number, number, number][];   // x0, y, z0, x1, z1
   pushPull: [number, number, number, number, number, number][];   // wall point x, y, z → floor point x, 0, z
   brackets: [number, number, number][];                 // riser brackets
-  heads: [number, number, number, number][];            // prop heads / drop heads: x, y, z, kind
+  heads: [number, number, number, number, number?][];   // prop heads / drop heads: x, y, z, kind, direction of the keel it sits in (radians)
 };
 
 const ring = (r: Pt[]): [number, number][] => { const o = r.map((p) => [p[0], p[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
@@ -48,6 +48,7 @@ export function buildScene3(o: {
   arch?: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[];
   stairLay?: StairLayout[];                 // the stair panels the layout chose (soffit / cheek / landing pieces)
   propSpacing?: number; tieH?: number; tieV?: number;   // m, mm, mm
+  midBeamMm?: number;                       // keel (mid beam) width; it carries the deck panels and the prop heads sit in it
 }): Scene3 {
   const H = Math.max(0.5, o.floorHeight - o.slabMm / 1000), slab = o.slabMm / 1000;
   // walls: even-odd combination of the merged wall rings → proper polygons with holes
@@ -112,7 +113,7 @@ export function buildScene3(o: {
     const at = (mm: number): Pt => { const t = Math.min(len, mm / 1000); return [a[0] + ux * t, a[1] + uy * t]; };
     const quad = (x0: number, x1: number, z0: number, z1: number, k: Panel3["k"], c: string) => {
       const p0 = at(x0), p1 = at(x1);
-      panels.push({ p: [[p0[0], base + z0, p0[1]], [p1[0], base + z0, p1[1]], [p1[0], base + z1, p1[1]], [p0[0], base + z1, p0[1]]], k, c, z: f.code });
+      panels.push({ p: [[p0[0], base + z0, p0[1]], [p1[0], base + z0, p1[1]], [p1[0], base + z1, p1[1]], [p0[0], base + z1, p0[1]]], k, c, z: f.code, n: [nx * s, 0, ny * s] });
     };
     const Hm = f.height / 1000, main = Math.min(o.stdHeight / 1000, Hm), top = f.top / 1000;
     let run = 0;
@@ -134,9 +135,9 @@ export function buildScene3(o: {
     const a: Pt = [A[0] * mpp + nx * offM, A[1] * mpp + ny * offM], b: Pt = [a[0] + ux * L * mpp, a[1] + uy * L * mpp];
     const Hf = Math.min(H, (f.geo ? 0 : f.geo3!.z0 / 1000) + f.height / 1000);
     const c = `${f.code} · soffit corner ${o.scMm?.[0] ?? 100} × ${o.scMm?.[1] ?? 125}`;
-    panels.push({ p: [[a[0], Hf - scV, a[1]], [b[0], Hf - scV, b[1]], [b[0], Hf, b[1]], [a[0], Hf, a[1]]], k: "sc", c, z: f.code });
+    panels.push({ p: [[a[0], Hf - scV, a[1]], [b[0], Hf - scV, b[1]], [b[0], Hf, b[1]], [a[0], Hf, a[1]]], k: "sc", c, z: f.code, n: [nx * s, 0, ny * s] });
     const ox = nx * s * scH, oy = ny * s * scH;      // horizontal leg, away from the concrete
-    panels.push({ p: [[a[0], Hf, a[1]], [b[0], Hf, b[1]], [b[0] + ox, Hf, b[1] + oy], [a[0] + ox, Hf, a[1] + oy]], k: "sc", c, z: f.code });
+    panels.push({ p: [[a[0], Hf, a[1]], [b[0], Hf, b[1]], [b[0] + ox, Hf, b[1] + oy], [a[0] + ox, Hf, a[1] + oy]], k: "sc", c, z: f.code, n: [0, -1, 0] });
   }
   // internal / external corners of the walls: a vertical piece at every corner (legs along both faces)
   const icL = (o.icMm ?? 100) / 1000, ecL = (o.ecMm ?? 65) / 1000;
@@ -150,7 +151,9 @@ export function buildScene3(o: {
     for (const q of [prev, next]) {
       const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy); if (!L) continue;
       const e: Pt = [p[0] + (dx / L) * Math.min(leg, L), p[1] + (dy / L) * Math.min(leg, L)];
-      panels.push({ p: [[p[0], 0, p[1]], [e[0], 0, e[1]], [e[0], H, e[1]], [p[0], H, p[1]]], k, c });
+      const mx = (p[0] + e[0]) / 2, my = (p[1] + e[1]) / 2, px = -dy / L, py = dx / L;
+      const out = inRings([mx + px * 0.03, my + py * 0.03], o.zoneWalls) ? -1 : 1;
+      panels.push({ p: [[p[0], 0, p[1]], [e[0], 0, e[1]], [e[0], H, e[1]], [p[0], H, p[1]]], k, c, n: [px * out, 0, py * out] });
     }
   }
   // external kicker along the slab edge (outside face of the slab, above the wall panels)
@@ -171,7 +174,7 @@ export function buildScene3(o: {
   let deckN = 0;
   for (const z of o.zones) for (const p of z.panels) {
     const y = H - 0.005;
-    panels.push({ p: [[p.x0, y, p.y0], [p.x1, y, p.y0], [p.x1, y, p.y1], [p.x0, y, p.y1]], k: p.custom ? "dspec" : "deck", c: `${p.no} · ${p.code}`, z: z.code });
+    panels.push({ p: [[p.x0, y, p.y0], [p.x1, y, p.y0], [p.x1, y, p.y1], [p.x0, y, p.y1]], k: p.custom ? "dspec" : "deck", c: `${p.no} · ${p.code}`, z: z.code, n: [0, -1, 0] });
     deckN++; if (p.custom) special++;
   }
   // staircases: a dog-leg stair in each stair box — flight 1 up one half of the box, landing across the far end,
@@ -318,12 +321,15 @@ export function buildScene3(o: {
   });
   // ---- accessories (the same rules as the parts list) ----
   // deck props: a prop with a drop head under every mid-beam end and along it at the prop spacing
-  const sp = o.propSpacing ?? 1.2, seenP = new Set<string>();
-  const addProp = (x: number, z: number, top: number, kind: number) => { const k = `${Math.round(x * 20)}:${Math.round(z * 20)}:${kind}`; if (seenP.has(k)) return; seenP.add(k); acc.props.push([x, z, 0, top, kind]); acc.heads.push([x, top, z, kind]); };
+  const sp = o.propSpacing ?? 1.2, seenP = new Set<string>(), KEEL_D = 0.1;
+  const addProp = (x: number, z: number, top: number, kind: number, ang = 0) => { const k = `${Math.round(x * 20)}:${Math.round(z * 20)}:${kind}`; if (seenP.has(k)) return; seenP.add(k); acc.props.push([x, z, 0, top, kind]); acc.heads.push([x, top, z, kind, ang]); };
+  // the keel (mid beam) runs wall to wall; its ends sit on the soffit corners and the prop heads are set in it at the
+  // prop spacing — the props stand under the heads only (they stay when the keel and deck are struck: early striking)
   for (const zn of o.zones) for (const [a, b] of zn.mb) {
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 0.2) continue;
-    const n = Math.max(1, Math.ceil(L / sp));
-    for (let i = 0; i <= n; i++) addProp(a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n, H - 0.07, 0);
+    const n = Math.max(1, Math.ceil((L - 0.3) / sp)), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const ts = n === 1 ? [0.5] : Array.from({ length: n - 1 }, (_, i) => (i + 1) / n);
+    for (const t of ts) addProp(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, H - KEEL_D, 0, ang);
   }
   // beam props: under every beam bottom along its length
   for (const b3 of o.beams3 ?? []) {
@@ -370,9 +376,9 @@ export function buildScene3(o: {
     H, slab, box, walls: strip(walls), slabPoly: strip(slabM),
     beams: o.zoneGaps.map((g) => ({ a: g.a, b: g.b, w: Math.max(0.1, g.thk), d: Math.max(slab, o.beamDepthMm / 1000) })),
     cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps, stairSolids,
-    panels, mb: o.zones.flatMap((z) => z.mb), zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
+    panels, mb: o.zones.flatMap((z) => z.mb), keel: { w: (o.midBeamMm ?? 150) / 1000, d: 0.1 }, zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
     stats: { wall: wallN, deck: deckN, special },
-    acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map(r3) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map(r3) as Acc3["heads"][number]) },
+    acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map(r3) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map((x) => r3(x ?? 0)) as Acc3["heads"][number]) },
     arch: (o.arch ?? []).map((x) => ({ k: x.k, ...(x.a ? { a: [r3(x.a[0]), r3(x.a[1])] as Pt } : {}), ...(x.b ? { b: [r3(x.b[0]), r3(x.b[1])] as Pt } : {}), ...(x.ring ? { ring: x.ring.map((q) => [r3(q[0]), r3(q[1])] as Pt) } : {}) })),
     wallBits, glass: glass.map((g) => ({ ...g, p: g.p.map((v) => [r3(v[0]), r3(v[1]), r3(v[2])]) as [number, number, number][] })),
   };

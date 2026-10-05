@@ -34,6 +34,7 @@ export type IndexPart = {
   n: number; title: string; kind: PartKind; box: [number, number, number, number]; wM: number; hM: number;
   level: { kind: LevelKind; nos: number[]; typical: boolean; tower?: string };
   levelFrom?: "title" | "labels";             // "labels": the drawing has no title — read from what is written in it
+  scope?: "formwork"; scopeNote?: string;     // marked by the architect as the formwork set (the caption over its row)
   scale?: string;
   layers: { name: string; lines: number }[];
   found: Record<string, number>;              // meaning key → how many labels, e.g. { lift: 5, duct: 4, toilet: 12 }
@@ -190,7 +191,7 @@ export function buildDrawingIndex(model: DxfModel, unitToM: number, opts: { dict
     });
     return {
       n: p.n, title: p.title, kind: p.kind, box: p.box, wM: Math.round(p.w * 10) / 10, hM: Math.round(p.h * 10) / 10,
-      level: parseLevelName(`${p.title} ${p.sub ?? ""}`), levelFrom: p.named === "labels" ? "labels" as const : "title" as const, scale,
+      level: parseLevelName(`${p.title} ${p.sub ?? ""}`), levelFrom: p.named === "labels" ? "labels" as const : "title" as const, scale, scope: p.scope, scopeNote: p.scopeNote,
       layers: [...lay.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, lines]) => ({ name, lines })),
       found, labels,
     };
@@ -211,6 +212,8 @@ export function buildDrawingIndex(model: DxfModel, unitToM: number, opts: { dict
   if (![...L.values()].some((x) => x.role === "walls")) checks.push("No wall layer was found — choose the wall layer(s) below.");
   else if ([...L.values()].some((x) => x.from === "geometry")) checks.push("The wall layer was found from its geometry only (its name does not say so) — please confirm it below.");
   if (!outParts.some((p) => p.kind === "plan")) checks.push("No floor plan drawing was recognised by its title.");
+  const fwParts = outParts.filter((p) => p.scope === "formwork");
+  if (fwParts.length) checks.push(`The architect marked ${fwParts.length} drawing(s) for the formwork ("${fwParts[0].scopeNote}"): ${fwParts.filter((p) => p.kind === "plan").map((p) => p.title).join(", ")}. These are used first for the typical floor and the levels.`);
   if (building?.levels.every((l) => l.src === "assumed")) checks.push("No level list was found (no level table, level marks or section level names) — floors are assumed.");
   if (unknown.length) checks.push(`${unknown.length} word(s) on the drawing are not in the dictionary yet — teach the ones that matter below (lift, duct, stair, wall …).`);
 

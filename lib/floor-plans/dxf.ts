@@ -1114,7 +1114,20 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
  * Finds the separate drawings (floor plans, sections…) in a DXF by grouping wall lines that lie close together.
  * Returns their boxes in drawing units, biggest first — the user clicks the typical floor instead of boxing it by hand.
  */
-export type PlanCandidate = { box: [number, number, number, number]; count: number; w: number; h: number; title?: string; score: number; floors?: number };
+export type PlanCandidate = { box: [number, number, number, number]; count: number; w: number; h: number; title?: string; score: number; floors?: number; scope?: "formwork" };
+/** The areas under formwork captions (the row of drawings right under "FOR Alu. Formwork"), as boxes. */
+function formworkCaptionBoxes(texts: DxfText[], boxes: [number, number, number, number][], unitToM: number): [number, number, number, number][] {
+  const M = 1 / unitToM, out: [number, number, number, number][] = [];
+  for (const cap of texts) {
+    if (!FORMWORK_CAPTION.test(cap.text) || cap.text.length > 60 || /not\s+(for|in)|excluded|conventional/i.test(cap.text)) continue;
+    const under = boxes.filter((b) => b[3] <= cap.y + 2 * M && b[3] >= cap.y - 40 * M && Math.abs((b[0] + b[2]) / 2 - cap.x) <= 250 * M);
+    if (!under.length) continue;
+    const rowTop = Math.max(...under.map((b) => b[3]));
+    const row = under.filter((b) => Math.abs(b[3] - rowTop) <= 15 * M);
+    out.push([Math.min(...row.map((b) => b[0])) - 5 * M, Math.min(...row.map((b) => b[1])) - 40 * M, Math.max(...row.map((b) => b[2])) + 5 * M, rowTop + 2 * M]);
+  }
+  return out;
+}
 
 const BAD_TITLE = /section|elevation|site|roof|terrace|parking|basement|stilt|podium|detail|stair|lift|key\s*plan|location|schedule|foundation|footing|column\s*layout|centre\s*line|center\s*line|剖面|立面|屋面|地下|详图|大样|楼梯|总平面/i;
 /** Floors from a title like "TYPICAL 1ST TO 14TH FLOOR PLAN" or "2nd-12th floor". */
@@ -1283,13 +1296,16 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
     if (aspect > 6) f *= 0.3;                                   // long thin strips: elevations / sections
     o.score = o.count * f;
   }
+  // drawings the architect marked for the formwork ("FOR Alu. Formwork" over a row of sheets) come first
+  const fw = formworkCaptionBoxes(texts, kept.map((o) => o.box), unitToM);
+  for (const o of kept) if (fw.some((b) => o.box[0] >= b[0] - 1 && o.box[2] <= b[2] + 1 && o.box[1] >= b[1] - 1 && o.box[3] <= b[3] + 1)) { o.score *= 3; o.scope = "formwork"; }
   return kept.sort((a, b) => b.score - a.score).slice(0, 12);
 }
 
 
 /* ---------- separate drawings in one file ---------- */
 export type PartKind = "plan" | "section" | "elevation" | "site" | "detail" | "other";
-export type DrawingPart = { n: number; box: [number, number, number, number]; w: number; h: number; title: string; sub?: string; kind: PartKind; count: number; named?: "labels" };
+export type DrawingPart = { n: number; box: [number, number, number, number]; w: number; h: number; title: string; sub?: string; kind: PartKind; count: number; named?: "labels"; scope?: "formwork"; scopeNote?: string };
 
 /** Readable name of a Revit view / block: "TO-01-TOWER _B_-ARCH-PD_rvt-1-01 FIRST FLOOR PLAN AJ" → "TOWER B · 01 FIRST FLOOR PLAN AJ". */
 export function viewLabel(name: string): string {
@@ -1506,6 +1522,7 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
   const ordered = rows.flatMap((r) => r.sort((a, b) => a.box[0] - b.box[0])).filter(keepPart).slice(0, 80);
   ordered.forEach((p, i) => { p.n = i + 1; if (!p.title) p.title = `Drawing ${i + 1}`; });
   if (roles) nameUntitledPlans(ordered, model, roles);
+  markFormworkScope(ordered, texts, unitToM);
   return ordered;
 }
 /**
@@ -1536,6 +1553,41 @@ function nameUntitledPlans(parts: DrawingPart[], model: DxfModel, roles: Record<
   for (let pass = 0; pass < 3; pass++) for (const [p, c] of guess) {
     const free = c.filter((v) => !taken.has(`${v} PLAN`) && ![...taken].some((t) => t.startsWith(v)));
     if (free.length === 1) { p.title = `${free[0]} PLAN`; p.named = "labels"; taken.add(p.title); guess.delete(p); }
+  }
+}
+/** A caption that marks a group of drawings as the formwork set: "FOR Alu. Formwork", "ALUFORM DRAWINGS", "MIVAN SCOPE", 铝模 … */
+export const FORMWORK_CAPTION = /form\s*-?\s*work|alu\.?\s*form|aluform|mivan|alu(?:mini|mi)?um\s*(?:form|shutter)|shuttering|铝模|铝合金模板/i;
+/**
+ * The architect often copies the floors to be cast with the aluminium formwork into their own row of sheets under a
+ * big caption ("FOR Alu. Formwork"). Those drawings are the formwork scope: the row of drawings right under the caption,
+ * and the small pieces (sections, details) under that row. They are preferred for the typical floor and the levels.
+ */
+function markFormworkScope(parts: DrawingPart[], texts: DxfText[], unitToM: number) {
+  const inAny = (t: DxfText) => parts.some((p) => t.x >= p.box[0] && t.x <= p.box[2] && t.y >= p.box[1] && t.y <= p.box[3]);
+  const caps = texts.filter((t) => FORMWORK_CAPTION.test(t.text) && t.text.length <= 60 && !/not\s+(for|in)|excluded|conventional/i.test(t.text) && !inAny(t));
+  const M = 1 / unitToM;
+  for (const cap of caps) {
+    // the row right under the caption: drawings whose top is within 40 m below it, taken outwards from the one nearest
+    // the caption while the gaps between neighbours stay under 25 m
+    const under = parts.filter((p) => p.box[3] <= cap.y + 2 * M && p.box[3] >= cap.y - 40 * M && p.w >= 5 && p.h >= 5);
+    if (!under.length) continue;
+    const near = under.reduce((b, p) => (Math.abs((p.box[0] + p.box[2]) / 2 - cap.x) < Math.abs((b.box[0] + b.box[2]) / 2 - cap.x) ? p : b), under[0]);
+    if (Math.abs((near.box[0] + near.box[2]) / 2 - cap.x) > 60 * M) continue;
+    const row = new Set<DrawingPart>([near]);
+    const rowTop = near.box[3];
+    // (a plan drawn inside its sheet frame is not a row member of its own — the frame is)
+    const nested = (p: DrawingPart) => under.some((q) => q !== p && p.box[0] >= q.box[0] && p.box[2] <= q.box[2] && p.box[1] >= q.box[1] && p.box[3] <= q.box[3]);
+    const sameRow = under.filter((p) => Math.abs(p.box[3] - rowTop) <= 15 * M && !nested(p)).sort((a, b) => a.box[0] - b.box[0]);
+    const idx = sameRow.indexOf(near);
+    if (idx < 0) continue;
+    for (let i = idx + 1; i < sameRow.length; i++) { if (sameRow[i].box[0] - sameRow[i - 1].box[2] > 25 * M) break; row.add(sameRow[i]); }
+    for (let i = idx - 1; i >= 0; i--) { if (sameRow[i + 1].box[0] - sameRow[i].box[2] > 25 * M) break; row.add(sameRow[i]); }
+    const xs0 = Math.min(...[...row].map((p) => p.box[0])), xs1 = Math.max(...[...row].map((p) => p.box[2])), yb = Math.min(...[...row].map((p) => p.box[1]));
+    // small pieces inside the row's width and up to 40 m under it (sections / details of the same set)
+    for (const p of parts) if (!row.has(p) && p.box[0] >= xs0 - 5 * M && p.box[2] <= xs1 + 5 * M && p.box[3] <= yb + 2 * M && p.box[3] >= yb - 40 * M) row.add(p);
+    // pieces lying inside a row drawing (a plan inside its sheet frame)
+    for (const p of parts) if (!row.has(p)) for (const r of row) if (p.box[0] >= r.box[0] && p.box[2] <= r.box[2] && p.box[1] >= r.box[1] && p.box[3] <= r.box[3]) { row.add(p); break; }
+    for (const p of row) { p.scope = "formwork"; p.scopeNote = cap.text.trim(); }
   }
 }
 function keepPart(p: { title: string; w: number; h: number; count: number }) {
