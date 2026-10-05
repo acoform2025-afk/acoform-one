@@ -499,7 +499,12 @@ function stairClusters(paths: DxfPath[], u: number): [number, number, number, nu
  * same length at a regular 220–350 mm spacing make a flight (width = line length, tread = spacing, treads = lines).
  * The landing is what is left of the box beside the flights. Units: mm (via u).
  */
-export type StairMeasure = { box: [number, number, number, number]; flights: { width: number; treads: number; tread: number }[]; landingM2: number };
+export type StairMeasure = {
+  box: [number, number, number, number]; flights: { width: number; treads: number; tread: number; ang?: number }[]; landingM2: number;
+  run?: "x" | "y";            // the flights climb along x or y (across their tread lines)
+  landPt?: Pt;               // a point on the mid-landing (drawing units): the landing is at that end of the stairwell
+  upPt?: Pt;                 // the "UP" arrow text: the first flight (up from this floor) is on its side
+};
 export function measureStairs(paths: DxfPath[], boxes: [number, number, number, number][], u: number): StairMeasure[] {
   const mm = u * 1000;
   const out: StairMeasure[] = [];
@@ -533,7 +538,7 @@ export function measureStairs(paths: DxfPath[], boxes: [number, number, number, 
           if (run.length >= 3) {
             const sp = run.slice(1).map((r2, i) => (r2.off - run[i].off) * mm), tread = sp.reduce((s2, v) => s2 + v, 0) / sp.length;
             const width = run.reduce((s2, r2) => s2 + r2.L, 0) / run.length;
-            flights.push({ width: Math.round(width / 5) * 5, treads: run.length, tread: Math.round(tread / 5) * 5 });
+            flights.push({ width: Math.round(width / 5) * 5, treads: run.length, tread: Math.round(tread / 5) * 5, ang: g[0].ang });
             flightArea += (run.length * tread) * width;
           }
           run = [];
@@ -1038,7 +1043,36 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
           });
         }
       }
-      return { stairCount: s.length, stairBoxes: s, stairsMeasured: measureStairs(src, s, u) };
+      const meas = measureStairs(src, s, u);
+      // the stairwell is the flights AND the mid-landing: the climb runs across the tread lines; the landing is at the
+      // end away from the "UP" / "DN" arrows (both sit at the floor end of a dog-leg stair). A box that holds only the
+      // tread lines is extended by a landing as deep as the flights are wide.
+      const arrows = (model.texts ?? []).filter((t) => /^(up|dn|down)\b/i.test(t.text.trim()) && t.text.trim().length <= 6);
+      s = s.map((b, i) => {
+        const m = meas[i]; if (!m?.flights.length) return b;
+        const a0 = m.flights[0].ang ?? 0; const horiz = Math.abs(Math.sin(a0)) < 0.09, vert = Math.abs(Math.cos(a0)) < 0.09;
+        if (!horiz && !vert) return b;
+        const run: "x" | "y" = horiz ? "y" : "x"; m.run = run;
+        const lo = run === "x" ? b[0] : b[1], hi = run === "x" ? b[2] : b[3], mid = (lo + hi) / 2;
+        const e = 1.5 / u;
+        const near = arrows.filter((t) => t.x >= b[0] - e && t.x <= b[2] + e && t.y >= b[1] - e && t.y <= b[3] + e).map((t) => (run === "x" ? t.x : t.y));
+        const floorLow = near.length ? near.reduce((x, y) => x + y, 0) / near.length <= mid : true;
+        const avgW = m.flights.reduce((x, f) => x + f.width, 0) / m.flights.length / 1000 / u;        // drawing units
+        const runLen = Math.max(...m.flights.map((f) => f.treads * f.tread)) / 1000 / u;
+        const need = runLen + 0.8 * avgW;
+        let nb = b;
+        if (hi - lo < need) {
+          const add = runLen + avgW - (hi - lo);
+          nb = run === "x" ? (floorLow ? [b[0], b[1], b[2] + add, b[3]] : [b[0] - add, b[1], b[2], b[3]]) : (floorLow ? [b[0], b[1], b[2], b[3] + add] : [b[0], b[1] - add, b[2], b[3]]);
+          m.box = nb;
+        }
+        const nlo = run === "x" ? nb[0] : nb[1], nhi = run === "x" ? nb[2] : nb[3], landAt = floorLow ? nhi - 0.1 / u : nlo + 0.1 / u;
+        m.landPt = run === "x" ? [landAt, (nb[1] + nb[3]) / 2] : [(nb[0] + nb[2]) / 2, landAt];
+        const up = arrows.find((t) => /^up\b/i.test(t.text.trim()) && t.x >= b[0] - e && t.x <= b[2] + e && t.y >= b[1] - e && t.y <= b[3] + e);
+        if (up) m.upPt = [up.x, up.y];
+        return nb;
+      });
+      return { stairCount: s.length, stairBoxes: s, stairsMeasured: meas };
     })(),
     ...(() => {
       const g = wallGaps(U.rings, u, paired ? 1.2 : 0);

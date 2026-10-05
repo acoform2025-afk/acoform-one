@@ -314,6 +314,14 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   ];
   const zoneBeam3: { ring: Pt[]; d: number }[] = frame ? (auto?.beamRings ?? []).map((r, i) => ({ ring: r.map((q) => toM(frame!.toPx(q))), d: auto?.beamRingDepth?.[i] ?? (t.params.beamDepthMm ?? 600) })) : [];
   const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : [];
+  // which way each stair climbs and at which end its mid-landing is (read from the tread lines and the UP / DN arrows)
+  const zoneStairOrient: ({ along: boolean; landHigh: boolean; upHigh?: boolean } | null)[] = zoneStairs.map((zb, i) => {
+    const m = (auto as { stairsMeasured?: { run?: "x" | "y"; landPt?: Pt; upPt?: Pt }[] } | undefined)?.stairsMeasured?.[i];
+    if (!frame || !m?.run || !m.landPt) return null;
+    const lp = toM(frame.toPx(m.landPt)), along = m.run === "x";
+    const up = m.upPt ? toM(frame.toPx(m.upPt)) : null;
+    return { along, landHigh: along ? lp[0] > (zb[0] + zb[2]) / 2 : lp[1] > (zb[1] + zb[3]) / 2, upHigh: up ? (along ? up[1] > (zb[1] + zb[3]) / 2 : up[0] > (zb[0] + zb[2]) / 2) : undefined };
+  });
   // doors / windows inside the walls, for the 3D model: the opening across the wall (metres), sill and head (mm)
   const zoneOpenings: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean; free?: boolean }[] = [];
   if (frame && auto?.wallRings) for (const op of auto.wallOpenings ?? []) {
@@ -340,5 +348,5 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 + z.n[0] * z.thk / 2 - mid[0], (z.a[1] + z.b[1]) / 2 + z.n[1] * z.thk / 2 - mid[1]) < 0.3)) continue;
     zoneOpenings.push({ a: [ca[0] - nx * h, ca[1] - ny * h], b: [cb[0] - nx * h, cb[1] - ny * h], n: [nx, ny], thk: dg.thk, door: dg.door, sill: dg.door ? 0 : OPENING_DEFAULTS.windowSill, head: dg.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, gap: true, ...(dg.free ? { free: true } : {}) });
   }
-  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [] };
+  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneStairOrient, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [] };
 }

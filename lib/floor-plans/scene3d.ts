@@ -42,7 +42,7 @@ const strip = (m: MultiPolygon): Poly2[] => m.map((poly) => poly.map((r) => r.sl
 export function buildScene3(o: {
   zoneWalls: Pt[][]; zoneGaps: { a: Pt; b: Pt; thk: number }[]; decks: { pts: Pt[]; holes: Pt[][] }[];
   zones: Zone[]; faces: FaceLayout[]; mpp: number; floorHeight: number; slabMm: number; stdHeight: number; beamDepthMm: number;
-  cols?: Pt[][]; beams3?: { ring: Pt[]; d: number }[]; stairs?: [number, number, number, number][];
+  cols?: Pt[][]; beams3?: { ring: Pt[]; d: number }[]; stairs?: [number, number, number, number][]; stairOrient?: ({ along: boolean; landHigh: boolean; upHigh?: boolean } | null)[];
   stairGeo?: StairGeo[]; kickerMm?: number; scMm?: [number, number]; icMm?: number; ecMm?: number;
   openings?: { a: Pt; b: Pt; n: Pt; thk: number; door: boolean; sill: number; head: number; gap?: boolean; free?: boolean }[];
   arch?: { k: "rail" | "parapet" | "proj"; a?: Pt; b?: Pt; ring?: Pt[] }[];
@@ -181,17 +181,21 @@ export function buildScene3(o: {
   const acc: Acc3 = { props: [], ties: [], walers: [], pushPull: [], brackets: [], heads: [] };
   const FH = o.floorHeight;
   (o.stairs ?? []).forEach(([x0, y0, x1, y1], si) => {
-    const along = x1 - x0 >= y1 - y0;                        // flights run along the long side of the box
+    // the climb direction and the landing end as read from the drawing; else flights along the long side, landing at the far end
+    const ori = o.stairOrient?.[si];
+    const along = ori ? ori.along : x1 - x0 >= y1 - y0;
     const Lb = along ? x1 - x0 : y1 - y0, Wb = along ? y1 - y0 : x1 - x0;
     if (Lb < 1.5 || Wb < 1) return;
     // measured flights when the drawing gave them (risers, tread, width), else a typical dog-leg
     const g = (o.stairGeo ?? []).filter((x) => !x.assumed)[si];
     const per = g ? Math.max(2, g.risers) : Math.max(2, Math.ceil(FH / 2 / 0.17)), rise = g ? g.riser / 1000 : FH / 2 / per;
-    const land = g && g.landingM2 > 0 ? Math.min(Lb / 2, Math.max(0.9, g.landingM2 / Math.max(0.9, Wb))) : Math.min(1.5, Math.max(0.9, Wb / 2));
+    const land = g && ori ? Math.max(0.9, Lb - (Math.max(2, g.risers) - 1) * (g.tread / 1000)) : g && g.landingM2 > 0 ? Math.min(Lb / 2, Math.max(0.9, g.landingM2 / Math.max(0.9, Wb))) : Math.min(1.5, Math.max(0.9, Wb / 2));
     const tread = g ? Math.min(g.tread / 1000, (Lb - land) / Math.max(1, per - 1)) : Math.min(0.3, (Lb - land) / Math.max(1, per - 1));
     const half = g ? Math.min(g.width / 1000, Wb / 2) : Wb / 2;
     const fl = g ? Math.max(1, Math.min(2, g.flights)) : 2;
-    const P = (u: number, v: number): [number, number] => (along ? [x0 + u, y0 + v] : [x0 + v, y0 + u]);
+    const flipU = ori ? !ori.landHigh : false;               // landing at the low end: the plan is mirrored along the climb
+    const flipV = !!ori?.upHigh;                              // the first flight on the side of the "UP" arrow
+    const P = (u0: number, v0: number): [number, number] => { const u = flipU ? Lb - u0 : u0, v = flipV ? Wb - v0 : v0; return along ? [x0 + u, y0 + v] : [x0 + v, y0 + u]; };
     const box = (u: number, v: number, du: number, dv: number, yb: number, yt: number) => {
       const [cx, cz] = P(u + du / 2, v + dv / 2);
       steps.push({ c: [cx, (yb + yt) / 2, cz], s: along ? [du, yt - yb, dv] : [dv, yt - yb, du], rot: 0 });
@@ -310,7 +314,7 @@ export function buildScene3(o: {
         acc.props.push([x, z, 0, ly - 0.005, 2]); acc.heads.push([x, ly - 0.005, z, 2]);
       }
     }
-    if (fl > 1) flight(2, Lb - land, -1, half, Wb, topOf, topOf - waist, Wb);
+    if (fl > 1) flight(2, Lb - land, -1, Math.max(half, Wb - half), Wb, topOf, topOf - waist, Wb);      // the far side; the gap between the flights stays open
   });
   // ---- accessories (the same rules as the parts list) ----
   // deck props: a prop with a drop head under every mid-beam end and along it at the prop spacing
