@@ -4,6 +4,8 @@ const nextConfig = {
   // @react-pdf/renderer must run as a normal Node package on the server
   serverExternalPackages: ["@react-pdf/renderer"],
   poweredByHeader: false,
+  // one stamp per build, baked into the server and the pages: a page from an older build can tell it is out of date
+  env: { BUILD_STAMP: process.env.RENDER_GIT_COMMIT || String(Date.now()) },
   webpack: (config, { isServer }) => {
     // the DWG reader (LibreDWG WebAssembly) runs in the browser; its Node-only branches are never used there
     if (!isServer) config.resolve.fallback = { ...(config.resolve.fallback ?? {}), module: false, fs: false, path: false, url: false, crypto: false };

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 
 /** Friendly screen instead of "Application error": usually the server was restarting (new version / busy). */
 export default function DashboardError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
-  const chunk = /ChunkLoadError|Loading chunk|Failed to fetch dynamically imported module|502/i.test(`${error?.name} ${error?.message}`);
+  const chunk = /ChunkLoadError|Loading chunk|Failed to fetch dynamically imported module|502|Server Action .* was not found|failed-to-find-server-action/i.test(`${error?.name} ${error?.message}`);
   useEffect(() => {
     // a page file failed to load (server restarted with a new version): reload once automatically
     if (chunk && typeof window !== "undefined" && !sessionStorage.getItem("acoform-reloaded")) {
