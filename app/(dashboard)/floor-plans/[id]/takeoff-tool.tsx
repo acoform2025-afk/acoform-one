@@ -420,6 +420,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     if (!modelRef.current || !t.dxf) return;
     // structural drawings: several slab / floor layouts, each titled with its floors — the typical floor is the layout
     // that stands for the most floors ("SLAB OVER 17TH TO 26TH FLOOR"), drawn exactly as its title frames it
+    let fresh: Record<string, LayerRole> | null = null;
+    if (force && modelRef.current) { fresh = {}; for (const l of modelRef.current.layers) fresh[l.name] = learnedRole(l.name, dict) ?? l.suggested; }
     const lays = parts.filter((q) => q.kind === "plan" && isLayoutTitle(q.title));
     const lp = lays.length >= 2 ? [...lays].sort((a, b) => (floorsFromTitle(b.title) ?? 1) - (floorsFromTitle(a.title) ?? 1) || b.count - a.count)[0] : null;
     const pick = lp ? { n: lp.n, w: lp.w, h: lp.h, title: lp.title, floors: undefined as number | undefined, px: lp.px } : candidates.length >= 2 ? candidates[0] : null;
@@ -449,12 +451,14 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
       ...(bld ? { building: bld } : {}),
       auto: { done: true, note },
       params: { ...pp.params, ...(floors ? { floors } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}), ...(slabMm ? { slabMm } : {}), ...(beamDepthMm ? { beamDepthMm } : {}) },
-      dxf: pp.dxf && pick ? { ...pp.dxf, region: pick.px } : pp.dxf,
+      // "read again": the layers are set again as the app reads them now (a plan read by an older version keeps no stale layer roles)
+      dxf: pp.dxf ? { ...pp.dxf, ...(fresh ? { layerRoles: fresh } : {}), ...(pick ? { region: pick.px } : {}) } : pp.dxf,
     }));
+    if (fresh) setLayerVersion((v) => v + 1);
     setAutoNote(note ?? null);
     if (note) setAutoSave(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, parts, currentPart, readLevels, t.dxf, t.building, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update]);
+  }, [candidates, parts, currentPart, readLevels, t.dxf, t.building, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update, dict]);
   useEffect(() => {
     if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size) return;
     // only the first time a plan is opened: once the user has a region / saved values, nothing is changed automatically
@@ -1146,7 +1150,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
               <p>
                 <b>Counting:</b> {current ? `${current.title ?? `Drawing ${current.n}`} (${current.w.toFixed(1)} × ${current.h.toFixed(1)} m)` : currentPart ? `${currentPart.title} (${currentPart.w.toFixed(1)} × ${currentPart.h.toFixed(1)} m)` : t.dxf.region ? "your marked region" : "whole drawing"}
                 {canEdit ? <button type="button" onClick={() => { if (!choosing && size) fit(size.w, size.h); else if (choosing) zoomToSelected(); setChoosing((v) => !v); }} className="ml-2 underline hover:text-signal-amber">{choosing ? "Cancel" : "Choose another drawing"}</button> : null}
-                {canEdit ? <button type="button" onClick={() => { if (window.confirm("Read the drawing again? The typical floor, number of floors, floor height, slab thickness and beam depth (from the sections) are picked again from the drawing (your other figures stay).")) detect(true); }} className="ml-2 inline-flex items-center gap-1 underline hover:text-signal-amber"><RefreshCw className="size-3" />Read drawing again</button> : null}
+                {canEdit ? <button type="button" onClick={() => { if (window.confirm("Read the drawing again? The layers, typical floor, number of floors, floor height, slab thickness and beam depth are read again from the drawing (shapes you drew stay; layer roles you changed by hand are reset).")) detect(true); }} className="ml-2 inline-flex items-center gap-1 underline hover:text-signal-amber"><RefreshCw className="size-3" />Read drawing again</button> : null}
               </p>
               {autoNote ?? t.auto?.note ? <p className="mt-1 text-graphite-400">Read from the drawing when first opened: {autoNote ?? t.auto?.note} Your own changes are never overwritten.</p> : null}
               {choosing ? (
