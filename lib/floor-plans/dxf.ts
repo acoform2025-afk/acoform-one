@@ -10,7 +10,7 @@ import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, isRailLayer, suggestLa
 import { meaningOf, type Dictionary } from "./vocab";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
-export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
+export type DxfPath = { layer: string; pts: Pt[]; closed: boolean; dashed?: boolean };   // dashed: drawn with a broken linetype (hidden / dashed)
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole };   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
 /** A hatch boundary (filled area: columns, sunk / raised zones, cut-outs) or a leader line — kept apart from the lines so the reading of walls / beams is not changed by them. */
 export type DxfFill = DxfPath & { kind: "hatch" | "leader" };
@@ -84,7 +84,7 @@ export function cleanDxfText(text: string): string {
  * memory of a general DXF parser. Values broken over two lines (LibreDWG MTEXT) are skipped like cleanDxfText.
  * Output has the same shape as dxf-parser's for the fields readDxf reads.
  */
-export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]; blocks: Record<string, AnyEnt> } {
+export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]; blocks: Record<string, AnyEnt>; layerLt: Record<string, string>; ltDashed: Record<string, boolean> } {
   let pos = 0;
   const n = text.length;
   const line = (): string | null => {
@@ -108,6 +108,9 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
   const header: AnyEnt = {}, entities: AnyEnt[] = [], blocks: Record<string, AnyEnt> = {};
   const deg = Math.PI / 180;
   let section = "", cur: AnyEnt | null = null, target: AnyEnt[] = entities, block: AnyEnt | null = null, poly: AnyEnt | null = null, vtx: AnyEnt | null = null, hdrVar = "";
+  const layerLt: Record<string, string> = {}, ltDashed: Record<string, boolean> = {};
+  let tab: { type: string; name?: string; lt?: string; n?: number } | null = null;
+  const endTab = () => { if (tab?.name) { if (tab.type === "LAYER" && tab.lt) layerLt[tab.name] = tab.lt; if (tab.type === "LTYPE") ltDashed[tab.name.toUpperCase()] = (tab.n ?? 0) > 0; } tab = null; };
   const RAW = new Set(["HATCH", "LEADER", "SPLINE", "SOLID", "TRACE", "ELLIPSE", "DIMENSION", "MULTILEADER", "MLEADER"]);
   const flush = () => {
     if (!cur) return;
@@ -118,12 +121,12 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
     if (e.type === "ENDBLK") { block = null; target = entities; return; }
     if (e.inPaperSpace) return;
     switch (e.type) {
-      case "LINE": target.push({ type: "LINE", layer: e.layer, vertices: [{ x: e._x, y: e._y }, { x: e._x1, y: e._y1 }] }); break;
-      case "LWPOLYLINE": target.push({ type: "LWPOLYLINE", layer: e.layer, shape: (e._flag & 1) === 1, vertices: e._vs ?? [] }); break;
-      case "POLYLINE": if (!(e._flag & (16 | 64))) { const pl = { type: "POLYLINE", layer: e.layer, shape: (e._flag & 1) === 1, vertices: [] as AnyEnt[] }; target.push(pl); poly = pl; } else poly = { vertices: [] }; break;
+      case "LINE": target.push({ type: "LINE", layer: e.layer, lt: e._lt, vertices: [{ x: e._x, y: e._y }, { x: e._x1, y: e._y1 }] }); break;
+      case "LWPOLYLINE": target.push({ type: "LWPOLYLINE", layer: e.layer, lt: e._lt, shape: (e._flag & 1) === 1, vertices: e._vs ?? [] }); break;
+      case "POLYLINE": if (!(e._flag & (16 | 64))) { const pl = { type: "POLYLINE", layer: e.layer, lt: e._lt, shape: (e._flag & 1) === 1, vertices: [] as AnyEnt[] }; target.push(pl); poly = pl; } else poly = { vertices: [] }; break;
       case "CIRCLE": target.push({ type: "CIRCLE", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r }); break;
       case "ARC": target.push({ type: "ARC", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r, startAngle: (e._a0 ?? 0) * deg, endAngle: (e._a1 ?? 360) * deg }); break;
-      case "INSERT": target.push({ type: "INSERT", layer: e.layer, name: e.name, position: { x: e._x ?? 0, y: e._y ?? 0 }, xScale: e._sx ?? 1, yScale: e._sy ?? 1, rotation: e._rot ?? 0, cols: e._flag || 1, rows: e._rows || 1, colGap: e._cs ?? 0, rowGap: e._rs ?? 0 }); break;
+      case "INSERT": target.push({ type: "INSERT", layer: e.layer, lt: e._lt, name: e.name, position: { x: e._x ?? 0, y: e._y ?? 0 }, xScale: e._sx ?? 1, yScale: e._sy ?? 1, rotation: e._rot ?? 0, cols: e._flag || 1, rows: e._rows || 1, colGap: e._cs ?? 0, rowGap: e._rs ?? 0 }); break;
       case "TEXT": case "MTEXT": case "ATTRIB": {
         const t = ((e._t3 ?? "") + (e._t ?? "")).trim();
         // justified single-line text sits at its alignment point (11/21), not at its first point
@@ -143,10 +146,20 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
       if (val === "ENDSEC") { section = ""; continue; }
       if (val === "EOF") break;
       if (section === "ENTITIES" || section === "BLOCKS") cur = { type: val, layer: "0" };
+      if (section === "TABLES") { endTab(); tab = val === "LAYER" || val === "LTYPE" ? { type: val } : null; }
       continue;
     }
     if (section === "HEADER") {
       if (code === 9) hdrVar = val; else if (hdrVar === "$INSUNITS" && code === 70) header.$INSUNITS = Number(val);
+      continue;
+    }
+    // layer and linetype tables: which linetype each layer draws with, and which linetypes are broken (dashed)
+    if (section === "TABLES") {
+      if (tab) {
+        if (code === 2 && tab.name == null) tab.name = val;
+        else if (code === 6 && tab.type === "LAYER") tab.lt = val;
+        else if (code === 73 && tab.type === "LTYPE") tab.n = Number(val);
+      }
       continue;
     }
     if (!cur) continue;
@@ -154,6 +167,7 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
     if (RAW.has(cur.type) && code !== 8 && code !== 67) { const raw: [number, string][] = (cur._raw ??= []); if (raw.length < 400_000) raw.push([code, val]); continue; }
     switch (code) {
       case 8: cur.layer = val; break;
+      case 6: cur._lt = val; break;
       case 1: if (cur.type === "TEXT" || cur.type === "MTEXT" || cur.type === "ATTRIB") cur._t = val.slice(0, 2000); break;
       case 3: if (cur.type === "MTEXT") cur._t3 = ((cur._t3 ?? "") + val).slice(0, 2000); break;
       case 71: cur._rows = num; break;
@@ -177,7 +191,7 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
     }
   }
   flush();
-  return { header, entities, blocks };
+  return { header, entities, blocks, layerLt, ltDashed };
 }
 
 /**
@@ -280,13 +294,14 @@ const UNIT_TO_M_LOCAL: Record<string, number> = { mm: 0.001, cm: 0.01, m: 1, in:
 export function drawingSection(model: DxfModel): SectionLevels | null { return agreedSection(model.sections ?? []); }
 
 export function readDxf(raw: string): DxfModel {
-  let dxf: { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt> } | null = null;
+  let dxf: { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt>; layerLt?: Record<string, string>; ltDashed?: Record<string, boolean> } | null = null;
   try { dxf = leanParseDxf(raw); } catch { dxf = null; }
   if (!dxf || dxf.entities.length === 0) {
     dxf = new DxfParser().parseSync(cleanDxfText(raw)) as unknown as { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt> } | null;
   }
   if (!dxf) throw new Error("This DXF file could not be read.");
   const blocks = dxf.blocks ?? {};
+  const layerLt = dxf.layerLt ?? {}, ltDashed = dxf.ltDashed ?? {};
   const paths: DxfPath[] = [];
   const texts: DxfText[] = [];
   const views: DxfView[] = [];
@@ -302,7 +317,14 @@ export function readDxf(raw: string): DxfModel {
   const fills: DxfFill[] = [];
   const lateKinds = new WeakSet<DxfPath>();
   // textOnly: a dimension's own block — only its written value is wanted, not its extension lines / arrows
-  const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number, textOnly = false) => {
+  // a broken linetype: by the linetype table (has dash elements), else by its name
+  const LT_NAME = /dash|hidden|dot|center|centre|phantom|divide|border|acad_iso0[2-9]|acad_iso1/i;
+  const isDashed = (lt: string | undefined): boolean => {
+    if (!lt) return false; const k = lt.toUpperCase();
+    if (k === "CONTINUOUS" || k === "BYLAYER" || k === "BYBLOCK") return false;
+    return ltDashed[k] ?? LT_NAME.test(lt);
+  };
+  const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number, textOnly = false, parentLt?: string) => {
     for (const e of ents) {
       if (paths.length > 150000) return;
       if (textOnly && e.type !== "TEXT" && e.type !== "MTEXT" && e.type !== "INSERT") continue;
@@ -310,9 +332,11 @@ export function readDxf(raw: string): DxfModel {
       const layer: string = (e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0");
       // doors, windows, glazing, furniture … never carry formwork geometry: skip their lines (keep their texts)
       const noise = noiseCache.get(layer) ?? (noiseCache.set(layer, isNoiseLayer(layer)), noiseCache.get(layer)!);
+      // the entity's linetype: its own, else its layer's (BYLAYER), else the block insert's (BYBLOCK)
+      const ltName = !e.lt || /^bylayer$/i.test(e.lt) ? layerLt[layer] : /^byblock$/i.test(e.lt) ? parentLt : e.lt;
       const push = (pts: Pt[], closed: boolean) => {
         if (pts.length < 2) return;
-        if (!noise) { paths.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed }); return; }
+        if (!noise) { paths.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed, ...(isDashed(ltName) ? { dashed: true } : {}) }); return; }
         // door / window lines are kept apart: where they sit inside a wall they mark an opening in it
         const dk = dwCache.get(layer) ?? (dwCache.set(layer, doorWindowKind(layer)), dwCache.get(layer)!);
         if (dk && dw.length < 80_000) dw.push({ layer, kind: dk, pts: pts.map(([x, y]) => ap(m, x, y)), closed });
@@ -374,7 +398,7 @@ export function readDxf(raw: string): DxfModel {
               e: (e.position?.x ?? 0) + ox * Math.cos(rot) - oy * Math.sin(rot), f: (e.position?.y ?? 0) + ox * Math.sin(rot) + oy * Math.cos(rot),
             };
             const local = mul(t, { ...ID, e: -base.x, f: -base.y });
-            walk(b.entities ?? [], mul(m, local), layer, depth + 1, textOnly);
+            walk(b.entities ?? [], mul(m, local), layer, depth + 1, textOnly, ltName);
           }
           if (depth === 0 && /section|(^|[^a-z])sec([^a-z]|$)/i.test(String(e.name))) { const nm = String(e.name).slice(0, 100); (secRanges.get(nm) ?? secRanges.set(nm, []).get(nm)!).push([before, paths.length]); }
           // a big named block placed in model space is a drawing of its own (e.g. "TOWER B FIRST FLOOR PLAN")
@@ -595,7 +619,7 @@ export function closedLoops(paths: DxfPath[], tol: number, closeGaps = false): P
  * lines of the same length (0.7–2.5 m) at a regular 200–360 mm spacing are tread lines. Flights closer than 1.5 m
  * make one staircase. Returns the staircase boxes (drawing units) round the flights.
  */
-function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, number, number][] {
+export function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, number, number][] {
   const mm = u * 1000;
   type Seg = { a: Pt; b: Pt; L: number; ang: number };
   const segs: Seg[] = [];
@@ -617,7 +641,9 @@ function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, number,
     const cls: (typeof rows)[] = [];
     for (const r of rows) { const c = cls.find((c2) => Math.abs(c2[0].along - r.along) * mm <= 0.4 * r.sg.L); if (c) c.push(r); else cls.push([r]); }
     for (const cl of cls) {
-      const rs = cl.sort((p1, p2) => p1.off - p2.off).filter((r, i, arr) => i === 0 || (r.off - arr[i - 1].off) * mm >= 20);
+      // a tread drawn with its nosing (two lines 25–80 mm apart) counts once
+      const rs: typeof cl = [];
+      for (const r of cl.sort((p1, p2) => p1.off - p2.off)) if (!rs.length || (r.off - rs[rs.length - 1].off) * mm >= 90) rs.push(r);
       let run: typeof rs = [];
       const flush = () => {
         if (run.length >= 5) {
@@ -635,7 +661,10 @@ function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, number,
       flush();
     }
   }
-  // flights near each other (dog-leg: side by side) → one staircase
+  return mergeFlights(flights, u);
+}
+/** Flights near each other (dog-leg: side by side; also when each flight is drawn on its own layer) → one staircase. */
+function mergeFlights(flights: [number, number, number, number][], u: number): [number, number, number, number][] {
   const g = 1.5 / u, parent = flights.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   for (let i = 0; i < flights.length; i++) for (let j = i + 1; j < flights.length; j++) {
@@ -711,7 +740,9 @@ export function measureStairs(paths: DxfPath[], boxes: [number, number, number, 
       const clusters: (typeof all)[] = [];
       for (const r2 of all) { const c = clusters[clusters.length - 1]; if (c && Math.abs(r2.along - c[c.length - 1].along) * mm <= 0.5 * r2.L) c.push(r2); else clusters.push([r2]); }
       for (const cl of clusters) {
-        const rows = cl.sort((p1, p2) => p1.off - p2.off).filter((r2, i, arr) => i === 0 || (r2.off - arr[i - 1].off) * mm >= 20);   // the same line drawn twice counts once
+        // the same line drawn twice, or a tread drawn with its nosing (a second line 25–80 mm away), counts once
+        const rows: typeof cl = [];
+        for (const r2 of cl.sort((p1, p2) => p1.off - p2.off)) if (!rows.length || (r2.off - rows[rows.length - 1].off) * mm >= 90) rows.push(r2);
         let run: typeof rows = [];
         const flush = () => {
           if (run.length >= 3) {
@@ -731,7 +762,8 @@ export function measureStairs(paths: DxfPath[], boxes: [number, number, number, 
         flush();
       }
     }
-    if (!flights.length) continue;
+    // one entry per box, in the same order (a staircase whose treads cannot be read keeps its place, with no flights)
+    if (!flights.length) { out.push({ box, flights: [], landingM2: 0 }); continue; }
     const boxA = (box[2] - box[0]) * (box[3] - box[1]) * mm * mm;
     // landing: the rest of the box, else (landing lines not on the stair layer) a landing as deep as the flights are wide
     const sumW = flights.reduce((s2, fl) => s2 + fl.width, 0), avgW = sumW / flights.length;
@@ -1063,6 +1095,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   // lifts, shafts, ducts, cut-outs named on the plan (P.LIFT, S.LIFT, SHAFT, DUCT, OTS …): the space round the name,
   // bounded by the walls; boxes with an X on the generic layers — both are holes in the slab
   const extraOpen: Pt[][] = [];
+  const sunkX: { depth: number; perimeter: number; area: number; box: [number, number, number, number] }[] = [];   // sunk slabs marked with a dashed X
   {
     const tx = (model.texts ?? []).filter((t) => isOpeningLabel(t.text, opts.dict) && t.text.length <= 30 && (!keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false })));
     // lift doors are open gaps in the core walls: bridged (up to 1.3 m), and lines on the generic layers (door / sill
@@ -1077,15 +1110,26 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     }
     // structural slab plans: a bay crossed by an X drawn on the beam layers is a cut-out / lift / void — unless a sunk
     // or level mark ("300 SUNK", "+225 LVL", a sunk / level hatch) says it is a lowered or raised slab
+    // When the drawing keeps its linetypes, the X itself says which: an X of continuous lines is a cut-out, an X of
+    // broken (dashed / hidden) lines is a sunk slab — the drop depth from the "300 SUNK" note in it
     const lvlMark = /sunk|lvl|level|drop|^\s*[+-]\s*\d{2,4}\b/i;
-    for (const b of xMarkedBoxes(of("beams").filter((p) => !p.closed && p.pts.length === 2), 0.02 / u)) {
+    const ltKnown = model.paths.some((p) => p.dashed);
+    const xLines = of("beams").filter((p) => !p.closed && p.pts.length === 2);
+    for (const b of ltKnown ? xMarkedBoxes(xLines.filter((p) => p.dashed), 0.02 / u, 0.15 / u) : []) {
+      const xs = b.map((q) => q[0]), ys = b.map((q) => q[1]), bx = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+      const w = (bx[2] - bx[0]) * u, h = (bx[3] - bx[1]) * u;
+      if (w < 0.4 || h < 0.4 || w * h > 150) continue;
+      const note = (model.texts ?? []).find((t) => t.x >= bx[0] && t.x <= bx[2] && t.y >= bx[1] && t.y <= bx[3] && /sunk|drop/i.test(t.text));
+      sunkX.push({ depth: Number(note?.text.match(/(\d{2,3})/)?.[1] ?? 0), perimeter: 2 * (w + h), area: w * h, box: bx as [number, number, number, number] });
+    }
+    for (const b of xMarkedBoxes(ltKnown ? xLines.filter((p) => !p.dashed) : xLines, 0.02 / u)) {
       const xs = b.map((q) => q[0]), ys = b.map((q) => q[1]), bx = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
       const w = (bx[2] - bx[0]) * u, h = (bx[3] - bx[1]) * u;
       if (w < 0.4 || h < 0.4 || w * h > 150) continue;
       const inB = (x: number, y: number) => x >= bx[0] && x <= bx[2] && y >= bx[1] && y <= bx[3];
-      if ((model.texts ?? []).some((t) => inB(t.x, t.y) && lvlMark.test(t.text.trim()))) continue;
+      if (!ltKnown && (model.texts ?? []).some((t) => inB(t.x, t.y) && lvlMark.test(t.text.trim()))) continue;
       // a hatch in the box (sunk / level / beam-bottom slab patterns) marks slab; cut-outs and lifts are plain crosses
-      if ((model.fills ?? []).some((f) => f.kind === "hatch" && (roles[f.layer] ?? "ignore") !== "opening" && (roles[f.layer] ?? "ignore") !== "columns" && !/lift|cut|cop|duct|shaft|void|open/i.test(f.layer) && f.pts.every((q) => inB(q[0], q[1])) && Math.abs(polyArea(f.pts)) * u2 >= 0.3 * w * h)) continue;
+      if (!ltKnown && (model.fills ?? []).some((f) => f.kind === "hatch" && (roles[f.layer] ?? "ignore") !== "opening" && (roles[f.layer] ?? "ignore") !== "columns" && !/lift|cut|cop|duct|shaft|void|open/i.test(f.layer) && f.pts.every((q) => inB(q[0], q[1])) && Math.abs(polyArea(f.pts)) * u2 >= 0.3 * w * h)) continue;
       extraOpen.push(b);
     }
   }
@@ -1439,6 +1483,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
         const depth = Number(layer.match(/(\d{2,3})\s*mm/i)?.[1] ?? layer.match(/(\d{2,3})/)?.[1] ?? 0);
         for (const r of closedLoops(ps, tol)) { const a = Math.abs(polyArea(r)) * u2; if (a >= 0.5) out.push({ depth, perimeter: polyLength(r, true) * u, area: a }); }
       }
+      for (const x of sunkX) if (!keep || keep({ layer: "", pts: [[(x.box[0] + x.box[2]) / 2, (x.box[1] + x.box[3]) / 2]], closed: false })) out.push({ depth: x.depth, perimeter: x.perimeter, area: x.area });
       return out;
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
@@ -1460,18 +1505,25 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     ...(() => {
       const sp = model.paths.filter((p) => /stair|staircase|\bstep|(^|[^a-z])strs([^a-z]|$)|楼梯/i.test(p.layer) && !/lift|elev|note|text|anno|iden/i.test(p.layer) && (!keep || keep(p)));
       let s = stairClusters(sp, u), src = sp;
-      // no stair layer: tread lines on the generic layers; the staircase is the walled space round its flights
-      if (!s.length) {
-        const fl = treadFlightBoxes(misc, u);
+      // tread lines on other layers — generic, mark-up ("COMMENTS"), or the beam layer of a framing plan: every
+      // staircase whose treads are not on a stair layer (one drawing often puts each stair on a different layer); the
+      // staircase is the walled space round its flights
+      {
+        const pool = [...misc, ...(framing ? beamPaths : [])];
+        const clear = (b: number[]) => !s.some((o) => b[0] < o[2] && o[0] < b[2] && b[1] < o[3] && o[1] < b[3]);
+        // layer by layer: lines of another layer (beam edges, grid) in between would break the even tread spacing
+        const byLayer = new Map<string, DxfPath[]>();
+        for (const p of pool) (byLayer.get(p.layer) ?? byLayer.set(p.layer, []).get(p.layer)!).push(p);
+        const fl = mergeFlights([...byLayer.values()].flatMap((ps) => treadFlightBoxes(ps, u)), u).filter(clear);
         if (fl.length) {
-          src = misc;
-          s = fl.map((b) => {
+          src = [...sp, ...pool];
+          s = [...s, ...fl.map((b) => {
             const c: Pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
             const sp2 = U.rings.length ? labelledSpaces(U.rings, loose, [c], u, 60, 0.3)[0] : undefined;
             const fa = (b[2] - b[0]) * (b[3] - b[1]) * u2;
             if (sp2 && sp2.area >= fa * 0.9 && sp2.area <= 60) return sp2.box;
             const e = 0.15 / u; return [b[0] - e, b[1] - e, b[2] + e, b[3] + e] as [number, number, number, number];
-          });
+          })];
         }
       }
       // a stair drawn only as a labelled room ("楼梯 另详" — flights detailed on another sheet; "LT1", "ST-1", "TB2/D/180"

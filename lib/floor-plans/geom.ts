@@ -126,7 +126,9 @@ export function outlineFromWalls(walls: { pts: Pt[]; closed: boolean }[], unit: 
 }
 
 /** Rectangles drawn as a box with an X: pairs of straight lines that are the two diagonals of the same box. */
-export function xMarkedBoxes(lines: { pts: Pt[]; closed: boolean }[], tol: number): Pt[][] {
+/** tol: how far the two diagonals' boxes may differ; loose: hand-drawn crosses (diagonals that stop short of the
+ *  corners or overrun them) — matched by centre and size within `loose`, the box is the union of both. */
+export function xMarkedBoxes(lines: { pts: Pt[]; closed: boolean }[], tol: number, loose = 0): Pt[][] {
   const segs = lines.filter((l) => !l.closed && l.pts.length === 2).map((l) => l.pts as [Pt, Pt]);
   const used = new Set<number>(); const out: Pt[][] = [];
   const bb = ([a, b]: [Pt, Pt]) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
@@ -136,9 +138,14 @@ export function xMarkedBoxes(lines: { pts: Pt[]; closed: boolean }[], tol: numbe
     for (let j = i + 1; j < segs.length; j++) {
       if (used.has(j)) continue;
       const B = bb(segs[j]);
-      if (A.every((v, k) => Math.abs(v - B[k]) <= tol)) {
+      const near = A.every((v, k) => Math.abs(v - B[k]) <= tol) || (loose > 0 && Math.abs(A[0] + A[2] - B[0] - B[2]) / 2 <= 2 * loose && Math.abs(A[1] + A[3] - B[1] - B[3]) / 2 <= 2 * loose
+        && Math.abs((A[2] - A[0]) - (B[2] - B[0])) <= Math.max(2 * loose, 0.25 * (A[2] - A[0])) && Math.abs((A[3] - A[1]) - (B[3] - B[1])) <= Math.max(2 * loose, 0.25 * (A[3] - A[1])));
+      if (near) {
         const s1 = (segs[i][1][0] - segs[i][0][0]) * (segs[i][1][1] - segs[i][0][1]), s2 = (segs[j][1][0] - segs[j][0][0]) * (segs[j][1][1] - segs[j][0][1]);
-        if (Math.sign(s1) !== Math.sign(s2)) { used.add(i); used.add(j); out.push([[A[0], A[1]], [A[2], A[1]], [A[2], A[3]], [A[0], A[3]]]); break; }
+        if (Math.sign(s1) !== Math.sign(s2)) {
+          const U = [Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.max(A[2], B[2]), Math.max(A[3], B[3])];
+          used.add(i); used.add(j); out.push([[U[0], U[1]], [U[2], U[1]], [U[2], U[3]], [U[0], U[3]]]); break;
+        }
       }
     }
   }
