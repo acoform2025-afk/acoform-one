@@ -697,12 +697,81 @@ function wallOpeningsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" 
 const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
 
 /** keep: optional filter, e.g. only paths inside the chosen plan region (so sections/elevations in the same file are not counted). */
+/**
+ * The floor as one connected island of structure. Elements: closed wall outlines and wall lines, column outlines,
+ * beam outlines and straight beam lines, slab-edge lines, doors / windows, railings. Two elements belong together
+ * when their boxes come within `gap` (1 m) of each other. The island with the most wall area inside the region is the
+ * floor. `on(p)` answers for an element path (true / false), undefined for anything else (texts, generic lines);
+ * `near(pts)` tells whether a point set lies within a metre of the floor's elements.
+ */
+export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u: number, keep?: (p: DxfPath) => boolean): { on: (p: DxfPath) => boolean | undefined; near: (pts: Pt[]) => boolean; count: number; dropped: number } {
+  const gap = 3 / u, axisTol = 0.02;            // 3 m: a doorway, a stairwell, a lift opening or a balcony between two walls still joins them
+  // a captioned detail / section / legend ("…示意", "…大样", "…详图", "DETAIL", "SECTION", "LEGEND") drawn next to the plan:
+  // the geometry standing over its caption is that detail, never the floor
+  const capRe = /示意图?$|大样$|详图$|节点$|做法$|\bdetail\b|\bsection\b|\blegend\b|\btypical\b/i;
+  const capBoxes = (model.texts ?? []).filter((t) => capRe.test(t.text.trim()) && t.text.trim().length <= 40).map((t) => { const w = Math.max(1.5 / u, t.text.trim().length * t.h * 0.6); return [t.x - w, t.y - 0.6 / u, t.x + w, t.y + 6 / u] as [number, number, number, number]; });
+  const inCaption = (b: [number, number, number, number]) => capBoxes.some((c) => b[0] >= c[0] && b[2] <= c[2] && b[1] >= c[1] && b[3] <= c[3]);
+  const straight = (p: DxfPath) => { if (p.closed || p.pts.length !== 2) return true; const dx = Math.abs(p.pts[1][0] - p.pts[0][0]), dy = Math.abs(p.pts[1][1] - p.pts[0][1]); return Math.min(dx, dy) <= axisTol * Math.max(dx, dy); };
+  type El = { p: DxfPath; box: [number, number, number, number]; strong: boolean; wallA: number; link?: boolean };
+  const els: El[] = [];
+  const detail = new Set<DxfPath>();
+  const dwSet = new Set<DxfPath>(model.dw ?? []);
+  for (const p of [...model.paths, ...(model.dw ?? []), ...(model.rails ?? [])]) {
+    const r = roles[p.layer] ?? "ignore";
+    const isDw = dwSet.has(p), rail = isRailLayer(p.layer) || (model.rails ?? []).includes(p);
+    let kind: "wall" | "col" | "beam" | "slab" | "dw" | "link" | null = null;
+    if (r === "walls" || r === "upstand") kind = "wall"; else if (r === "columns") kind = "col"; else if (r === "beams") kind = "beam"; else if (r === "slab" || (r === "ignore" && (SLAB_EDGE_HINT.test(p.layer) || rail))) kind = "slab"; else if (isDw || r === "opening") kind = "dw";
+    // generic straight lines (brick walls, sills, slab edges, stair treads on unnamed layers) link elements across
+    // balconies and partitions; they are connectors only — neither kept nor dropped by the island
+    else if (r === "ignore" && !MISC_NOISE.test(p.layer) && straight(p) && polyLength(p.pts, p.closed) * u >= 0.5) kind = "link";
+    if (!kind) continue;
+    if (p.pts.length < 2) continue;
+    const L = polyLength(p.pts, p.closed) * u; if (L < 0.15) continue;
+    // a single slanting line on a beam / slab layer is a leader or a section mark, not a connector
+    if ((kind === "beam" || kind === "slab") && !straight(p)) continue;
+    if (kind === "link") { const xs0 = p.pts.map((q) => q[0]), ys0 = p.pts.map((q) => q[1]); const b0: [number, number, number, number] = [Math.min(...xs0), Math.min(...ys0), Math.max(...xs0), Math.max(...ys0)]; if (!inCaption(b0) && (!keep || keep(p))) els.push({ p, box: b0, strong: false, wallA: 0, link: true }); continue; }
+    const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
+    const box: [number, number, number, number] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    if (inCaption(box)) { detail.add(p); continue; }
+    els.push({ p, box, strong: kind !== "beam" || p.closed, wallA: kind === "wall" && p.closed ? Math.abs(polyArea(p.pts)) : kind === "wall" ? L * 0.2 / u : 0 });
+  }
+  if (!els.length) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size };
+  // union-find over box nearness, with a coarse grid so big drawings stay fast
+  const parent = els.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const cell = gap * 2, grid = new Map<string, number[]>();
+  const keyOf = (x: number, y: number) => `${Math.floor(x / cell)}:${Math.floor(y / cell)}`;
+  els.forEach((e, i) => { for (let x = e.box[0]; x <= e.box[2] + cell; x += cell) for (let y = e.box[1]; y <= e.box[3] + cell; y += cell) { const k = keyOf(x, y); const a = grid.get(k); if (a) a.push(i); else grid.set(k, [i]); } });
+  const touch = (a: El, b: El) => a.box[0] <= b.box[2] + gap && b.box[0] <= a.box[2] + gap && a.box[1] <= b.box[3] + gap && b.box[1] <= a.box[3] + gap;
+  for (const ids of grid.values()) for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) { const a = els[ids[i]], b = els[ids[j]]; if (find(ids[i]) !== find(ids[j]) && touch(a, b)) parent[find(ids[i])] = find(ids[j]); }
+  // the floor: the island with the most wall area inside the region (seeded by the region, grown beyond it)
+  const inReg = (e: El) => !keep || keep(e.p);
+  const area = new Map<number, number>();
+  els.forEach((e, i) => { if (inReg(e)) { const g = find(i); area.set(g, (area.get(g) ?? 0) + e.wallA); } });
+  let main = -1, best = -1; for (const [g, a] of area) if (a > best) { best = a; main = g; }
+  if (main < 0) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size };
+  const onEl = new Map<DxfPath, boolean>();
+  let count = 0, dropped = 0;
+  els.forEach((e, i) => { if (e.link) return; const ok = find(i) === main && (inReg(e) || e.strong); onEl.set(e.p, ok); if (ok) count++; else dropped++; });
+  const mainBoxes = els.filter((e, i) => find(i) === main && !e.link).map((e) => e.box);
+  const near = (pts: Pt[]) => pts.some((q) => mainBoxes.some((b) => q[0] >= b[0] - gap && q[0] <= b[2] + gap && q[1] >= b[1] - gap && q[1] <= b[3] + gap));
+  return { on: (p) => (detail.has(p) ? false : onEl.get(p)), near, count, dropped: dropped + detail.size };
+}
+
 export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary } = {}): DxfAuto {
   const u = unitToM, u2 = unitToM * unitToM;
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
   const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m] as [number, number, number, number]; });
   const inCloud = (q: Pt) => clouds.some((b) => q[0] >= b[0] && q[0] <= b[2] && q[1] >= b[1] && q[1] <= b[3]);
   const markup = (p: DxfPath) => clouds.length > 0 && (isRevCloud(p.pts, u) || (!p.closed && p.pts.length <= 3 && (inCloud(p.pts[0]) || inCloud(p.pts[p.pts.length - 1]))));
+  // THE FLOOR IS ONE CONNECTED STRUCTURE: walls, columns, beams, slab edges, doors and windows of a floor stand within
+  // a metre of one another (brick walls between shear walls carry beams, sills and slab edges, so the chain never
+  // breaks); details, legends, sketches and notes drawn beside the plan do not touch it. The structure with the most
+  // wall area inside the region is the floor; every other island is left out, and a wall / column / slab edge that
+  // continues outside the region joins the floor (a hand-drawn box that cuts the building is widened by what it cuts).
+  const island = floorIsland(model, roles, u, keep);
+  const keep0 = keep;
+  keep = (p: DxfPath) => island.on(p) ?? (!keep0 || keep0(p));
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)) && !markup(p));
   const tol = 0.005 / u;                                      // 5 mm in drawing units
   const loops = (r: LayerRole, gaps = false) => closedLoops(of(r), tol, gaps).map((pts) => ({ layer: r, pts, closed: true }) as DxfPath);
@@ -798,7 +867,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   // openings: closed loops + boxes marked with an X
   // IS 1200-5: openings under 0.4 m² are not deducted
   // generic layers (not walls, not services / annotation): lifts, ducts and stairs are often drawn on them
-  const misc = model.paths.filter((p) => (roles[p.layer] ?? "ignore") === "ignore" && (!keep || keep(p)) && !MISC_NOISE.test(p.layer));
+  const misc = model.paths.filter((p) => (roles[p.layer] ?? "ignore") === "ignore" && (!keep || keep(p)) && !MISC_NOISE.test(p.layer) && island.near(p.pts));
   // lifts, shafts, ducts, cut-outs named on the plan (P.LIFT, S.LIFT, SHAFT, DUCT, OTS …): the space round the name,
   // bounded by the walls; boxes with an X on the generic layers — both are holes in the slab
   const extraOpen: Pt[][] = [];
@@ -1173,6 +1242,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
         gapSoffit: g.reduce((s, x) => s + x.span * x.thk, 0),
         windowGaps: { count: win.length, span: win.reduce((s, x) => s + x.span, 0), top: win.reduce((s, x) => s + x.span * x.thk, 0) },
         edgeBeamLength: edgeLen, edgeBeams: edgeSegs.slice(0, 4000), parapetRings: UP?.rings ?? [],
+        onFloor: (p) => (!keep || keep(p as DxfPath)) && island.near(p.pts),
       };
     })(),
   };

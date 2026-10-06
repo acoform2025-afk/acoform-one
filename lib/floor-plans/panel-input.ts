@@ -61,7 +61,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     const tm = (q: Pt): Pt => { const [x, y] = f.toPx(q); return [x * mpp, y * mpp]; };
     for (const p of [...(model.rails ?? []), ...model.paths]) {
       if (archItems.length > 6000) break;
-      const k = kindOf(p.layer); if (!k || (keep && !keep(p))) continue;
+      const k = kindOf(p.layer); if (!k || (auto?.onFloor ? !auto.onFloor(p) : keep && !keep(p))) continue;
       const pts = p.pts.map(tm);
       if (k === "proj" && p.closed && pts.length >= 3) { archItems.push({ k, ring: pts }); continue; }
       for (let i = 0; i < pts.length - (p.closed ? 0 : 1); i++) {
@@ -69,6 +69,8 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
         if (Math.hypot(dx, dy) < 0.1) continue;
         // a slanting line on a projection layer is the cross marking an opening / shaft, not a sunshade
         if (k === "proj" && Math.min(dx, dy) > 0.1 * Math.max(dx, dy)) continue;
+        // a long slanting single line is a leader / section line crossing the plan, not a railing or parapet
+        if (p.pts.length === 2 && Math.min(dx, dy) > 0.05 * Math.max(dx, dy) && Math.hypot(dx, dy) > 2.5) continue;
         archItems.push({ k, a, b });
       }
     }
