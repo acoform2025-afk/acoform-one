@@ -429,6 +429,17 @@ export function readDxf(raw: string): DxfModel {
   const byLayer = new Map<string, DxfLayerInfo>();
   const info = (l: string) => byLayer.get(l) ?? (byLayer.set(l, { name: l, count: 0, closed: 0, suggested: suggestRole(l) }), byLayer.get(l)!);
   for (const p of paths) { const li = info(p.layer); li.count++; if (p.closed) li.closed++; }
+  // a layer named as walls / columns that holds only circles (room-type tags, grid bubbles) is not structure
+  {
+    const circ = new Map<string, number>();
+    for (const p of paths) {
+      if (!p.closed || p.pts.length < 16) continue;
+      const cx = p.pts.reduce((a, q) => a + q[0], 0) / p.pts.length, cy = p.pts.reduce((a, q) => a + q[1], 0) / p.pts.length;
+      const r = p.pts.map((q) => Math.hypot(q[0] - cx, q[1] - cy)), rm = r.reduce((a, b) => a + b, 0) / r.length;
+      if (rm > 0 && r.every((v) => Math.abs(v - rm) <= 0.03 * rm)) circ.set(p.layer, (circ.get(p.layer) ?? 0) + 1);
+    }
+    for (const li of byLayer.values()) if ((li.suggested === "walls" || li.suggested === "columns") && li.count >= 3 && (circ.get(li.name) ?? 0) >= 0.75 * li.count) li.suggested = "ignore";
+  }
   // every layer of the drawing is listed — also those with only texts (beam marks, dimensions) or only hatches
   for (const t of texts) if (t.layer) { const li = info(t.layer); li.texts = (li.texts ?? 0) + 1; }
   for (const f of fills) { const li = info(f.layer); li.fills = (li.fills ?? 0) + 1; }
