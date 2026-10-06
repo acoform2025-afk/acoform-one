@@ -204,7 +204,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
           const roles: Record<string, LayerRole> = {};
           // what the estimator set on this plan wins; otherwise what the company taught for this layer name, then the name rule
           for (const l of model.layers) {
-            const own = saved.dxf?.layerRoles?.[l.name], learned = learnedRole(l.name, dict);
+            // a role the layer's content rules out (a "wall" layer holding only circles) is never used, whoever set it
+            const ok = (r: LayerRole | undefined) => (r != null && r !== l.vetoed ? r : undefined);
+            const own = ok(saved.dxf?.layerRoles?.[l.name]), learned = ok(learnedRole(l.name, dict));
             roles[l.name] = own != null && (own !== l.suggested || !learned) ? own : learned ?? l.suggested;
           }
           const units = (saved.dxf?.units ?? model.units) as DxfUnits;
@@ -421,7 +423,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     // structural drawings: several slab / floor layouts, each titled with its floors — the typical floor is the layout
     // that stands for the most floors ("SLAB OVER 17TH TO 26TH FLOOR"), drawn exactly as its title frames it
     let fresh: Record<string, LayerRole> | null = null;
-    if (force && modelRef.current) { fresh = {}; for (const l of modelRef.current.layers) fresh[l.name] = learnedRole(l.name, dict) ?? l.suggested; }
+    if (force && modelRef.current) { fresh = {}; for (const l of modelRef.current.layers) { const lr = learnedRole(l.name, dict); fresh[l.name] = lr != null && lr !== l.vetoed ? lr : l.suggested; } }
     const lays = parts.filter((q) => q.kind === "plan" && isLayoutTitle(q.title));
     const lp = lays.length >= 2 ? [...lays].sort((a, b) => (floorsFromTitle(b.title) ?? 1) - (floorsFromTitle(a.title) ?? 1) || b.count - a.count)[0] : null;
     const pick = lp ? { n: lp.n, w: lp.w, h: lp.h, title: lp.title, floors: undefined as number | undefined, px: lp.px } : candidates.length >= 2 ? candidates[0] : null;

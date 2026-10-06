@@ -11,7 +11,7 @@ import { meaningOf, type Dictionary } from "./vocab";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
-export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number };   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
+export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole };   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
 /** A hatch boundary (filled area: columns, sunk / raised zones, cut-outs) or a leader line — kept apart from the lines so the reading of walls / beams is not changed by them. */
 export type DxfFill = DxfPath & { kind: "hatch" | "leader" };
 export type DxfText = { text: string; x: number; y: number; h: number; layer?: string; r?: number; al?: "c" | "r"; kind?: "dim" | "attr" };   // r: rotation (radians, drawing axes); kind: a dimension value / a block attribute (grid bubble, tag)
@@ -438,7 +438,7 @@ export function readDxf(raw: string): DxfModel {
       const r = p.pts.map((q) => Math.hypot(q[0] - cx, q[1] - cy)), rm = r.reduce((a, b) => a + b, 0) / r.length;
       if (rm > 0 && r.every((v) => Math.abs(v - rm) <= 0.03 * rm)) circ.set(p.layer, (circ.get(p.layer) ?? 0) + 1);
     }
-    for (const li of byLayer.values()) if ((li.suggested === "walls" || li.suggested === "columns") && li.count >= 3 && (circ.get(li.name) ?? 0) >= 0.75 * li.count) li.suggested = "ignore";
+    for (const li of byLayer.values()) if ((li.suggested === "walls" || li.suggested === "columns") && li.count >= 3 && (circ.get(li.name) ?? 0) >= 0.75 * li.count) { li.vetoed = li.suggested; li.suggested = "ignore"; }
   }
   // every layer of the drawing is listed — also those with only texts (beam marks, dimensions) or only hatches
   for (const t of texts) if (t.layer) { const li = info(t.layer); li.texts = (li.texts ?? 0) + 1; }
@@ -933,8 +933,17 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
   return { on: (p) => (detail.has(p) && !forced([p.pts[0][0], p.pts[0][1], p.pts[0][0], p.pts[0][1]]) ? false : onEl.get(p)), near, count, dropped: dropped + detail.size, notes };
 }
 
-export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][]; beamDepthMm?: number } = {}): DxfAuto {
+/** The layer roles as used: a role the layer's own content rules out (DxfLayerInfo.vetoed) counts as "ignore", also
+ *  when it was saved on the plan or taught for that layer name by another drawing. */
+export function effectiveRoles(model: DxfModel, roles: Record<string, LayerRole>): Record<string, LayerRole> {
+  let out: Record<string, LayerRole> | null = null;
+  for (const l of model.layers) if (l.vetoed && roles[l.name] === l.vetoed) { out ??= { ...roles }; out[l.name] = "ignore"; }
+  return out ?? roles;
+}
+
+export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][]; beamDepthMm?: number } = {}): DxfAuto {
   const u = unitToM, u2 = unitToM * unitToM;
+  const roles = effectiveRoles(model, rolesIn);
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
   const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m] as [number, number, number, number]; });
   const inCloud = (q: Pt) => clouds.some((b) => q[0] >= b[0] && q[0] <= b[2] && q[1] >= b[1] && q[1] <= b[3]);
@@ -1914,7 +1923,8 @@ export function sheetFrames(model: DxfModel, unitToM: number): Box[] {
  * split again where each piece has its own title, or by their walls); named blocks / Revit views are drawings of their
  * own. Each gets a title (drawing title text or view name) and a type. Numbered in reading order (top row first).
  */
-export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<string, LayerRole>): DrawingPart[] {
+export function drawingParts(model: DxfModel, unitToM: number, rolesIn?: Record<string, LayerRole>): DrawingPart[] {
+  const roles = rolesIn ? effectiveRoles(model, rolesIn) : rolesIn;
   // named blocks that hold only skipped layers (glazing, doors, railings in elevations) are not drawings
   const linesIn = (b: number[]) => { let n = 0; for (const p of model.paths) { const [x, y] = p.pts[0]; if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] && ++n >= 30) break; } return n; };
   const views = (model.views ?? []).filter((v) => (v.box[2] - v.box[0]) * unitToM >= 2 && (v.box[3] - v.box[1]) * unitToM >= 2 && linesIn(v.box) >= 30);

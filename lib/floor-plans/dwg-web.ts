@@ -7,6 +7,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { doorWindowKind, isNoiseLayer, isRailLayer } from "./layer-rules";
 import { SECTION_LAYER, sectionLevels, sectionMarker, type SectionLevels } from "./section-read";
+import { cleanDxfText } from "./dxf";
 type Xf = [number, number, number, number, number, number]; // a b c d e f  → x' = a x + c y + e ; y' = b x + d y + f
 const ID: Xf = [1, 0, 0, 1, 0, 0];
 const mul = (m: Xf, n: Xf): Xf => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
@@ -52,7 +53,7 @@ export const SKIP_BLOCK = /section|elevation|(^|[^a-z])elev([^a-z]|$)|(^|[^a-z0-
 export const VIEW_LAYER = "ACOFORM-VIEWS";
 
 /** DwgDatabase (from libredwg-web `convert`) → DXF text. */
-export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string; count: number } {
+export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string; count: number; markers: string[] } {
   const blocks = new Map<string, any>();
   for (const b of db?.tables?.BLOCK_RECORD?.entries ?? []) if (b?.name) blocks.set(b.name, b);
   const ms = blocks.get("*Model_Space") ?? blocks.get("*MODEL_SPACE");
@@ -175,25 +176,48 @@ export function dwgDatabaseToDxf(db: any, maxEntities = 400_000): { dxf: string;
   };
   walk(top, ID, null, 0);
   for (const [nm, hl] of secLines) { const sl = sectionLevels(hl, unitToM, nm); if (sl) sections.push(sl); }
-  for (const s of sections) out.push("0", "TEXT", "8", SECTION_LAYER, "10", "0", "20", "0", "30", "0", "40", "0", "1", sectionMarker(s));
-  for (const v of views) out.push("0", "TEXT", "8", VIEW_LAYER, "10", f(v.box[0]), "20", f(v.box[3]), "30", "0", "40", "0", "1", ["VIEW", ...v.box.map(f), v.name].join("|"));
+  // marker texts (section levels, named views): also added to the full DXF, which has no such summary of its own
+  const markers: string[] = [];
+  for (const s of sections) markers.push("0", "TEXT", "8", SECTION_LAYER, "10", "0", "20", "0", "30", "0", "40", "0", "1", sectionMarker(s));
+  for (const v of views) markers.push("0", "TEXT", "8", VIEW_LAYER, "10", f(v.box[0]), "20", f(v.box[3]), "30", "0", "40", "0", "1", ["VIEW", ...v.box.map(f), v.name].join("|"));
+  out.push(...markers);
   const units = Number(db?.header?.INSUNITS);
   const head = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9", "$INSUNITS", "70", String(Number.isFinite(units) ? units : 0), "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES",
     // first entity: tells the reader that door / window / railing lines are only marks (not part of the drawing extents,
     // so plan regions saved before these lines were kept stay in place)
     "0", "TEXT", "8", VIEW_LAYER, "10", "0", "20", "0", "30", "0", "40", "0", "1", "ACOFORM|marks-not-extents"];
-  return { dxf: [...head, ...out, "0", "ENDSEC", "0", "EOF"].join("\r\n"), count };
+  return { dxf: [...head, ...out, "0", "ENDSEC", "0", "EOF"].join("\r\n"), count, markers };
 }
 
-/** Browser only: reads a .dwg with the WebAssembly reader (served from /wasm) and returns DXF text. */
-export async function convertDwgInBrowser(bytes: Uint8Array): Promise<{ dxf: string; count: number }> {
+/** Adds marker texts (group code / value pairs) at the end of a DXF's ENTITIES section. */
+export function addMarkers(dxf: string, markers: string[]): string {
+  if (!markers.length) return dxf;
+  const m = /\r?\n\s*2\r?\nENTITIES\r?\n/.exec(dxf); if (!m) return dxf;
+  const end = /\r?\n\s*0\r?\nENDSEC\r?\n/g; end.lastIndex = m.index + m[0].length;
+  const e = end.exec(dxf); if (!e) return dxf;
+  return dxf.slice(0, e.index) + "\r\n" + markers.join("\r\n") + dxf.slice(e.index);
+}
+
+/**
+ * Browser only: reads a .dwg with the WebAssembly reader (served from /wasm) and returns DXF text.
+ * The whole drawing is written (LibreDWG's own DXF writer — the same reader the server uses): dimensions, hatches,
+ * block attributes (beam / column marks), rotated texts, schedules inside blocks and arrayed blocks all stay, exactly
+ * as in AutoCAD. `slim` is the old line-only reading, kept as the fallback when the full drawing is too big to store.
+ */
+export async function convertDwgInBrowser(bytes: Uint8Array): Promise<{ dxf: string; count: number; full: boolean; slim: string }> {
   const mod: any = await import("@mlightcad/libredwg-web");
   const lib = await mod.LibreDwg.create("/wasm");
   const dwg = lib.dwg_read_data(bytes, mod.Dwg_File_Type.DWG);
   if (!dwg) throw new Error("This DWG could not be read. In AutoCAD use Save As → DXF and upload the DXF instead.");
   let db: any;
   try { db = lib.convert(dwg); } finally { try { lib.dwg_free(dwg); } catch { /* ignore */ } }
-  const r = dwgDatabaseToDxf(db);
+  const r = dwgDatabaseToDxf(db); db = null;
   if (!r.count) throw new Error("No lines were found in this DWG's model space. Save As → DXF in AutoCAD and upload that.");
-  return r;
+  let full: string | null = null;
+  try {
+    const out: Uint8Array | null = lib.dwg_write_dxf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    if (out?.length) { const t = new TextDecoder().decode(out); if (/\bENTITIES\b/.test(t)) full = cleanDxfText(t); }
+  } catch { full = null; }
+  if (!full) return { dxf: r.dxf, count: r.count, full: false, slim: r.dxf };
+  return { dxf: addMarkers(full, r.markers), count: r.count, full: true, slim: r.dxf };
 }

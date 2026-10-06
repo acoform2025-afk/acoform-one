@@ -3,7 +3,7 @@
  * Everything is in "plan pixels" (the take-off's coordinate system); toMm() turns a point into drawing mm.
  */
 import { OPENING_DEFAULTS, shapeMeasure, UNIT_TO_M, type LayerRole, type Pt, type Shape, type Takeoff } from "./calc";
-import { dxfFrame, type DxfModel } from "./dxf";
+import { dxfFrame, effectiveRoles, type DxfModel } from "./dxf";
 
 export type ShellLine = { pts: Pt[]; closed: boolean };
 export type ShellTag = { at: Pt; text: string; kind: Shape["kind"] | "dxf" };
@@ -28,7 +28,7 @@ const PREFIX: Record<Shape["kind"], string> = { slab: "S", opening: "D", wall: "
 export function buildShell(t: Takeoff, model: DxfModel | null): ShellGeometry {
   const mpp = t.metersPerPx ?? 0;
   const frame = model ? dxfFrame(model, 2400) : null;
-  const roles = t.dxf?.layerRoles ?? {};
+  const roles = model ? effectiveRoles(model, t.dxf?.layerRoles ?? {}) : (t.dxf?.layerRoles ?? {});
   const reg = t.dxf?.region ?? null;
 
   // DXF lines by role, inside the plan region

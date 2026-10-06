@@ -8,7 +8,8 @@ import { dbError } from "@/lib/format";
 import { dwgToDxf } from "@/lib/floor-plans/dwg";
 import { loadModel, runPanels } from "@/lib/floor-plans/run-panels";
 import { drawingParts, dxfFrame } from "@/lib/floor-plans/dxf";
-import { UNIT_TO_M } from "@/lib/floor-plans/calc";
+import { UNIT_TO_M, type Takeoff } from "@/lib/floor-plans/calc";
+import { remapTakeoff, type FrameAnchor } from "@/lib/floor-plans/frame-remap";
 import type { Building } from "@/lib/floor-plans/building";
 import { readingFingerprint, type ReadingFp } from "@/lib/floor-plans/reading-record";
 
@@ -290,13 +291,32 @@ export async function createBomFromFloorPlan(planId: string, designId: string, q
 
 /** After the drawing was read again from its original DWG (by the browser): every plan using this file is marked
  *  updated, so the take-off, panels and 3D read the new file. */
-export async function touchPlanFile(id: string): Promise<Result> {
+const anchorSchema = z.object({ x0: z.number().finite(), y1: z.number().finite(), s: z.number().finite().positive(), w: z.number().int().positive().max(100_000), h: z.number().int().positive().max(100_000) });
+/**
+ * The drawing file was read again. `frames`: the drawing's screen frame before and after — when its extents changed,
+ * every plan using the file gets its region, drawn shapes, scale and answers moved onto the new frame, so each plan
+ * still shows its own part of the drawing.
+ */
+export async function touchPlanFile(id: string, frames?: { from: FrameAnchor; to: FrameAnchor }): Promise<Result> {
   const denied = await guard(); if (denied) return { error: denied };
   if (!uuid.safeParse(id).success) return { error: "Invalid floor plan." };
+  const fr = frames ? z.object({ from: anchorSchema, to: anchorSchema }).safeParse(frames) : null;
+  if (fr && !fr.success) return { error: "Invalid drawing frame." };
   const supabase = await createClient();
   const { data: row } = await supabase.from("floor_plans").select("file_path, lead_id").eq("id", id).maybeSingle();
   if (!row) return { error: "Floor plan not found." };
-  const { error } = await supabase.from("floor_plans").update({ updated_at: new Date().toISOString() }).eq("file_path", row.file_path);
+  const now = new Date().toISOString();
+  if (fr?.success) {
+    const { data: plans, error: e1 } = await supabase.from("floor_plans").select("id, takeoff").eq("file_path", row.file_path);
+    if (e1) return { error: dbError(e1.message) };
+    for (const p of plans ?? []) {
+      const t = p.takeoff && typeof p.takeoff === "object" && !Array.isArray(p.takeoff) ? (p.takeoff as Takeoff) : null;
+      const next = t ? remapTakeoff({ ...t, shapes: Array.isArray(t.shapes) ? t.shapes : [] }, fr.data.from, fr.data.to) : null;
+      const { error: e2 } = await supabase.from("floor_plans").update({ updated_at: now, ...(next && next !== t ? { takeoff: next } : {}) }).eq("id", p.id);
+      if (e2) return { error: dbError(e2.message) };
+    }
+  }
+  const { error } = await supabase.from("floor_plans").update({ updated_at: now }).eq("file_path", row.file_path);
   if (error) return { error: dbError(error.message) };
   revalidatePath("/floor-plans"); revalidatePath(`/floor-plans/${id}`);
   if (row.lead_id) revalidatePath(`/leads/${row.lead_id}`);

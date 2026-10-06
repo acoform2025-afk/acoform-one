@@ -20,15 +20,31 @@ export function ReReadDwgButton({ id, originalUrl, filePath }: { id: string; ori
       setBusy("Downloading DWG…");
       const res = await fetch(originalUrl); if (!res.ok) throw new Error("Could not download the original DWG.");
       const bytes = new Uint8Array(await res.arrayBuffer());
+      const bucket = createClient().storage.from("floor-plans");
+      const { gzipText, dxfTextFromBlob } = await import("@/lib/floor-plans/dxf-text");
+      const { readDxf } = await import("@/lib/floor-plans/dxf");
+      const { frameAnchor } = await import("@/lib/floor-plans/frame-remap");
+      // the drawing's present frame: plan regions and shapes are stored in it and are moved onto the new one
+      setBusy("Reading the present drawing…");
+      let from: ReturnType<typeof frameAnchor> | null = null;
+      try { const old = await bucket.download(filePath); if (old.data) from = frameAnchor(readDxf(await dxfTextFromBlob(old.data))); } catch { from = null; }
       setBusy("Reading drawing…");
       const { convertDwgInBrowser } = await import("@/lib/floor-plans/dwg-web");
-      let dxf: string | null = (await convertDwgInBrowser(bytes)).dxf;
+      const conv = await convertDwgInBrowser(bytes);
+      let dxf: string | null = conv.dxf;
+      let to: ReturnType<typeof frameAnchor> | null = null;
+      try { to = frameAnchor(readDxf(dxf)); } catch { to = null; }
       setBusy("Saving…");
-      const { gzipText } = await import("@/lib/floor-plans/dxf-text");
-      const packed = await gzipText(dxf); dxf = null;
-      const up = await createClient().storage.from("floor-plans").upload(filePath, packed, { contentType: "application/dxf", upsert: true });
+      let up = await bucket.upload(filePath, await gzipText(dxf), { contentType: "application/dxf", upsert: true });
+      if (up.error && conv.full && /exceed|too large|size/i.test(up.error.message)) {
+        // the full drawing is too big to store: the line-only reading instead
+        dxf = conv.slim; try { to = frameAnchor(readDxf(dxf)); } catch { to = null; }
+        up = await bucket.upload(filePath, await gzipText(dxf), { contentType: "application/dxf", upsert: true });
+      }
+      dxf = null;
       if (up.error) throw new Error(up.error.message);
-      const r = await touchPlanFile(id); if (r.error) throw new Error(r.error);
+      const r = await touchPlanFile(id, from && to ? { from, to } : undefined); if (r.error) throw new Error(r.error);
+      if (!from || !to) window.alert("The drawing was read again, but its plan regions could not be carried over — check the region of each plan made from this drawing.");
       setBusy(null); router.refresh();
     } catch (e) { setBusy(null); window.alert(e instanceof Error ? e.message : String(e)); }
   };

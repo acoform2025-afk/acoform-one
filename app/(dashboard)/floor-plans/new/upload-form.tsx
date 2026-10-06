@@ -54,10 +54,11 @@ export function UploadFloorPlanForm({ tenantId, leads, leadId, quotationId }: { 
         if (up.error) throw new Error("Upload failed: " + up.error.message);
         // read the DWG here in the browser (big drawings need more memory than the server has)
         setBusy("Reading AutoCAD drawing on this computer…");
-        let dxf: string | null = null, readErr = "";
+        let dxf: string | null = null, slim: string | null = null, readErr = "";
         try {
           const { convertDwgInBrowser } = await import("@/lib/floor-plans/dwg-web");
-          dxf = (await convertDwgInBrowser(new Uint8Array(await file.arrayBuffer()))).dxf;
+          const conv = await convertDwgInBrowser(new Uint8Array(await file.arrayBuffer()));
+          dxf = conv.dxf; slim = conv.full ? conv.slim : null;
         } catch (err) { readErr = err instanceof Error ? err.message : String(err); }
         if (dxf) {
           setBusy("Saving drawing…");
@@ -65,7 +66,10 @@ export function UploadFloorPlanForm({ tenantId, leads, leadId, quotationId }: { 
           // saved gzip-compressed (~10× smaller) so big drawings fit the storage limit
           const { gzipText } = await import("@/lib/floor-plans/dxf-text");
           const packed = await gzipText(dxf); dxf = null;
-          const up2 = await bucket.upload(dxfPath, packed, { contentType: "application/dxf" });
+          let up2 = await bucket.upload(dxfPath, packed, { contentType: "application/dxf" });
+          // the full drawing is too big to store: the line-only reading instead
+          if (up2.error && slim && /exceed|too large|size/i.test(up2.error.message)) up2 = await bucket.upload(dxfPath, await gzipText(slim), { contentType: "application/dxf" });
+          slim = null;
           if (up2.error) throw new Error(up2.error.message.includes("exceeded") ? "The drawing is too large once converted. Delete unused sheets / PURGE in AutoCAD and try again." : "Upload failed: " + up2.error.message);
           res = await createFloorPlan({ ...base, sourceKind: "dxf", filePath: dxfPath, originalPath: path });
         } else if (file.size < 1.5 * 1024 * 1024) {

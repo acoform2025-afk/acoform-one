@@ -5,7 +5,7 @@
 import { DEFAULT_RULES, type MeasureRules } from "./rules";
 import { computeTotals, OPENING_DEFAULTS, polyArea, polyLength, UNIT_TO_M, type Pt, type Takeoff, type Totals, autoStairRows } from "./calc";
 import { isRailLayer } from "./layer-rules";
-import { closedLoops, drawingParts, dxfAuto, dxfFrame, separateAreas, type DxfModel } from "./dxf";
+import { closedLoops, drawingParts, dxfAuto, dxfFrame, effectiveRoles, separateAreas, type DxfModel } from "./dxf";
 import { nearRings, wallUnion } from "./geom";
 import { buildShell } from "./shell";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
@@ -54,7 +54,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     const force = inM.map((b) => { const a = f.fromPx([b[0] / mpp, b[1] / mpp]), c = f.fromPx([b[2] / mpp, b[3] / mpp]); return [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.max(a[0], c[0]), Math.max(a[1], c[1])] as [number, number, number, number]; });
     auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0, force, beamDepthMm: Number(t.params.beamDepthMm) || undefined });
     // architecture around the formwork, for the 3D model only: balcony railings, parapet walls, sunshades / projections
-    const roles = t.dxf.layerRoles ?? {};
+    const roles = effectiveRoles(model, t.dxf.layerRoles ?? {});
     const kindOf = (layer: string): "rail" | "parapet" | "proj" | null => {
       const r = roles[layer]; if (r === "walls" || r === "slab" || r === "columns" || r === "beams" || r === "upstand") return null;
       if (isRailLayer(layer)) return "rail";
