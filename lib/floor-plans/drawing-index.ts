@@ -104,6 +104,17 @@ export function buildDrawingIndex(model: DxfModel, unitToM: number, opts: { dict
   const geo = layerGeometry(model.paths, unitToM);
 
   /* ---- layers ---- */
+  // a layer whose shapes are all circles (room-type tags, grid bubbles) holds no walls / columns, whatever its name
+  const circleLayer = (name: string) => {
+    const ps = model.paths.filter((p) => p.layer === name); if (ps.length < 3) return false;
+    const circ = ps.filter((p) => {
+      if (!p.closed || p.pts.length < 16) return false;
+      const cx = p.pts.reduce((a, q) => a + q[0], 0) / p.pts.length, cy = p.pts.reduce((a, q) => a + q[1], 0) / p.pts.length;
+      const r = p.pts.map((q) => Math.hypot(q[0] - cx, q[1] - cy)); const rm = r.reduce((a, b) => a + b, 0) / r.length;
+      return rm > 0 && r.every((v) => Math.abs(v - rm) <= 0.03 * rm);
+    }).length;
+    return circ >= 0.75 * ps.length;
+  };
   const L = new Map<string, IndexLayer>();
   const get = (name: string, kind: IndexLayer["kind"]) => L.get(name) ?? (L.set(name, { name, lines: 0, closed: 0, texts: 0, lengthM: 0, role: "ignore", from: "none", why: "", kind }), L.get(name)!);
   // layers with lines or hatches are geometry; a layer with only texts (beam marks, dimensions) is listed below as text-only
@@ -123,8 +134,9 @@ export function buildDrawingIndex(model: DxfModel, unitToM: number, opts: { dict
     if (taught) { x.role = taught; x.from = "taught"; x.why = "taught on an earlier drawing"; }
     else if (x.kind === "doors-windows") { x.why = "door / window lines — used to find the openings in walls"; }
     else if (x.kind === "railings") { x.why = "railing lines — a wall under a railing is a parapet"; }
+    else if (byName !== "ignore" && circleLayer(x.name)) { x.why = `named ${byName}, but it holds only circles (room / grid tags) — not ${byName}`; }
     else if (byName !== "ignore") { x.role = byName; x.from = "name"; x.why = `the layer name says ${byName}`; }
-    else if (nameMeaning && CONCEPT_ROLE[nameMeaning.key] && !isNoiseLayer(x.name)) { x.role = CONCEPT_ROLE[nameMeaning.key]!; x.from = "words"; x.why = `the layer name means "${nameMeaning.label}"`; }
+    else if (nameMeaning && CONCEPT_ROLE[nameMeaning.key] && !isNoiseLayer(x.name) && !/steel|reinf|(^|[^a-z])bars?([^a-z]|$)|aro|arrow|(^|[^a-z])nos?([^a-z]|$)|depth|mark|thk|thick/i.test(x.name)) { x.role = CONCEPT_ROLE[nameMeaning.key]!; x.from = "words"; x.why = `the layer name means "${nameMeaning.label}"`; }
     else if (isNoiseLayer(x.name)) { x.why = "furniture / hatch / dimension / annotation layer"; }
     else x.why = x.lines ? "nothing in its name says what it is" : "texts only";
     // geometry hints only for layers whose name says nothing (not dotted / hidden lines, title sheets, doors …)

@@ -102,7 +102,7 @@ export const UNIT_TO_M: Record<DxfUnits, number> = { mm: 0.001, cm: 0.01, m: 1, 
 /** Areas/lengths the DXF reader found automatically (already in metres). */
 export type DxfAuto = {
   onFloor?: (p: { pts: Pt[]; layer: string; closed: boolean }) => boolean;   // the floor island: is this drawing path part of the floor read (region + connected structure)?
-  notes?: { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled"; box: [number, number, number, number]; n?: number; text?: string }[];   // what the reader decided on its own (drawing units) — for the review screen
+  notes?: { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size"; box: [number, number, number, number]; n?: number; text?: string }[];   // what the reader decided on its own (drawing units) — for the review screen
   slabArea: number; slabPerimeter: number;
   openingArea: number; openingPerimeter: number;
   wallLineLength: number;                           // total length of lines on wall layers

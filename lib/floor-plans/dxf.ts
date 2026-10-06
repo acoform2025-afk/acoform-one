@@ -530,6 +530,10 @@ export function isRevCloud(pts: Pt[], unitToM: number): boolean {
   const segs: number[] = []; let per = 0;
   for (let i = 1; i < pts.length; i++) { const L = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) * unitToM; segs.push(L); per += L; }
   if (per > 12) return false;
+  // a circle (grid bubble, room tag, round column drawn as an arc) is not a cloud: every point at the same distance from the centre
+  const cx = pts.reduce((a, q) => a + q[0], 0) / pts.length, cy = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+  const rr = pts.map((q) => Math.hypot(q[0] - cx, q[1] - cy)), rm = rr.reduce((a, b) => a + b, 0) / rr.length;
+  if (rm > 0 && rr.every((v) => Math.abs(v - rm) <= 0.05 * rm)) return false;
   const short = segs.filter((L) => L < 0.04).length;
   return short >= 0.7 * segs.length;
 }
@@ -858,7 +862,7 @@ const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
  * floor. `on(p)` answers for an element path (true / false), undefined for anything else (texts, generic lines);
  * `near(pts)` tells whether a point set lies within a metre of the floor's elements.
  */
-export type ReadNote = { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled"; box: [number, number, number, number]; n?: number; text?: string };
+export type ReadNote = { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size"; box: [number, number, number, number]; n?: number; text?: string };
 export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u: number, keep?: (p: DxfPath) => boolean, force: [number, number, number, number][] = []): { on: (p: DxfPath) => boolean | undefined; near: (pts: Pt[]) => boolean; count: number; dropped: number; notes: ReadNote[] } {
   const forced = (b: [number, number, number, number]) => force.some((f) => b[0] >= f[0] - 1 && b[2] <= f[2] + 1 && b[1] >= f[1] - 1 && b[3] <= f[3] + 1);
   const gap = 3 / u, axisTol = 0.02;            // 3 m: a doorway, a stairwell, a lift opening or a balcony between two walls still joins them
@@ -918,7 +922,7 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
   return { on: (p) => (detail.has(p) && !forced([p.pts[0][0], p.pts[0][1], p.pts[0][0], p.pts[0][1]]) ? false : onEl.get(p)), near, count, dropped: dropped + detail.size, notes };
 }
 
-export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][] } = {}): DxfAuto {
+export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][]; beamDepthMm?: number } = {}): DxfAuto {
   const u = unitToM, u2 = unitToM * unitToM;
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
   const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m] as [number, number, number, number]; });
@@ -950,7 +954,9 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     const round = p.pts.length > 8 && Math.abs(w - d) <= 0.1 * Math.max(w, d) && area >= 0.7 * w * d && area <= 0.86 * w * d;
     return { p, w, d, perimeter: polyLength(p.pts, true) * u, area, round, isCol: area > 0 && w >= 0.1 && d >= 0.1 && w <= 4 && d <= 4 && (area >= 0.86 * w * d || round) };
   });
-  const colWalls = colAll.filter((c) => !c.isCol && c.area > 0.05).map((c) => c.p.pts);
+  // a shape on a column layer that is not a column is a wall (shear wall, L / C core) only when it is wall-thin
+  // (mean thickness 2A/P ≤ 0.8 m): pool / tank / slab outlines drawn on a column layer are not walls
+  const colWalls = colAll.filter((c) => !c.isCol && c.area > 0.05 && (2 * c.area) / Math.max(1e-9, c.perimeter) <= 0.8).map((c) => c.p.pts);
 
   // walls: closed outlines merged (duplicates / overlaps once) → wall tops + face length; loose lines add their length
   // drawn outside the floor slab (a detail sketch or legend beside the plan) they are not walls of this floor
@@ -1049,6 +1055,19 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       const w = Math.abs(b[2][0] - b[0][0]) * u, h = Math.abs(b[2][1] - b[0][1]) * u;
       if (w >= 0.4 && h >= 0.4 && w * h >= 0.25 && w * h <= 12) extraOpen.push(b);
     }
+    // structural slab plans: a bay crossed by an X drawn on the beam layers is a cut-out / lift / void — unless a sunk
+    // or level mark ("300 SUNK", "+225 LVL", a sunk / level hatch) says it is a lowered or raised slab
+    const lvlMark = /sunk|lvl|level|drop|^\s*[+-]\s*\d{2,4}\b/i;
+    for (const b of xMarkedBoxes(of("beams").filter((p) => !p.closed && p.pts.length === 2), 0.02 / u)) {
+      const xs = b.map((q) => q[0]), ys = b.map((q) => q[1]), bx = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+      const w = (bx[2] - bx[0]) * u, h = (bx[3] - bx[1]) * u;
+      if (w < 0.4 || h < 0.4 || w * h > 150) continue;
+      const inB = (x: number, y: number) => x >= bx[0] && x <= bx[2] && y >= bx[1] && y <= bx[3];
+      if ((model.texts ?? []).some((t) => inB(t.x, t.y) && lvlMark.test(t.text.trim()))) continue;
+      // a hatch in the box (sunk / level / beam-bottom slab patterns) marks slab; cut-outs and lifts are plain crosses
+      if ((model.fills ?? []).some((f) => f.kind === "hatch" && (roles[f.layer] ?? "ignore") !== "opening" && (roles[f.layer] ?? "ignore") !== "columns" && !/lift|cut|cop|duct|shaft|void|open/i.test(f.layer) && f.pts.every((q) => inB(q[0], q[1])) && Math.abs(polyArea(f.pts)) * u2 >= 0.3 * w * h)) continue;
+      extraOpen.push(b);
+    }
   }
   const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath), ...extraOpen.map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]).filter((x) => x.a * u2 >= minOpeningM2);
 
@@ -1067,9 +1086,35 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   const beamRings: Pt[][] = [];
   const beamRingDepth: number[] = [];   // mm, one per beam ring (3D model)
   const beamParts: { k: string; b: number; d: number; ring: Pt[]; polys: Pt[][]; bb: number[] }[] = [];
-  let unsizedLen = 0;
+  let unsizedLen = 0, loneBeamLen = 0;
   // a size written next to the beam ("B:125X750H", "IVP:100X375H", "B1 230x450") when the layer has none
-  const sizeTexts = (model.texts ?? []).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
+  const sizeTexts: { t: DxfText; sz: { b: number; d: number } | null }[] = (model.texts ?? []).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
+  // a beam schedule: beam elevations / tables titled "B12A" with the size "(600X900)" written beside — every "B12A"
+  // label on the plan then carries that size (several schedules in one file: the nearest one)
+  {
+    const all = model.texts ?? [];
+    // "(600X900)" beside a beam elevation title, or a schedule table row "B1 | 450 X 900 BEAM DEPTH"
+    const pure = all.filter((t) => t.text.trim().length <= 40 && (/^\(?\s*\d{2,4}\s*[xX×*]\s*\d{2,4}\s*\)?$/.test(t.text.trim()) || /^\d{2,4}\s*[xX×*]\s*\d{2,4}\s*(mm\s*)?(beam|depth|deep|size|\(|$)/i.test(t.text.trim())));
+    const isName = (s2: string) => /^[A-Z]{0,3}B[A-Z]?\d{1,3}[A-Z]{0,2}$/i.test(s2) || /^B\d{1,3}[A-Z]{0,2}$/i.test(s2);
+    const names = all.filter((t) => isName(t.text.trim()));
+    const sched: { name: string; sz: { b: number; d: number }; x: number; y: number }[] = [];
+    for (const p of pure) {
+      const sz = beamSizeFromLayer(p.text); if (!sz) continue;
+      const hh = Math.max(p.h, 0.2 / u) * 1.6;
+      const c = names.filter((n) => Math.abs(n.y - p.y) <= hh && p.x - n.x <= 8 / u && p.x - n.x >= -0.5 / u)
+        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+      if (c) sched.push({ name: c.text.trim().toUpperCase(), sz, x: c.x, y: c.y });
+    }
+    if (sched.length) {
+      const used = new Set(sched.map((e) => `${e.x},${e.y}`));
+      for (const n of names) {
+        if (used.has(`${n.x},${n.y}`)) continue;                     // the schedule's own titles
+        const k = n.text.trim().toUpperCase();
+        const e = sched.filter((x) => x.name === k).sort((a, b) => Math.hypot(a.x - n.x, a.y - n.y) - Math.hypot(b.x - n.x, b.y - n.y))[0];
+        if (e) sizeTexts.push({ t: n, sz: e.sz });
+      }
+    }
+  }
   const sizeNear = (r: Pt[], wMm: number) => {
     const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]), pad = 0.6 / u;
     const b = [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
@@ -1094,25 +1139,59 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     const L = closedLoops(ps, tol).filter((r) => r.length >= 3 && Math.abs(polyArea(r)) * u2 > 0.01);
     // real beam outlines are narrow strips; chained beam edge lines closing round a room are not outlines → pair the lines instead
     const narrow = L.filter((r) => (2 * Math.abs(polyArea(r))) / Math.max(1e-9, polyLength(r, true)) * u * 1000 <= 600);
-    if (narrow.length && narrow.length * 2 >= L.length) beamLoops.set(layer, narrow);
-    else if (!beamSizeFromLayer(layer)) looseBeam.push(...ps.filter((p) => !p.closed));
+    const openN = ps.filter((p) => !p.closed).length;
+    if (narrow.length && narrow.length * 2 >= L.length) {
+      beamLoops.set(layer, narrow);
+      // a few beams drawn closed and the rest as loose edge lines (one layer, both styles): the loose ones are paired too
+      if (!beamSizeFromLayer(layer) && openN >= 20 && openN > 4 * narrow.length) looseBeam.push(...ps.filter((p) => !p.closed));
+    } else if (!beamSizeFromLayer(layer)) looseBeam.push(...ps.filter((p) => !p.closed));
     else unsizedLen += ps.reduce((s2, p) => s2 + polyLength(p.pts, p.closed), 0) * u;
   }
   if (looseBeam.length) {
-    const st = pairedWallStrips(looseBeam.map((p) => p.pts), u, 75, 500);
+    const st = pairedWallStrips(looseBeam.map((p) => p.pts), u, 75, 700);   // beams up to 700 wide (650 × 900 transfer / frame beams)
     // one strip per pair of edges (not merged: a chain of beams round a room would otherwise become one big outline)
     const rings = st.strips.filter((r) => r.length >= 3 && Math.abs(polyArea(r)) * u2 > 0.01);
     if (rings.length) beamLoops.set("(beam lines)", rings);
     // lines that found no partner
-    for (const p of looseBeam) { const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2]; if (!rings.length || !nearRings(mid, rings, 0.02 / u)) unsizedLen += polyLength(p.pts, false) * u; }
+    for (const p of looseBeam) { const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2]; if (!rings.length || !nearRings(mid, rings, 0.02 / u)) loneBeamLen += polyLength(p.pts, false) * u; }
   }
+  const assumedBeams: { ring: Pt[]; b: number; d: number }[] = [];
+  // a structural framing plan (several beams sized by their labels / the beam schedule): a beam strip with no size of
+  // its own takes its drawn width and the depth most beams of that width have — flagged for the review
+  // width of a strip from its area and perimeter (a rectangle L × w: P/2 = L + w, A = L·w) — exact for short pieces too
+  const stripWidth = (r: Pt[]) => { const A = Math.abs(polyArea(r)) * u2, h = polyLength(r, true) * u / 2, disc = h * h - 4 * A; return disc >= 0 ? (h - Math.sqrt(disc)) / 2 : (2 * A) / Math.max(1e-9, 2 * h); };
+  const labelled: { b: number; d: number }[] = [];
+  for (const [layer, L] of beamLoops) { const lsz = beamSizeFromLayer(layer); for (const r of L) { const wEst = stripWidth(r) * 1000; const sz = lsz ?? sizeNear(r, wEst); if (sz && wEst >= 0.4 * sz.b && wEst <= 1.8 * sz.b) labelled.push(sz); } }
+  // widths drawn again and again (rounded to 25 mm): the beam widths of a framing plan with no sizes written at all
+  const widthCount = new Map<number, number>();
+  for (const [layer, L] of beamLoops) if (!beamSizeFromLayer(layer)) for (const r of L) { const w = Math.round(stripWidth(r) * 1000 / 25) * 25; if (w >= 150 && w <= 700) widthCount.set(w, (widthCount.get(w) ?? 0) + 1); }
+  const commonW = [...widthCount].filter(([, n]) => n >= 4).map(([w]) => w);
+  const stripsN = [...widthCount.values()].reduce((a2, b2) => a2 + b2, 0);
+  // a framing plan: beams sized by labels / a schedule, or many beam strips and few walls (a column-and-beam frame)
+  const framing = labelled.length >= 5 || (stripsN >= 20 && commonW.length > 0 && wallPaths.length < stripsN);
+  const widthsOk = labelled.length >= 5 ? labelled.map((x) => x.b) : commonW;
+  const depthFor = (bMm: number) => {
+    const same = labelled.filter((x) => Math.abs(x.b - bMm) <= 25), pool = same.length ? same : labelled;
+    const c = new Map<number, number>(); for (const x of pool) c.set(x.d, (c.get(x.d) ?? 0) + 1);
+    return [...c].sort((a2, b2) => b2[1] - a2[1])[0]?.[0] ?? (opts.beamDepthMm ?? 600);
+  };
+  // stair flights drawn on the beam layer: their tread lines pair up like beams — not beams
+  const treadBoxes = framing ? treadFlightBoxes(beamPaths, u) : [];
+  const onTreads = (r: Pt[]) => { const cx = r.reduce((a2, q) => a2 + q[0], 0) / r.length, cy = r.reduce((a2, q) => a2 + q[1], 0) / r.length; return treadBoxes.some((b) => cx >= b[0] && cx <= b[2] && cy >= b[1] && cy <= b[3]); };
   for (const [layer, L] of beamLoops) {
     const lsz = beamSizeFromLayer(layer);
     for (const r of L) {
+      if (onTreads(r)) continue;
       // a beam outline is a narrow strip about as wide as the beam (not a room enclosed by chained beam lines)
-      const wEst = (2 * Math.abs(polyArea(r)) * u2) / Math.max(1e-9, polyLength(r, true) * u) * 1000;
-      const sz = lsz ?? sizeNear(r, wEst);
-      if (!sz || wEst < 0.4 * sz.b || wEst > 1.8 * sz.b) { unsizedLen += polyLength(r, true) * u; continue; }
+      const wEst = stripWidth(r) * 1000;
+      let sz = lsz ?? sizeNear(r, wEst);
+      // only at a width the schedule has: a strip between a beam face and a sunk / cut-out box line is not a beam
+      if ((!sz || wEst < 0.4 * sz.b || wEst > 1.8 * sz.b) && framing && wEst >= 150 && wEst <= 700 && widthsOk.some((w) => Math.abs(w - wEst) <= 15)) {
+        const bw = widthsOk.reduce((a2, w) => (Math.abs(w - wEst) < Math.abs(a2 - wEst) ? w : a2), widthsOk[0]);
+        sz = { b: bw, d: depthFor(bw) };
+        assumedBeams.push({ ring: r, b: sz.b, d: sz.d });
+      }
+      if (!sz || wEst < 0.4 * sz.b || wEst > 1.8 * sz.b) { if (!framing) unsizedLen += polyLength(r, true) * u; continue; }
       beamRings.push(r); beamRingDepth.push(sz.d);
       let clearA = Math.abs(polyArea(r)) * u2;
       let polys: Pt[][] = [r];
@@ -1122,6 +1201,13 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       const g = sized.get(k) ?? { b: sz.b, d: sz.d, len: 0, bottom: 0, count: 0, inner: 0, outer: 0, lintel: 0 };
       g.len += clearA / (sz.b / 1000); g.bottom += clearA; g.count++; sized.set(k, g);
     }
+  }
+  // single beam-layer lines with no partner: in a framing plan they are slab panel edges, sunk / cut-out boxes — not beams
+  if (!framing) unsizedLen += loneBeamLen;
+  if (assumedBeams.length) {
+    const xs = assumedBeams.flatMap((x) => x.ring.map((q) => q[0])), ys = assumedBeams.flatMap((x) => x.ring.map((q) => q[1]));
+    const by = new Map<string, number>(); for (const x of assumedBeams) by.set(`${x.b}×${x.d}`, (by.get(`${x.b}×${x.d}`) ?? 0) + 1);
+    notes.push({ kind: "beam-size", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], n: assumedBeams.length, text: [...by].map(([k, n]) => `${n} × ${k}`).join(", ") });
   }
 
   // slab: slab layer outlines; if none, the outer face of the walls (with columns and beams: a framed building's
