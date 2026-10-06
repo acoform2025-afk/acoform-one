@@ -1116,6 +1116,24 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
         .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
       if (c) sched.push({ name: c.text.trim().toUpperCase(), sz, x: c.x, y: c.y });
     }
+    // beam cross-sections "17A-17A" / "L1-L1" with their width (horizontal dimension) and depth (vertical dimension)
+    // drawn just above the section title → beam B17A / LB1
+    {
+      const dims = all.filter((t) => t.kind === "dim" && /^\d{2,4}$/.test(t.text.trim()));
+      for (const st of all) {
+        const m = st.text.trim().toUpperCase().match(/^([A-Z]{0,2}\d{1,3}[A-Z]{0,2})-([A-Z]{0,2}\d{1,3}[A-Z]{0,2})$/);
+        if (!m || m[1] !== m[2]) continue;
+        const win = dims.filter((t) => Math.abs(t.x - st.x) <= 3 / u && t.y - st.y >= 0 && t.y - st.y <= 5 / u);
+        const vert = win.filter((t) => Math.abs(Math.abs(t.r ?? 0) - Math.PI / 2) < 0.2).map((t) => Number(t.text)).filter((v) => v >= 150 && v <= 2500);
+        const hor = win.filter((t) => Math.abs(t.r ?? 0) < 0.2).sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y)).map((t) => Number(t.text)).filter((v) => v >= 100 && v <= 1200);
+        if (!vert.length || !hor.length) continue;
+        const sz = { b: hor[0], d: Math.max(...vert) };
+        if (sz.d <= sz.b) continue;
+        const id = m[1];
+        const keys = /^L\d/.test(id) ? [`L${id.startsWith("LB") ? id.slice(2) : id.slice(1)}`.replace(/^L/, "LB"), id] : id.startsWith("B") ? [id] : [`B${id}`, id];
+        for (const k of keys) sched.push({ name: k, sz, x: st.x, y: st.y });
+      }
+    }
     if (sched.length) {
       const used = new Set(sched.map((e) => `${e.x},${e.y}`));
       for (const n of names) {
