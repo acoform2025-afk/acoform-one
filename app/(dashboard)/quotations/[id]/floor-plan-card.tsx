@@ -36,7 +36,7 @@ export function FloorPlanCard({ quotationId, leadId, editable, isQuick, attached
           ) : null}
           <div className="min-w-0 flex-1 text-sm">
             <Link href={`/floor-plans/${attached.id}?quotation=${quotationId}`} className="font-medium text-graphite-100 hover:text-brand-orange hover:underline">{attached.name}</Link>
-            <p className="mt-0.5 text-xs text-graphite-500">Printed on the quotation PDF with its area table.</p>
+            <p className="mt-0.5 text-xs text-graphite-500">Printed on the quotation PDF with the quoted area only (no split into slab / walls / columns).</p>
             <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
               <dt className="text-graphite-500">Vertical set (walls + columns)</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.vertical_area)}</dd>
               <dt className="text-graphite-500">Typical floor total</dt><dd className="text-right font-mono text-graphite-200">{fmtArea(attached.totals.contact_area)}</dd>

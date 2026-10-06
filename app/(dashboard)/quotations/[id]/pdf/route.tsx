@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { QuotationDocument, type PdfLine, type PdfQuotation, type PdfCompany } from "@/lib/pdf/quotation-document";
 import { formworkKind, pdfFileName } from "@/lib/quotations/document-content";
 import { mediaForPdf } from "@/lib/quotations/media";
-import { computeTotals, totalsRows, UNIT_TO_M, type DxfAuto, type Takeoff, type Totals } from "@/lib/floor-plans/calc";
+import { totalsRows, UNIT_TO_M, type DxfAuto, type Takeoff, type Totals } from "@/lib/floor-plans/calc";
 import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { dxfAuto, dxfFrame, readDxf, separateAreas, type DxfModel } from "@/lib/floor-plans/dxf";
 import { sheetGeo } from "@/lib/floor-plans/area-sheet";
@@ -70,7 +70,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         unitToM = UNIT_TO_M[tk.dxf.units] ?? 0.001;
         const auto: DxfAuto = dxfAuto(model, tk.dxf.layerRoles, unitToM, keep, tk.params.minOpeningM2 != null && String(tk.params.minOpeningM2) !== "" ? Number(tk.params.minOpeningM2) : mr.minOpeningM2, separateAreas(tk.shapes, f), { minWallMm: Number(tk.params.minWallMm) || 0 });
         geo = sheetGeo(auto);
-        if (!Array.isArray((t as unknown as Totals).items) || !(t as unknown as Totals).items.length) { const tot = computeTotals(tk, auto, mr); (t as unknown as Totals).items = tot.items; }
       }
     }
     if (!geo && fp.preview_path) {
@@ -78,10 +77,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       if (img) image = { data: Buffer.from(await img.arrayBuffer()), format: "jpg" };
     }
     plans.push({
-      name: fp.name, image, geo, rows: totalsRows(t as unknown as Partial<Totals>),
+      // the quotation shows the quoted area only — no split into slab / walls / columns / beams and no element list
+      name: fp.name, image, geo, rows: totalsRows(t as unknown as Partial<Totals>).filter(([k]) => /^(Total for typical floor|Add \d|Additional for non-typical|Formwork set)/.test(k)),
       dims: { floorMm: Math.round((pr.floorHeight ?? 3) * 1000), slabMm: pr.slabMm ?? 150, beamMm: pr.beamDepthMm ?? 600, parapetMm: pr.parapetMm ?? 900, unitToM, thin: (Number(pr.minWallMm) || 0) > 75 },
       rules: mr.printOnQuote ? describeRules(mr) : undefined,
-      items: Array.isArray((t as unknown as Totals).items) ? (t as unknown as Totals).items.slice(0, 400) : undefined,
+      items: undefined,
       note: `Areas are per typical floor, measured from the client's drawing. Floor height ${pr.floorHeight != null ? Math.round(pr.floorHeight * 1000) : "-"} mm, slab ${pr.slabMm ?? "-"} mm. One formwork set is reused on all floors (typical floor basis${Number((t as Record<string, number>).nontypical_area) > 0 ? " + additional pieces for non-typical floors" : ""}). Final quantities as per approved GFC drawings.`,
     });
   }
