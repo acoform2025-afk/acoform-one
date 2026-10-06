@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { QuotationDocument, type PdfLine, type PdfQuotation, type PdfCompany } from "@/lib/pdf/quotation-document";
 import { formworkKind, pdfFileName } from "@/lib/quotations/document-content";
 import { mediaForPdf } from "@/lib/quotations/media";
-import { totalsRows, UNIT_TO_M, type DxfAuto, type Takeoff, type Totals } from "@/lib/floor-plans/calc";
+import { fmtArea, UNIT_TO_M, type DxfAuto, type Takeoff, type Totals } from "@/lib/floor-plans/calc";
 import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { dxfAuto, dxfFrame, readDxf, separateAreas, type DxfModel } from "@/lib/floor-plans/dxf";
 import { sheetGeo } from "@/lib/floor-plans/area-sheet";
@@ -77,8 +77,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       if (img) image = { data: Buffer.from(await img.arrayBuffer()), format: "jpg" };
     }
     plans.push({
-      // the quotation shows the quoted area only — no split into slab / walls / columns / beams and no element list
-      name: fp.name, image, geo, rows: totalsRows(t as unknown as Partial<Totals>).filter(([k]) => /^(Total for typical floor|Add \d|Additional for non-typical|Formwork set)/.test(k)),
+      // the quotation shows one figure: the quoted area — no split into slab / walls / columns / beams, no 'add %' line, no element list
+      name: fp.name, image, geo, rows: [["Formwork area (typical floor basis)", fmtArea((t as unknown as Partial<Totals>).quote_area)]],
       dims: { floorMm: Math.round((pr.floorHeight ?? 3) * 1000), slabMm: pr.slabMm ?? 150, beamMm: pr.beamDepthMm ?? 600, parapetMm: pr.parapetMm ?? 900, unitToM, thin: (Number(pr.minWallMm) || 0) > 75 },
       rules: mr.printOnQuote ? describeRules(mr) : undefined,
       items: undefined,
