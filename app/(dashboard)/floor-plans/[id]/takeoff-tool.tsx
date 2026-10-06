@@ -288,7 +288,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         ctx.fillStyle = "#374151"; ctx.textBaseline = "alphabetic";
         let n = 0;
         for (const q of textPxRef.current) {
-          const fs = q.h * kk; if (fs < 5) continue;
+          const fs = q.h * kk; if (fs < 2.5) continue;   // small table texts (schedules) show as soon as they are a few pixels high
           if (hidden[q.layer]) continue;
           const reach = (fs * q.text.length) / kk;
           if (q.x < ix0 - reach || q.x > ix1 + reach || q.y < iy0 - reach || q.y > iy1 + reach) continue;
@@ -751,7 +751,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
 
         <div
           ref={stageRef}
-          className={cls("relative touch-none", full ? "min-h-0 flex-1" : "h-[62vh] min-h-[380px]", " select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
+          className={cls("relative touch-none", full ? "min-h-0 flex-1" : "h-[calc(100vh-150px)] min-h-[560px]", " select-none overflow-hidden rounded-b-lg border border-graphite-800", isDxf ? "bg-white" : "bg-[#e9eaec]",
             tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-pointer" : "cursor-crosshair")}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
           onPointerLeave={() => setHover(null)} onDoubleClick={() => { if (tool === "wall" || tool === "beam" || tool === "slab" || tool === "opening" || tool === "loft" || tool === "separate") finishDraft(); }}
