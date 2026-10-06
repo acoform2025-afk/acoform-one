@@ -18,7 +18,7 @@ import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
-import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
+import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, floorsFromTitle, isLayoutTitle, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { createAllLevelPlans, createLevelPlan, saveTakeoff } from "../actions";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
@@ -87,6 +87,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewCanvasRef = useRef<HTMLCanvasElement>(null);   // DXF: lines redrawn crisp at every zoom
   const pxPathsRef = useRef<{ layer: string; xy: Float32Array; closed: boolean; b: [number, number, number, number] }[]>([]);
+  const pxFillsRef = useRef<{ layer: string; xy: Float32Array; hatch: boolean; b: [number, number, number, number] }[]>([]);   // hatched areas (columns, sunk zones …) and leader lines, as in AutoCAD
   const modelRef = useRef<DxfModel | null>(null);
   const frameRef = useRef<ReturnType<typeof dxfFrame> | null>(null);
   const snapRef = useRef<Pt[]>([]);
@@ -114,7 +115,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   const [full, setFull] = useState(false);
   const [mouse, setMouse] = useState<Pt | null>(null);
   const [partFilter, setPartFilter] = useState<PartKind | "all">("all");
-  const textPxRef = useRef<{ x: number; y: number; h: number; text: string }[]>([]);
+  const textPxRef = useRef<{ x: number; y: number; h: number; text: string; r: number; layer: string; al?: "c" | "r" }[]>([]);
 
   const isDxf = plan.source_kind === "dxf";
   const update = useCallback((fn: (p: Takeoff) => Takeoff) => { setT((p) => fn(p)); setDirty(true); setMsg(null); }, []);
@@ -162,7 +163,12 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         p.pts.forEach((q, i) => { const [x, y] = f.toPx(q); xy[2 * i] = x; xy[2 * i + 1] = y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; });
         return { layer: p.layer, xy, closed: p.closed, b: [x0, y0, x1, y1] as [number, number, number, number] };
       });
-      textPxRef.current = (m.texts ?? []).filter((q) => q.h > 0).map((q) => { const [x, y] = f.toPx([q.x, q.y]); return { x, y, h: q.h / f.unitsPerPx, text: q.text }; });
+      textPxRef.current = (m.texts ?? []).filter((q) => q.h > 0).map((q) => { const [x, y] = f.toPx([q.x, q.y]); return { x, y, h: q.h / f.unitsPerPx, text: q.text, r: q.r ?? 0, layer: q.layer ?? "0", al: q.al }; });
+      pxFillsRef.current = (m.fills ?? []).map((p) => {
+        const xy = new Float32Array(p.pts.length * 2); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        p.pts.forEach((q, i) => { const [x, y] = f.toPx(q); xy[2 * i] = x; xy[2 * i + 1] = y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; });
+        return { layer: p.layer, xy, hatch: p.kind === "hatch", b: [x0, y0, x1, y1] as [number, number, number, number] };
+      });
     }
   }, []);
 
@@ -247,6 +253,21 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
       const ix0 = -vx / kk, iy0 = -vy / kk, ix1 = (r.width - vx) / kk, iy1 = (r.height - vy) / kk;
       const roles = t.dxf!.layerRoles;
       const order: LayerRole[] = ["ignore", "slab", "opening", "upstand", "beams", "walls", "columns"];
+      // hatched areas first (under the lines): filled in their layer's colour, leaders as thin lines
+      for (const hatch of [true, false]) for (const role of order) {
+        ctx.beginPath(); let any = false;
+        for (const p of pxFillsRef.current) {
+          if (p.hatch !== hatch || (roles[p.layer] ?? "ignore") !== role || hidden[p.layer]) continue;
+          if (p.b[2] < ix0 || p.b[0] > ix1 || p.b[3] < iy0 || p.b[1] > iy1) continue;
+          const xy = p.xy; any = true;
+          ctx.moveTo(vx + xy[0] * kk, vy + xy[1] * kk);
+          for (let i = 2; i < xy.length; i += 2) ctx.lineTo(vx + xy[i] * kk, vy + xy[i + 1] * kk);
+          if (hatch) ctx.closePath();
+        }
+        if (!any) continue;
+        if (hatch) { ctx.fillStyle = role === "ignore" ? "rgba(107,114,128,0.18)" : `${ROLE_COLOR[role]}40`; ctx.fill("evenodd"); }
+        else { ctx.strokeStyle = role === "ignore" ? "rgba(107,114,128,0.6)" : ROLE_COLOR[role]; ctx.lineWidth = 0.6; ctx.stroke(); }
+      }
       for (const role of order) {
         ctx.beginPath();
         let any = false;
@@ -268,11 +289,17 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         let n = 0;
         for (const q of textPxRef.current) {
           const fs = q.h * kk; if (fs < 5) continue;
-          if (q.x < ix0 - 50 / kk || q.x > ix1 || q.y < iy0 || q.y > iy1 + fs / kk) continue;
+          if (hidden[q.layer]) continue;
+          const reach = (fs * q.text.length) / kk;
+          if (q.x < ix0 - reach || q.x > ix1 + reach || q.y < iy0 - reach || q.y > iy1 + reach) continue;
           ctx.font = `${Math.min(fs, 200).toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
-          ctx.fillText(q.text, vx + q.x * kk, vy + q.y * kk);
+          ctx.textAlign = q.al === "c" ? "center" : q.al === "r" ? "right" : "left";
+          // rotated as on the drawing (beam marks along vertical beams); the screen's y runs down, so the angle flips
+          if (q.r) { ctx.save(); ctx.translate(vx + q.x * kk, vy + q.y * kk); ctx.rotate(-q.r); ctx.fillText(q.text, 0, 0); ctx.restore(); }
+          else ctx.fillText(q.text, vx + q.x * kk, vy + q.y * kk);
           if (++n > 4000) break;
         }
+        ctx.textAlign = "left";
       }
     });
     return () => cancelAnimationFrame(id);
@@ -391,7 +418,11 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   // automatic: pick the typical floor plan (most walls + "typical … plan" title), read floors & floor height from the drawing
   const detect = useCallback((force: boolean) => {
     if (!modelRef.current || !t.dxf) return;
-    const pick = candidates.length >= 2 ? candidates[0] : null;
+    // structural drawings: several slab / floor layouts, each titled with its floors — the typical floor is the layout
+    // that stands for the most floors ("SLAB OVER 17TH TO 26TH FLOOR"), drawn exactly as its title frames it
+    const lays = parts.filter((q) => q.kind === "plan" && isLayoutTitle(q.title));
+    const lp = lays.length >= 2 ? [...lays].sort((a, b) => (floorsFromTitle(b.title) ?? 1) - (floorsFromTitle(a.title) ?? 1) || b.count - a.count)[0] : null;
+    const pick = lp ? { n: lp.n, w: lp.w, h: lp.h, title: lp.title, floors: undefined as number | undefined, px: lp.px } : candidates.length >= 2 ? candidates[0] : null;
     const info = floorInfoFromTexts(modelRef.current.texts ?? [], UNIT_TO_M[t.dxf.units], [plan.name, plan.lead?.label ?? ""]);
     // first time: floor height / floors only replace the untouched defaults (3000 mm, 1 floor); "read again" replaces them
     // sections in the drawing: floor-to-floor and slab (concrete only — a floor finish / screed line is left out)
@@ -990,7 +1021,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
                       {hidden[l.name] ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                     </button>
                     <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: ROLE_COLOR[role] }} />
-                    <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({l.count})</span></span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({[l.count ? `${l.count}` : "", l.texts ? `${l.texts} txt` : "", l.fills ? `${l.fills} hatch` : ""].filter(Boolean).join(" · ") || 0})</span></span>
                     <select value={role} disabled={!canEdit} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-0.5 text-xs text-graphite-100"
                       onChange={(e) => { const r = e.target.value as LayerRole; update((p) => ({ ...p, dxf: { ...p.dxf!, layerRoles: { ...p.dxf!.layerRoles, [l.name]: r } } })); setLayerVersion((v) => v + 1);
                         // remembered for the next drawing with a layer of this name (the company dictionary)

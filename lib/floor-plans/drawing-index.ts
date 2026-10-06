@@ -23,7 +23,7 @@ import { drawingSection } from "./dxf";
 import { CONCEPT_ROLE, EMPTY_DICT, layerKey, meaningOf, normText, textCategory, type Dictionary, type Meaning, type TextCat } from "./vocab";
 
 export type IndexLayer = {
-  name: string; lines: number; closed: number; texts: number; lengthM: number;
+  name: string; lines: number; closed: number; texts: number; lengthM: number; fills?: number;
   role: LayerRole; from: "taught" | "name" | "words" | "geometry" | "none";
   why: string;
   hint?: { role: LayerRole; why: string };      // what the geometry suggests when the name says nothing
@@ -106,7 +106,8 @@ export function buildDrawingIndex(model: DxfModel, unitToM: number, opts: { dict
   /* ---- layers ---- */
   const L = new Map<string, IndexLayer>();
   const get = (name: string, kind: IndexLayer["kind"]) => L.get(name) ?? (L.set(name, { name, lines: 0, closed: 0, texts: 0, lengthM: 0, role: "ignore", from: "none", why: "", kind }), L.get(name)!);
-  for (const l of model.layers) { const x = get(l.name, "geometry"); x.lines = l.count; x.closed = l.closed; }
+  // layers with lines or hatches are geometry; a layer with only texts (beam marks, dimensions) is listed below as text-only
+  for (const l of model.layers) if (l.count || l.fills) { const x = get(l.name, "geometry"); x.lines = l.count; x.closed = l.closed; x.fills = l.fills ?? 0; }
   for (const p of model.dw ?? []) { const x = get(p.layer, "doors-windows"); x.lines++; }
   for (const p of model.rails ?? []) { const x = get(p.layer, "railings"); x.lines++; }
   const textMeaning = new Map<string, Map<string, number>>();

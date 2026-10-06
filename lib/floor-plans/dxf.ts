@@ -11,11 +11,13 @@ import { meaningOf, type Dictionary } from "./vocab";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean };
-export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole };
-export type DxfText = { text: string; x: number; y: number; h: number; layer?: string };
+export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number };   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
+/** A hatch boundary (filled area: columns, sunk / raised zones, cut-outs) or a leader line — kept apart from the lines so the reading of walls / beams is not changed by them. */
+export type DxfFill = DxfPath & { kind: "hatch" | "leader" };
+export type DxfText = { text: string; x: number; y: number; h: number; layer?: string; r?: number; al?: "c" | "r"; kind?: "dim" | "attr" };   // r: rotation (radians, drawing axes); kind: a dimension value / a block attribute (grid bubble, tag)
 /** A named drawing inside the file (Revit view / AutoCAD block), box in drawing units. */
 export type DxfView = { name: string; box: [number, number, number, number] };
-export type DxfModel = { texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+export type DxfModel = { fills?: DxfFill[]; texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -106,6 +108,7 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
   const header: AnyEnt = {}, entities: AnyEnt[] = [], blocks: Record<string, AnyEnt> = {};
   const deg = Math.PI / 180;
   let section = "", cur: AnyEnt | null = null, target: AnyEnt[] = entities, block: AnyEnt | null = null, poly: AnyEnt | null = null, vtx: AnyEnt | null = null, hdrVar = "";
+  const RAW = new Set(["HATCH", "LEADER", "SPLINE", "SOLID", "TRACE", "ELLIPSE", "DIMENSION", "MULTILEADER", "MLEADER"]);
   const flush = () => {
     if (!cur) return;
     const e = cur; cur = null;
@@ -120,9 +123,17 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
       case "POLYLINE": if (!(e._flag & (16 | 64))) { const pl = { type: "POLYLINE", layer: e.layer, shape: (e._flag & 1) === 1, vertices: [] as AnyEnt[] }; target.push(pl); poly = pl; } else poly = { vertices: [] }; break;
       case "CIRCLE": target.push({ type: "CIRCLE", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r }); break;
       case "ARC": target.push({ type: "ARC", layer: e.layer, center: { x: e._x, y: e._y }, radius: e._r, startAngle: (e._a0 ?? 0) * deg, endAngle: (e._a1 ?? 360) * deg }); break;
-      case "INSERT": target.push({ type: "INSERT", layer: e.layer, name: e.name, position: { x: e._x ?? 0, y: e._y ?? 0 }, xScale: e._sx ?? 1, yScale: e._sy ?? 1, rotation: e._rot ?? 0 }); break;
-      case "TEXT": case "MTEXT": { const t = ((e._t3 ?? "") + (e._t ?? "")).trim(); if (t) target.push({ type: "TEXT", layer: e.layer, text: t, position: { x: e._x ?? 0, y: e._y ?? 0 }, height: e._r ?? 0 }); break; }
-      default: break;
+      case "INSERT": target.push({ type: "INSERT", layer: e.layer, name: e.name, position: { x: e._x ?? 0, y: e._y ?? 0 }, xScale: e._sx ?? 1, yScale: e._sy ?? 1, rotation: e._rot ?? 0, cols: e._flag || 1, rows: e._rows || 1, colGap: e._cs ?? 0, rowGap: e._rs ?? 0 }); break;
+      case "TEXT": case "MTEXT": case "ATTRIB": {
+        const t = ((e._t3 ?? "") + (e._t ?? "")).trim();
+        // justified single-line text sits at its alignment point (11/21), not at its first point
+        const just = e.type !== "MTEXT" && (e._j72 || e._j73) && e._x1 != null;
+        // rotation: code 50 (degrees); an MTEXT may give its direction as a vector (11/21) instead
+        const rot = e._a0 != null ? e._a0 * deg : e.type === "MTEXT" && e._x1 != null ? Math.atan2(e._y1 ?? 0, e._x1) : 0;
+        if (t && !(e.type === "ATTRIB" && e._flag & 1)) target.push({ type: "TEXT", layer: e.layer, text: t, position: just ? { x: e._x1, y: e._y1 ?? 0 } : { x: e._x ?? 0, y: e._y ?? 0 }, height: e._r ?? 0, rotation: rot, attr: e.type === "ATTRIB", al: e.type === "MTEXT" ? ([0, 0, "c", "r"] as const)[((((e._rows ?? 1) - 1) % 3) + 1)] || undefined : just ? (e._j72 === 2 ? "r" : e._j72 ? "c" : undefined) : undefined });
+        break;
+      }
+      default: if (RAW.has(e.type) && e._raw) { const d = decodeRaw(e.type, e._raw); if (d) target.push({ ...d, layer: e.layer }); } break;
     }
   };
   while (next()) {
@@ -140,13 +151,19 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
     }
     if (!cur) continue;
     const num = Number(val);
+    if (RAW.has(cur.type) && code !== 8 && code !== 67) { const raw: [number, string][] = (cur._raw ??= []); if (raw.length < 400_000) raw.push([code, val]); continue; }
     switch (code) {
       case 8: cur.layer = val; break;
-      case 1: if (cur.type === "TEXT" || cur.type === "MTEXT") cur._t = val.slice(0, 200); break;
-      case 3: if (cur.type === "MTEXT") cur._t3 = ((cur._t3 ?? "") + val).slice(0, 200); break;
+      case 1: if (cur.type === "TEXT" || cur.type === "MTEXT" || cur.type === "ATTRIB") cur._t = val.slice(0, 2000); break;
+      case 3: if (cur.type === "MTEXT") cur._t3 = ((cur._t3 ?? "") + val).slice(0, 2000); break;
+      case 71: cur._rows = num; break;
+      case 44: cur._cs = num; break;
+      case 45: cur._rs = num; break;
+      case 72: cur._j72 = num; break;
+      case 73: case 74: if (num) cur._j73 = num; break;
       case 2: cur.name = val; break;
       case 67: cur.inPaperSpace = num === 1; break;
-      case 70: cur._flag = num; break;
+      case 70: if (cur.type === "ATTRIB" && cur._flag != null) break; cur._flag = num; break;   // an attribute's own flags come first (an embedded xrecord repeats 70)
       case 40: cur._r = num; break;
       case 41: cur._sx = num; break;
       case 42: if (cur.type === "LWPOLYLINE") { const vs = cur._vs; if (vs?.length) vs[vs.length - 1].bulge = num; } else if (cur.type === "VERTEX") cur._b = num; else cur._sy = num; break;
@@ -161,6 +178,100 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
   }
   flush();
   return { header, entities, blocks };
+}
+
+/**
+ * Entities read from their raw group codes: hatch boundaries (columns, sunk / raised zones), leaders, splines,
+ * ellipses, solids, dimensions (the value written on the drawing) and multileader texts.
+ */
+function decodeRaw(type: string, raw: [number, string][]): AnyEnt | null {
+  const n = (k: number) => Number(raw[k][1]);
+  const first = (c: number) => { const i = raw.findIndex((r) => r[0] === c); return i >= 0 ? Number(raw[i][1]) : undefined; };
+  const firstS = (c: number) => raw.find((r) => r[0] === c)?.[1];
+  const pairs = (cx: number, cy: number) => { const out: { x: number; y: number }[] = []; for (let i = 0; i < raw.length; i++) if (raw[i][0] === cx) { const j = raw.findIndex((r, k) => k > i && r[0] === cy); if (j > i && j - i <= 3) out.push({ x: n(i), y: n(j) }); } return out; };
+  const deg = Math.PI / 180;
+  switch (type) {
+    case "LEADER": { const v = pairs(10, 20); return v.length >= 2 ? { type: "LEADER", vertices: v } : null; }
+    case "SPLINE": {
+      const fit = pairs(11, 21), ctrl = pairs(10, 20), v = fit.length >= 2 ? fit : ctrl;
+      return v.length >= 2 ? { type: "LWPOLYLINE", shape: ((first(70) ?? 0) & 1) === 1, vertices: v.map((q) => ({ ...q, bulge: 0 })) } : null;
+    }
+    case "SOLID": case "TRACE": {
+      const p = [pairs(10, 20)[0], pairs(11, 21)[0], pairs(13, 23)[0], pairs(12, 22)[0]].filter(Boolean);
+      return p.length >= 3 ? { type: "LWPOLYLINE", shape: true, vertices: p.map((q) => ({ ...q, bulge: 0 })) } : null;
+    }
+    case "ELLIPSE": {
+      const c = pairs(10, 20)[0], mj = pairs(11, 21)[0], r = first(40) ?? 1, t0 = first(41) ?? 0, t1 = first(42) ?? Math.PI * 2;
+      if (!c || !mj) return null;
+      const span = ((t1 - t0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) || Math.PI * 2, steps = Math.max(8, Math.ceil(span / (Math.PI / 24)));
+      const v: { x: number; y: number; bulge: number }[] = [];
+      for (let i = 0; i <= steps; i++) { const t = t0 + (span * i) / steps; v.push({ x: c.x + mj.x * Math.cos(t) - mj.y * r * Math.sin(t), y: c.y + mj.y * Math.cos(t) + mj.x * r * Math.sin(t), bulge: 0 }); }
+      const full = Math.abs(span - Math.PI * 2) < 1e-6; if (full) v.pop();
+      return { type: "LWPOLYLINE", shape: full, vertices: v };
+    }
+    case "DIMENSION": {
+      // the text as written: override (1) with "<>" for the measured value (42), at the text middle (11/21)
+      const m = first(42), o = firstS(1), mid = pairs(11, 21)[0];
+      const meas = m != null && Number.isFinite(m) ? String(Math.round(m * 100) / 100) : "";
+      const text = o ? (o.includes("<>") ? o.replace("<>", meas) : o) : meas;
+      return { type: "DIMENSION", block: firstS(2), text, position: mid ?? pairs(10, 20)[0] ?? { x: 0, y: 0 } };
+    }
+    case "MULTILEADER": case "MLEADER": {
+      const t = firstS(304), p = pairs(12, 22)[0] ?? pairs(10, 20)[0];
+      return t && p ? { type: "TEXT", text: t, position: p, height: first(41) ?? 0 } : null;
+    }
+    case "HATCH": {
+      const loops: Pt[][] = [];
+      let k = raw.findIndex((r) => r[0] === 91); if (k < 0) return null;
+      const nPaths = n(k++);
+      const to = (c: number) => { while (k < raw.length && raw[k][0] !== c) k++; return k < raw.length; };
+      for (let p = 0; p < nPaths && p < 2000; p++) {
+        if (!to(92)) break;
+        const flag = n(k++);
+        if (flag & 2) {
+          let bul = 0; while (k < raw.length && raw[k][0] !== 93) { if (raw[k][0] === 72) bul = n(k); k++; }
+          if (k >= raw.length) break;
+          const nv = n(k++); const vs: { x: number; y: number; bulge: number }[] = [];
+          for (let v = 0; v < nv && k < raw.length; v++) {
+            if (!to(10)) break; const x = n(k++); if (!to(20)) break; const y = n(k++);
+            let b = 0; if (bul && k < raw.length && raw[k][0] === 42) b = n(k++);
+            vs.push({ x, y, bulge: b });
+          }
+          if (vs.length >= 3) loops.push(bulgePts(vs, true));
+        } else {
+          if (!to(93)) break;
+          const ne = n(k++); const pts: Pt[] = [];
+          const add = (q: Pt) => { const l = pts[pts.length - 1]; if (!l || Math.abs(l[0] - q[0]) > 1e-9 || Math.abs(l[1] - q[1]) > 1e-9) pts.push(q); };
+          for (let e = 0; e < ne && k < raw.length; e++) {
+            if (!to(72)) break; const et = n(k++);
+            const get = (c: number) => { const i = k; while (k < raw.length && raw[k][0] !== c) k++; if (k >= raw.length) { k = i; return NaN; } return n(k++); };
+            if (et === 1) { const x0 = get(10), y0 = get(20), x1 = get(11), y1 = get(21); add([x0, y0]); add([x1, y1]); }
+            else if (et === 2) {
+              const cx = get(10), cy = get(20), r = get(40); let a0 = get(50), a1 = get(51); const ccw = get(73);
+              if (!ccw) [a0, a1] = [360 - a1, 360 - a0];
+              if (a1 <= a0) a1 += 360;
+              const arc = arcPts(cx, cy, r, a0 * deg, a1 * deg); if (!ccw) { arc.reverse(); for (const q of arc) add([q[0], 2 * cy - q[1]]); } else for (const q of arc) add(q);
+            } else if (et === 3) {
+              const cx = get(10), cy = get(20), mx = get(11), my = get(21), r = get(40), a0 = get(50), a1 = get(51); get(73);
+              const steps = 24; for (let i = 0; i <= steps; i++) { const t = (a0 + ((((a1 - a0) % 360) + 360) % 360 || 360) * i / steps) * deg; add([cx + mx * Math.cos(t) - my * r * Math.sin(t), cy + my * Math.cos(t) + mx * r * Math.sin(t)]); }
+            } else if (et === 4) {
+              // spline edge: its control points, up to the next edge / end of the loop
+              while (k < raw.length && raw[k][0] !== 72 && raw[k][0] !== 97 && raw[k][0] !== 92) { if (raw[k][0] === 10 && raw[k + 1]?.[0] === 20) { add([n(k), n(k + 1)]); k += 2; } else k++; }
+            }
+          }
+          if (pts.length >= 3) { const f = pts[0], l = pts[pts.length - 1]; if (Math.abs(f[0] - l[0]) < 1e-9 && Math.abs(f[1] - l[1]) < 1e-9) pts.pop(); loops.push(pts); }
+        }
+      }
+      return loops.length ? { type: "HATCH", loops } : null;
+    }
+  }
+  return null;
+}
+
+/** Text as written, without AutoCAD format codes (\\P new line, \\A1; alignment, {\\f…;}, %%U underline, %%C Ø …). */
+export function cleanText(raw: string): string {
+  return raw.replace(/\\P/g, " ").replace(/\\[LlOoKk]/g, "").replace(/\\S([^;^/#]*)[\^/#]([^;]*);/g, "$1/$2").replace(/\\[A-Za-z][^;\\]*;/g, "").replace(/[{}]/g, "")
+    .replace(/%%[cC]/g, "Ø").replace(/%%[dD]/g, "°").replace(/%%[pP]/g, "±").replace(/%%[uUoOkK]/g, "").replace(/\s+/g, " ").trim();
 }
 
 const UNIT_TO_M_LOCAL: Record<string, number> = { mm: 0.001, cm: 0.01, m: 1, in: 0.0254, ft: 0.3048 };
@@ -188,9 +299,13 @@ export function readDxf(raw: string): DxfModel {
   const rails: DxfPath[] = []; const railCache = new Map<string, boolean>();
   let marksNoExtent = false;
 
-  const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number) => {
+  const fills: DxfFill[] = [];
+  const lateKinds = new WeakSet<DxfPath>();
+  // textOnly: a dimension's own block — only its written value is wanted, not its extension lines / arrows
+  const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number, textOnly = false) => {
     for (const e of ents) {
       if (paths.length > 150000) return;
+      if (textOnly && e.type !== "TEXT" && e.type !== "MTEXT" && e.type !== "INSERT") continue;
       if (e.inPaperSpace) continue;
       const layer: string = (e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0");
       // doors, windows, glazing, furniture … never carry formwork geometry: skip their lines (keep their texts)
@@ -218,17 +333,49 @@ export function readDxf(raw: string): DxfModel {
         }
         case "CIRCLE": if (e.center && e.radius > 0) push(arcPts(e.center.x, e.center.y, e.radius, 0, Math.PI * 2).slice(0, -1), true); break;
         case "ARC": if (e.center && e.radius > 0) push(arcPts(e.center.x, e.center.y, e.radius, e.startAngle ?? 0, e.endAngle ?? Math.PI * 2), false); break;
+        case "SPLINE": case "SOLID": case "TRACE": case "ELLIPSE": {
+          const vs = (e.vertices ?? []).filter((v: AnyEnt) => Number.isFinite(v.x) && Number.isFinite(v.y));
+          const before = paths.length;
+          if (vs.length >= 2) push(bulgePts(vs, !!e.shape), !!e.shape);
+          // read since Oct 2026: they do not move the drawing extents, so plan regions saved before stay where they were
+          for (let i = before; i < paths.length; i++) lateKinds.add(paths[i]);
+          break;
+        }
+        case "HATCH": {
+          if (textOnly || fills.length > 60_000) break;
+          for (const loop of e.loops ?? []) if (loop.length >= 3) fills.push({ kind: "hatch", layer, pts: loop.map(([x, y]: Pt) => ap(m, x, y)), closed: true });
+          break;
+        }
+        case "LEADER": {
+          if (textOnly || fills.length > 60_000) break;
+          const vs = (e.vertices ?? []).filter((v: AnyEnt) => Number.isFinite(v.x) && Number.isFinite(v.y));
+          if (vs.length >= 2) fills.push({ kind: "leader", layer, pts: vs.map((v: AnyEnt) => ap(m, v.x, v.y)), closed: false });
+          break;
+        }
+        case "DIMENSION": {
+          // the value as drawn: the texts of the dimension's own block; else the measured / override value
+          const before = texts.length;
+          const b = e.block ? blocks[e.block] : null;
+          if (b && depth <= 5) walk(b.entities ?? [], m, layer, depth + 1, true);
+          if (texts.length === before && e.text && texts.length < 40000) { const [x, y] = ap(m, e.position?.x ?? 0, e.position?.y ?? 0); const t = cleanText(String(e.text)); if (t) texts.push({ text: t, x, y, h: 0, layer, kind: "dim" }); }
+          break;
+        }
         case "INSERT": {
           const b = blocks[e.name]; if (!b || depth > 5) break;
           const rot = ((e.rotation ?? 0) * Math.PI) / 180, sx = e.xScale ?? 1, sy = e.yScale ?? 1;
           const base = b.position ?? { x: 0, y: 0 };
-          const t: Xf = {
-            a: Math.cos(rot) * sx, b: Math.sin(rot) * sx, c: -Math.sin(rot) * sy, d: Math.cos(rot) * sy,
-            e: e.position?.x ?? 0, f: e.position?.y ?? 0,
-          };
-          const local = mul(t, { ...ID, e: -base.x, f: -base.y });
           const before = paths.length;
-          walk(b.entities ?? [], mul(m, local), layer, depth + 1);
+          // an arrayed insert (MINSERT): one copy per column / row, spaced along the insert's own axes
+          const nc = Math.max(1, Math.min(50, e.cols ?? 1)), nr = Math.max(1, Math.min(50, e.rows ?? 1));
+          for (let ci = 0; ci < nc; ci++) for (let ri = 0; ri < nr; ri++) {
+            const ox = ci * (e.colGap ?? 0), oy = ri * (e.rowGap ?? 0);
+            const t: Xf = {
+              a: Math.cos(rot) * sx, b: Math.sin(rot) * sx, c: -Math.sin(rot) * sy, d: Math.cos(rot) * sy,
+              e: (e.position?.x ?? 0) + ox * Math.cos(rot) - oy * Math.sin(rot), f: (e.position?.y ?? 0) + ox * Math.sin(rot) + oy * Math.cos(rot),
+            };
+            const local = mul(t, { ...ID, e: -base.x, f: -base.y });
+            walk(b.entities ?? [], mul(m, local), layer, depth + 1, textOnly);
+          }
           if (depth === 0 && /section|(^|[^a-z])sec([^a-z]|$)/i.test(String(e.name))) { const nm = String(e.name).slice(0, 100); (secRanges.get(nm) ?? secRanges.set(nm, []).get(nm)!).push([before, paths.length]); }
           // a big named block placed in model space is a drawing of its own (e.g. "TOWER B FIRST FLOOR PLAN")
           if (depth === 0 && paths.length - before >= 150 && !/^\*|^A\$C[0-9a-f]+$/i.test(String(e.name))) {
@@ -239,7 +386,7 @@ export function readDxf(raw: string): DxfModel {
           break;
         }
         case "TEXT": case "MTEXT": {
-          if (texts.length >= 20000 || depth > 2) break;
+          if (texts.length >= 40000 || depth > 6) break;
           const raw = String(e.text ?? "");
           if (layer === SECTION_LAYER) { const sl = parseSectionMarker(raw); if (sl) sections.push(sl); break; }
           if (layer === VIEW_LAYER && raw === "ACOFORM|marks-not-extents") { marksNoExtent = true; break; }
@@ -249,9 +396,15 @@ export function readDxf(raw: string): DxfModel {
             if (box.every(Number.isFinite) && box[2] > box[0]) views.push({ name: name.join("|").trim(), box });
             break;
           }
-          const clean = raw.replace(/\\P/g, " ").replace(/\\[LlOoKk]/g, "").replace(/\\[A-Za-z][^;\\]*;/g, "").replace(/[{}]/g, "").replace(/%%[cdpCDP]/g, "").replace(/\s+/g, " ").trim();
+          const clean = cleanText(raw);
           const pos = e.position ?? e.startPoint ?? { x: 0, y: 0 };
-          if (clean && Number.isFinite(pos.x) && Number.isFinite(pos.y)) { const [x, y] = ap(m, pos.x, pos.y); texts.push({ text: clean.slice(0, 160), x, y, h: Math.abs(Number(e.height ?? e.textHeight ?? 0)) || 0, layer }); }
+          // text inside a scaled block is drawn bigger / smaller by the block's scale
+          const k = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1;
+          if (clean && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
+            const [x, y] = ap(m, pos.x, pos.y);
+            const r = (Number(e.rotation) || 0) + Math.atan2(m.b, m.a);
+            texts.push({ text: clean.slice(0, 400), x, y, h: (Math.abs(Number(e.height ?? e.textHeight ?? 0)) || 0) * k, layer, ...(Math.abs(r) > 1e-6 ? { r } : {}), ...(e.al ? { al: e.al } : {}), ...(textOnly ? { kind: "dim" as const } : e.attr ? { kind: "attr" as const } : {}) });
+          }
           break;
         }
         default: break; // dimensions, hatches etc. are not needed for quantities
@@ -263,7 +416,7 @@ export function readDxf(raw: string): DxfModel {
 
   // extents: ignore a few far-away stray objects
   const xs: number[] = [], ys: number[] = [];
-  for (const p of paths) for (const [x, y] of p.pts) { xs.push(x); ys.push(y); }
+  for (const p of paths) if (!lateKinds.has(p)) for (const [x, y] of p.pts) { xs.push(x); ys.push(y); }
   for (let i = 0; i < extentPts.length; i += 2) { xs.push(extentPts[i]); ys.push(extentPts[i + 1]); }
   xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
   const q = (arr: number[], f: number) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(f * (arr.length - 1))))];
@@ -274,10 +427,11 @@ export function readDxf(raw: string): DxfModel {
   }
 
   const byLayer = new Map<string, DxfLayerInfo>();
-  for (const p of paths) {
-    const li = byLayer.get(p.layer) ?? { name: p.layer, count: 0, closed: 0, suggested: suggestRole(p.layer) };
-    li.count++; if (p.closed) li.closed++; byLayer.set(p.layer, li);
-  }
+  const info = (l: string) => byLayer.get(l) ?? (byLayer.set(l, { name: l, count: 0, closed: 0, suggested: suggestRole(l) }), byLayer.get(l)!);
+  for (const p of paths) { const li = info(p.layer); li.count++; if (p.closed) li.closed++; }
+  // every layer of the drawing is listed — also those with only texts (beam marks, dimensions) or only hatches
+  for (const t of texts) if (t.layer) { const li = info(t.layer); li.texts = (li.texts ?? 0) + 1; }
+  for (const f of fills) { const li = info(f.layer); li.fills = (li.fills ?? 0) + 1; }
 
   const code = Number((dxf.header ?? {})["$INSUNITS"]);
   let units = INSUNITS[code];
@@ -298,7 +452,7 @@ export function readDxf(raw: string): DxfModel {
     }
   }
 
-  return { texts, views, sections, dw, rails, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  return { fills, texts, views, sections, dw, rails, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count || (b.texts ?? 0) + (b.fills ?? 0) - (a.texts ?? 0) - (a.fills ?? 0)), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */
@@ -1303,9 +1457,12 @@ function formworkCaptionBoxes(texts: DxfText[], boxes: [number, number, number, 
 
 const BAD_TITLE = /section|elevation|site|roof|terrace|parking|basement|stilt|podium|detail|stair|lift|key\s*plan|location|schedule|foundation|footing|column\s*layout|centre\s*line|center\s*line|剖面|立面|屋面|地下|详图|大样|楼梯|总平面/i;
 /** Floors from a title like "TYPICAL 1ST TO 14TH FLOOR PLAN" or "2nd-12th floor". */
-function floorsFromTitle(t: string): number | undefined {
-  const m = t.match(/(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor\s*)?(?:to|-|–|&|upto|up to)\s*(\d{1,3})\s*(?:st|nd|rd|th)?/i);
+export function floorsFromTitle(t: string): number | undefined {
+  const m = t.match(/(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor\s*)?(?:to|-|–|upto|up to)\s*(\d{1,3})\s*(?:st|nd|rd|th)?/i);
   if (m) { const a = +m[1], b = +m[2]; if (b > a && b - a < 200) return b - a + 1; }
+  // a list of floors: "2ND,6TH,10TH,14TH & 18TH FLOOR PLAN" → 5
+  const ords = t.match(/\b\d{1,3}\s*(?:st|nd|rd|th)\b/gi);
+  if (ords && ords.length >= 2) return ords.length;
   const n = t.match(/\((\d{1,3})\s*(?:nos|floors?)\)/i) ?? t.match(/(\d{1,3})\s*(?:nos\.?|floors)\b/i);
   if (n && +n[1] > 0 && +n[1] < 200) return +n[1];
   return undefined;
@@ -1313,14 +1470,60 @@ function floorsFromTitle(t: string): number | undefined {
 /** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
 /** Words a drawing title has ("… FLOOR PLAN", "SECTION A-A", "4BHK UNIT", "AREA TABLE") — whole words, so "DRAWING ROOM" is not a "wing". */
 const TITLE_WORDS = /plans?\b|\bsections?\b|\belevations?\b|\blayout\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\bunit\b|\bbhk\b|\barea (table|statement)\b|\bschedule\b|平面图|剖面|立面图|深化图|大样|配模图|布置图|放线图|贴片尺寸|背楞|墙板|飘板|清单/i;
+/**
+ * The groups of lines inside one sheet frame, the frame and title-block border lines left out (they touch everything
+ * near the margin): lines closer than `gap` belong together.
+ */
+function sheetGroups(model: DxfModel, f: Box, gap: number): { box: Box; hits: number }[] {
+  const W = f[2] - f[0], H = f[3] - f[1];
+  const nx = Math.ceil(W / gap) + 1, ny = Math.ceil(H / gap) + 1;
+  if (nx * ny > 4_000_000) return [];
+  const cell = new Int32Array(nx * ny).fill(-1);   // -1 empty, else count of points
+  const cnt = new Int32Array(nx * ny);
+  const mark = (x: number, y: number) => { const i = Math.floor((x - f[0]) / gap), j = Math.floor((y - f[1]) / gap); if (i < 0 || j < 0 || i >= nx || j >= ny) return; cell[j * nx + i] = 0; };
+  for (const p of model.paths) {
+    const b0 = p.pts[0]; if (b0[0] < f[0] || b0[0] > f[2] || b0[1] < f[1] || b0[1] > f[3]) continue;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of p.pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 - x0 > 0.5 * W || y1 - y0 > 0.5 * H) continue;           // sheet border, title-block rules
+    const i0 = Math.floor((b0[0] - f[0]) / gap), j0 = Math.floor((b0[1] - f[1]) / gap); if (i0 >= 0 && j0 >= 0 && i0 < nx && j0 < ny) cnt[j0 * nx + i0]++;
+    const n = p.closed ? p.pts.length : p.pts.length - 1;
+    for (let k = 0; k < n; k++) {
+      const a = p.pts[k], c = p.pts[(k + 1) % p.pts.length], L = Math.hypot(c[0] - a[0], c[1] - a[1]), st = Math.max(1, Math.ceil(L / (gap * 0.5)));
+      for (let q = 0; q <= st; q++) mark(a[0] + ((c[0] - a[0]) * q) / st, a[1] + ((c[1] - a[1]) * q) / st);
+    }
+  }
+  const out: { box: Box; hits: number }[] = [];
+  const comp = new Int32Array(nx * ny).fill(-1);
+  for (let s0 = 0; s0 < nx * ny; s0++) {
+    if (cell[s0] < 0 || comp[s0] >= 0) continue;
+    const id = out.length; const st = [s0]; comp[s0] = id;
+    let i0 = nx, j0 = ny, i1 = -1, j1 = -1, hits = 0;
+    while (st.length) {
+      const c = st.pop()!; const i = c % nx, j = (c - i) / nx; hits += cnt[c];
+      if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue; const q = jj * nx + ii; if (cell[q] >= 0 && comp[q] < 0) { comp[q] = id; st.push(q); } }
+    }
+    out.push({ box: [f[0] + i0 * gap, f[1] + j0 * gap, f[0] + (i1 + 1) * gap, f[1] + (j1 + 1) * gap], hits });
+  }
+  return out;
+}
+
+/** A floor / slab layout title with its level: "STRU. LAYOUT AT SLAB OVER 3RD TO 7TH FLOOR LVL", "TYPICAL FLOOR PLAN", "二层板配筋图". */
+export function isLayoutTitle(t: string): boolean {
+  const s = t.trim();
+  if (s.length < 8 || s.length > 110 || /^\d+[.)]?\s/.test(s) || NOT_TITLE.test(s)) return false;
+  if (/(楼|屋)?(板|梁|结构)(平面)?(布置|配筋|平法)?图/.test(s) && /(层|屋面)/.test(s)) return true;
+  if (!/\b(layout|plans?|framing)\b/i.test(s) || !/\b(slab|floor|roof|framing|beam|level|lvl)\b/i.test(s)) return false;
+  return /\b\d{1,2}\s*(st|nd|rd|th)\b|\b(ground|first|second|third|fourth|fifth|terrace|roof|typical|basement|podium|stilt|plinth|refuge)\b|\bg\.?f\.?\b/i.test(s);
+}
 /** Long notes / title-block lines that mention a plan but are not a title. */
-const NOT_TITLE = /^(disclaimer|notes?\b|general notes|e\s*:|email|date\b|for (review|approval|construction)|proposed\b.*\bscheme\b)/i;
+const NOT_TITLE = /^(disclaimer|notes?\b|general notes|e\s*:|email|date\b|for (review|approval|construction)|proposed\b.*\bscheme\b)|^\d{1,2}[.)]?\s+(this|all|the|provide|clear|lap|concrete|conc|use|for|refer|design|building|structure|minimum|unless)\b/i;   // numbered general notes ("2 THIS BUILDING IS DESIGNED FOR …") are not titles
 function titleFor(texts: DxfText[], box: [number, number, number, number], others: number[][] = []): string | undefined {
   const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
   const inOther = (t: DxfText) => others.some((o) => t.x > o[0] && t.x < o[2] && t.y > o[1] && t.y < o[3] && !(t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1));
   const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.4 && t.y <= y1 + h * 0.25 && !inOther(t))
     .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
-    .filter((t) => TITLE_WORDS.test(t.text) && (!/\b(lvl|level|slab|beam)\b/i.test(t.text) || /plans?\b|\bunit\b|bhk/i.test(t.text)) && !NOT_TITLE.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
+    .filter((t) => TITLE_WORDS.test(t.text) && (!/\b(lvl|level|slab|beam)\b/i.test(t.text) || /plans?\b|\bunit\b|bhk/i.test(t.text) || isLayoutTitle(t.text)) && !NOT_TITLE.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
   const pri = (x: string) => (/plan|section|elevation|layout|平面图|剖面|立面图|深化图|配模图|布置图|放线图/i.test(x) ? 1 : 0);
   // a big title written inside the drawing's own outline wins; otherwise "… PLAN / SECTION / ELEVATION" titles, biggest first
   const maxH = Math.max(0, ...near.map((t) => t.h));
@@ -1416,7 +1619,10 @@ export function floorHeightFromTexts(texts: DxfText[]): number | undefined {
 }
 
 export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number): PlanCandidate[] {
-  const walls = model.paths.filter((p) => (roles[p.layer] ?? "ignore") === "walls");
+  let walls = model.paths.filter((p) => (roles[p.layer] ?? "ignore") === "walls");
+  // a column-and-beam frame (few RC walls): the plan is where the columns and beams are
+  const frame = model.paths.filter((p) => { const r = roles[p.layer] ?? "ignore"; return r === "columns" || r === "beams"; });
+  if (frame.length > 2 * walls.length) walls = [...walls, ...frame];
   if (walls.length < 5) return [];
   const gap = 2.5 / unitToM;                                  // drawings closer than 2.5 m belong together
   const C = gap;
@@ -1461,8 +1667,10 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
     if (title) {
       if (/typical/i.test(title)) f = 4;
       else if (BAD_TITLE.test(title)) f = 0.25;
-      else if (/floor\s*plan|plan|block|tower|wing/i.test(title)) f = 1.5;
+      else if (/floor\s*plan|plan|block|tower|wing/i.test(title) || isLayoutTitle(title)) f = 1.5;
       o.floors = floorsFromTitle(title);
+      // of several floor layouts, the one that stands for the most floors is the typical one ("3RD TO 7TH" over "2ND")
+      if (o.floors && o.floors > 1 && f >= 1.5) f *= 1 + Math.min(o.floors, 12) * 0.1;
     }
     const aspect = Math.max(o.w, o.h) / Math.max(0.1, Math.min(o.w, o.h));
     if (aspect > 6) f *= 0.3;                                   // long thin strips: elevations / sections
@@ -1515,7 +1723,7 @@ const boxArea = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b
 const boxInter = (a: number[], b: number[]) => boxArea([Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])]);
 
 /** Everything closer than `gap` (drawing units) belongs together. `outside` = line points not inside a named view. */
-function clusterBoxes(model: DxfModel, gap: number, vBoxes: Box[]): { box: Box; hits: number; outside: number }[] {
+export function clusterBoxes(model: DxfModel, gap: number, vBoxes: Box[]): { box: Box; hits: number; outside: number }[] {
   const C = gap;
   const [bx0, by0, bx1, by1] = model.bbox;
   const span = Math.max(bx1 - bx0, by1 - by0);
@@ -1608,14 +1816,42 @@ export function drawingParts(model: DxfModel, unitToM: number, roles?: Record<st
   const cands = roles ? planCandidates(model, roles, unitToM) : [];
   const plansIn = (b: Box) => cands.filter((c) => partKind(c.title ?? "plan") === "plan" && boxInter(c.box, b) >= 0.8 * boxArea(c.box) && !views.some((v) => boxInter(c.box, v.box) >= 0.8 * boxArea(c.box)));
   const frames = sheetFrames(model, unitToM);
+  // floor / slab layout titles ("STRU. LAYOUT AT SLAB OVER 17TH TO 26TH FLOOR LVL", "FIRST FLOOR PLAN", "楼板配筋图"):
+  // the drawing is the group of lines right above (or below) its title
+  const sheetPlans = (f: Box): { box: Box; hits: number; title: string }[] => {
+    const heads = texts.filter((t) => t.x >= f[0] && t.x <= f[2] && t.y >= f[1] && t.y <= f[3] && isLayoutTitle(t.text))
+      .filter((t, i, a) => a.findIndex((u) => u.text === t.text) === i);
+    if (!heads.length) return [];
+    const parts = sheetGroups(model, f, 0.6 / unitToM).filter((s2) => s2.hits >= 40);
+    // the groups within 6 m above / below each title that span its position
+    const cand = heads.map((t) => ({ t, near: parts.filter((s2) => t.x >= s2.box[0] - (s2.box[2] - s2.box[0]) * 0.1 && t.x <= s2.box[2] + (s2.box[2] - s2.box[0]) * 0.1)
+      .map((s2) => ({ s2, above: s2.box[1] >= t.y - 1 / unitToM, d: t.y < s2.box[1] ? s2.box[1] - t.y : t.y > s2.box[3] ? t.y - s2.box[3] : 0 }))
+      .filter((x) => x.d <= 6 / unitToM) }));
+    // titles are written below their drawings on most sheets, above on some: the side the unambiguous titles show
+    let up = 0, down = 0;
+    for (const c of cand) if (c.near.length === 1) { if (c.near[0].above) up++; else down++; }
+    const side = up >= down;
+    const out: { box: Box; hits: number; title: string }[] = [];
+    for (const { t, near } of cand) {
+      const pick = near.filter((x) => x.above === side).sort((a, b) => a.d - b.d)[0] ?? near.sort((a, b) => b.s2.hits - a.s2.hits)[0];
+      if (!pick || out.some((o) => boxInter(o.box, pick.s2.box) >= 0.5 * boxArea(pick.s2.box))) continue;
+      out.push({ box: pick.s2.box, hits: pick.s2.hits, title: t.text.split(/\bscale\b/i)[0].trim().slice(0, 100) });
+    }
+    return out;
+  };
   const pointsIn = (b: Box) => { let n = 0; for (const p of model.paths) { const [x, y] = p.pts[0]; if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) n++; } return n; };
   for (const c of big) {
     if (c.hits < minHits || !bigEnough(c.box)) continue;
     if (views.some((v) => boxInter(c.box, v.box) >= 0.85 * boxArea(c.box))) continue;  // already listed as a named drawing
     // several drawing sheets side by side, each in its own frame: every sheet is one drawing
     const fr = frames.filter((f) => boxInter(f, c.box) >= 0.9 * boxArea(f));
-    if (fr.length >= 2) {
-      for (const f of fr) { const n = pointsIn(f); if (n >= minHits) raw.push({ box: f, hits: n }); }
+    if (fr.length >= 2 || (fr.length === 1 && sheetPlans(fr[0]).length)) {
+      for (const f of fr) {
+        const n = pointsIn(f); if (n < minHits) continue;
+        // a sheet with floor / slab layouts on it (plan + beam details + notes + title block): each layout is a drawing
+        const plans = sheetPlans(f);
+        if (plans.length) raw.push(...plans); else raw.push({ box: f, hits: n });
+      }
       for (const s2 of small) if (boxInter(s2.box, c.box) >= 0.9 * boxArea(s2.box) && s2.hits >= 40 && !fr.some((f) => boxInter(f, s2.box) >= 0.3 * boxArea(s2.box))) raw.push({ box: s2.box, hits: s2.hits });
       continue;
     }

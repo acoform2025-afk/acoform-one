@@ -50,6 +50,8 @@ export function suggestLayerRole(name: string): Role {
   if (/云线|问题|建议|修改|审图|revcloud|cloud|markup|mark-up|review|comment/i.test(n)) return "ignore";
   // Chinese: block / brick walls are not cast (unless "changed to cast-in-place" 改现浇)
   if (/砌块|砖/.test(n) && !/现浇/.test(n)) return "ignore";
+  // a column-schedule layer named by the column size ("C650X1650", "C900X1500", "COL 450x600"): the columns of that size
+  if (/^(c|col|column)[-_ ]?\d{3,4}\s*[x×*]\s*\d{3,4}$/i.test(name.trim().replace(/^.*\$0\$/, ""))) return "columns";
   if (/shaft|cut-?out|opening|(^|-)duct|(^|-)lift|stair-?open|洞|管井|风井|电梯井/.test(n)) return "opening";
   if (/(^|[^a-z])(col|cols|clm|column|columns)([^a-z]|$)|column|柱/.test(n)) return "columns";
   // upstands / planters / kerbs on top of the slab: both faces × their height

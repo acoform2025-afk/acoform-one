@@ -9,7 +9,7 @@
  * Every level is then matched to its drawing in the file (BASEMENT FLOOR PLAN, STILT FLOOR PLAN, 2ND TO 12TH FLOOR
  * PLAN …). What could not be found becomes a question for the architect / structural engineer.
  */
-import type { DxfText, DrawingPart } from "./dxf";
+import { isLayoutTitle, type DxfText, type DrawingPart } from "./dxf";
 import type { SectionLevels } from "./section-read";
 import { meaningOf } from "./vocab";
 
@@ -25,7 +25,7 @@ export type Level = {
   partN?: number; partTitle?: string;   // the drawing of this level in the file
   planId?: string | null;      // measured separately in the app (its own plan)
   use: LevelUse;               // counted with the typical plan / its own plan / not formed with this formwork
-  src: "table" | "names" | "section" | "assumed";
+  src: "table" | "names" | "section" | "assumed" | "drawings";
 };
 export type Question = { id: string; to: "architect" | "structure" | "client"; text: string; why: string; done?: boolean };
 export type Building = { v: 1; levels: Level[]; questions: Question[]; note: string; edited?: boolean };
@@ -235,6 +235,37 @@ function dedupe(ls: Level[]): Level[] {
 }
 
 /* ---------- reading 4: assumed from the stated figures ---------- */
+/**
+ * Levels from the floor / slab layouts in the file (structural drawings: "LAYOUT AT SLAB OVER 3RD TO 7TH FLOOR",
+ * "SLAB OVER GROUND FLOOR"): every floor a layout names, plus the floors the general note says the building has
+ * ("DESIGNED FOR 5 BASE. + G + 38 FLOOR") that no layout covers.
+ */
+function levelsFromLayouts(parts: DrawingPart[], texts: DxfText[], floorMm: number): Level[] | null {
+  const lay = parts.filter((p) => p.kind === "plan" && isLayoutTitle(p.title));
+  if (lay.length < 2) return null;
+  const out: Level[] = [];
+  const add = (l: Level) => { if (!out.some((o) => o.key === l.key)) out.push(l); };
+  for (const p of lay) {
+    const lv = parseLevelName(p.title);
+    const skip = /\bskip\b/i.test(p.title) ? " (skip floor)" : /refuge/i.test(p.title) ? " (refuge)" : "";
+    if (lv.kind === "floor" || lv.kind === "refuge") for (const n of lv.nos) add({ key: keyOf("floor", n), name: `Floor ${n}${skip}`, kind: "floor", no: n, floorMm, use: "typical", src: "drawings" });
+    else if (lv.kind !== "other") add({ key: keyOf(lv.kind, lv.nos[0]), name: KIND_LABEL[lv.kind], kind: lv.kind, no: lv.nos[0], floorMm, use: "typical", src: "drawings" });
+  }
+  if (out.length < 2) return null;   // one plan alone says nothing about the building's levels
+  // the general note: "THIS BUILDING IS DESIGNED FOR 5 BASE. + G + 38 FLOOR + O.H.W.TANK"
+  const note = texts.map((t) => t.text).find((t) => /\bG\s*\+\s*\d{1,3}\s*(floors?|flrs?|storey)/i.test(t));
+  const m = note?.match(/(?:(\d)\s*base\w*\.?\s*\+\s*)?G\s*\+\s*(\d{1,3})/i);
+  if (m) {
+    const nb = Number(m[1] ?? 0), nf = Number(m[2]);
+    for (let b = 1; b <= nb; b++) add({ key: keyOf("basement", b), name: `Basement ${b}`, kind: "basement", no: b, floorMm, use: "none", src: "drawings" });
+    if (!out.some((l) => l.kind === "ground")) add({ key: "g", name: "Ground floor", kind: "ground", floorMm, use: "typical", src: "drawings" });
+    for (let n = 1; n <= nf; n++) add({ key: keyOf("floor", n), name: `Floor ${n}`, kind: "floor", no: n, floorMm, use: "typical", src: "drawings" });
+    add({ key: "terrace", name: "Terrace", kind: "terrace", use: "none", src: "drawings" });
+  }
+  add({ key: "terrace", name: "Terrace", kind: "terrace", use: "none", src: "drawings" });
+  return out.sort((a, b) => levelRank(a) - levelRank(b));
+}
+
 function assumedLevels(floors: number, floorMm: number): Level[] {
   const out: Level[] = [{ key: "g", name: "Ground floor", kind: "ground", floorMm, use: "typical", src: "assumed" }];
   for (let i = 1; i <= floors - 1; i++) out.push({ key: `f${i}`, name: `Floor ${i}`, kind: "floor", no: i, floorMm, use: "typical", src: "assumed" });
@@ -255,8 +286,15 @@ export function readBuilding(inp: BuildingInput): Building {
   const myTower = inp.planName ? parseLevelName(inp.planName).tower : undefined;
   let levels = levelTable(inp.texts, inp.unitToM);
   let note = levels ? "levels from the level table on the drawing" : "";
+  // structural drawings: the slab layouts ("LAYOUT AT SLAB OVER 3RD TO 7TH FLOOR") are the level list — their titles
+  // would otherwise be read as level names
+  const layoutFloorMm = said.floorMm ?? inp.section?.floorMm ?? 3000;
+  if (!levels && inp.parts.filter((p) => p.kind === "plan" && /\bslab\b|板/i.test(p.title) && isLayoutTitle(p.title)).length >= 2) {
+    levels = levelsFromLayouts(inp.parts, inp.texts, layoutFloorMm); if (levels) note = "levels from the slab layouts in the drawing and its general note";
+  }
   if (!levels) { levels = levelMarks(inp.texts, inp.unitToM); if (levels) note = "levels from the level marks on the section"; }
   if (!levels) { levels = levelNames(inp.texts, inp.unitToM); if (levels) note = "levels from the level names on the section"; }
+  if (!levels) { levels = levelsFromLayouts(inp.parts, inp.texts, layoutFloorMm); if (levels) note = "levels from the floor plans in the drawing"; }
   const Q: Question[] = [];
   const ask = (to: Question["to"], text: string, why: string) => Q.push({ id: `q${Q.length + 1}`, to, text, why });
   // the typical floor height: as stated, else the height most floors have, else the sections

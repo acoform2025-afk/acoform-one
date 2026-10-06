@@ -166,7 +166,7 @@ export function ReadOut({ planName, fileUrl, indexPath, dict: dict0, canEdit, un
                 return (
                   <tr key={l.name} className="border-t border-graphite-800 align-top">
                     <td className="px-2 py-1 font-mono text-[11px] text-graphite-100"><span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: ROLE_COL[cur] }} />{l.name}</td>
-                    <td className="px-2 py-1 text-right text-graphite-300">{l.lines || ""}</td>
+                    <td className="px-2 py-1 text-right text-graphite-300">{l.lines || ""}{l.fills ? <span className="block text-[10px] text-graphite-500">{l.fills} hatch</span> : null}</td>
                     <td className="px-2 py-1 text-right text-graphite-300">{l.texts || ""}</td>
                     <td className="px-2 py-1">
                       {canEdit && l.kind === "geometry" ? (
