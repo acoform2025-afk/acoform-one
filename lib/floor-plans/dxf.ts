@@ -763,7 +763,9 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
   const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m] as [number, number, number, number]; });
   const inCloud = (q: Pt) => clouds.some((b) => q[0] >= b[0] && q[0] <= b[2] && q[1] >= b[1] && q[1] <= b[3]);
-  const markup = (p: DxfPath) => clouds.length > 0 && (isRevCloud(p.pts, u) || (!p.closed && p.pts.length <= 3 && (inCloud(p.pts[0]) || inCloud(p.pts[p.pts.length - 1]))));
+  // the leader of a cloud is a slanting line with one end at the cloud; the walls the cloud is drawn round stay
+  const slanted = (p: DxfPath) => { const a = p.pts[0], b = p.pts[p.pts.length - 1], dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]); return Math.min(dx, dy) > 0.05 * Math.max(dx, dy); };
+  const markup = (p: DxfPath) => clouds.length > 0 && (isRevCloud(p.pts, u) || (!p.closed && p.pts.length <= 3 && slanted(p) && (inCloud(p.pts[0]) || inCloud(p.pts[p.pts.length - 1]))));
   // THE FLOOR IS ONE CONNECTED STRUCTURE: walls, columns, beams, slab edges, doors and windows of a floor stand within
   // a metre of one another (brick walls between shear walls carry beams, sills and slab edges, so the chain never
   // breaks); details, legends, sketches and notes drawn beside the plan do not touch it. The structure with the most
@@ -1003,7 +1005,26 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     // an outline is a floor slab only when walls stand inside it (not just along its edge): at least 0.5 m² of wall
     // with its centre inside the outline — an empty box closed by section lines, notes or leaders beside the plan is not
     const walled = (pts: Pt[]) => { let a = 0; U.rings.forEach((r, i) => { if (U.isHole?.[i]) return; const c: Pt = [r.reduce((x, q) => x + q[0], 0) / r.length, r.reduce((x, q) => x + q[1], 0) / r.length]; if (inside(c, pts)) a += Math.abs(polyArea(r)); }); return a * u2 >= 0.5; };
-    const kept = outer.filter((pts) => walled(pts) && Math.abs(polyArea(pts)) * u2 >= 1);
+    // a small bay with no wall inside it (a balcony or projection closed by beams and the wall line) is slab when its
+    // edge runs along walls / beams for most of its length
+    const structRings = [...U.rings, ...beamRings];
+    const framed = (pts: Pt[]) => {
+      if (Math.abs(polyArea(pts)) * u2 > 15 || !floor.some((f0) => pts.some((q) => nearRings(q, [f0], 0.3 / u)))) return false;
+      let n = 0, hit = 0;
+      for (let i = 0; i < pts.length; i++) { const a0 = pts[i], b0 = pts[(i + 1) % pts.length], L = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]), steps = Math.max(1, Math.round((L * u) / 0.25)); for (let k = 0; k < steps; k++) { const t = (k + 0.5) / steps; n++; if (nearRings([a0[0] + (b0[0] - a0[0]) * t, a0[1] + (b0[1] - a0[1]) * t], structRings, 0.3 / u)) hit++; } }
+      return n > 0 && hit >= 0.5 * n;
+    };
+    const kept = outer.filter((pts) => (walled(pts) || framed(pts)) && Math.abs(polyArea(pts)) * u2 >= 1);
+    // small cantilever slabs outside the wall line (AC platforms, sunshades, 飘板 / 空调板): a closed outline on a beam or
+    // slab layer, 0.3 … 8 m², touching the floor from outside — slab of its own (suspended formwork), with the
+    // outermost of nested outlines taken (the inner one is the kerb / drop line)
+    const bayCands = [...loops("beams"), ...loops("slab")].map((q) => q.pts).filter((pts) => { const A = Math.abs(polyArea(pts)) * u2; return pts.length >= 4 && pts.length <= 12 && A >= 0.3 && A <= 8; });
+    const bays = bayCands.filter((pts) => {
+      const c: Pt = [pts.reduce((x, q) => x + q[0], 0) / pts.length, pts.reduce((x, q) => x + q[1], 0) / pts.length];
+      if (kept.some((k) => inside(c, k)) || !pts.some((q) => nearRings(q, kept, 0.3 / u))) return false;
+      return !bayCands.some((o) => o !== pts && Math.abs(polyArea(o)) > Math.abs(polyArea(pts)) && pts.every((q) => inside(q, o) || nearRings(q, [o], 0.02 / u)));   // nested: outer only
+    });
+    kept.push(...bays);
     const use = kept.length ? kept : outer;
     if (use.length) { slab = use.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
   }

@@ -39,7 +39,15 @@ export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[]
   }
   const holes: MultiPolygon = slabs.flatMap((s) => s.holes.filter((h) => h.length >= 3).map((h) => [ring(h)] as Polygon));
   const solid: MultiPolygon = solids.filter((r) => r.length >= 3).map((r) => [ring(r)] as Polygon);
-  const zones = safeDiff(slab, walls, strips, holes, ...solid.map((p) => [p] as MultiPolygon));
+  // the slab outline trimmed 40 mm inwards along its outer edge: a slab edge drawn a few cm outside the wall (groove
+  // lines, edge lines) must not leave a sliver that chains rooms together along the outside of the wall
+  const skin: MultiPolygon = [];
+  for (const poly of slab) for (const r0 of [poly[0].slice(0, -1) as Pt[]]) for (let i = 0; i < r0.length; i++) { const r = r0;
+    const a = r[i], b = r[(i + 1) % r.length], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (L < 0.02) continue;
+    const h = 0.04, nx = (-dy / L) * h, ny = (dx / L) * h, ex = (dx / L) * h, ey = (dy / L) * h;
+    skin.push([ring([[a[0] + nx - ex, a[1] + ny - ey], [b[0] + nx + ex, b[1] + ny + ey], [b[0] - nx + ex, b[1] - ny + ey], [a[0] - nx - ex, a[1] - ny - ey]])] as Polygon);
+  }
+  const zones = safeDiff(slab, walls, strips, holes, skin, ...solid.map((p) => [p] as MultiPolygon));
   const out: { rings: Pt[][]; area: number; box: [number, number, number, number] }[] = [];
   for (const poly of zones) {
     const rings = poly.map((r) => r.slice(0, -1) as Pt[]);
