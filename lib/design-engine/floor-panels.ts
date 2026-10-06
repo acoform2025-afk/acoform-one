@@ -33,7 +33,7 @@ export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit
 export type PanelOptions = { extCorners?: number; upstands?: { h: number; length: number; label: string }[]; sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "upstand" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
-export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo; geo3?: FaceGeo & { z0: number }; set?: "column" };
+export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo; geo3?: FaceGeo & { z0: number }; set?: "column"; end?: boolean };   // end: a wall end closed by a stop-end panel (filler = its width)
 export type PanelResult = {
   bom: BomRow[]; faces: FaceLayout[]; elements: ElementRow[]; columns: ColumnLayout[]; beams: BeamLayout[]; stairs: StairLayout[];
   summary: { specials: { types: number; pcs: number; area: number }; panelArea: number; weight: number; accessoryWeight: number; standardPct: number; faceCount: number; faceLength: number; deckFillArea: number; props: number; kgPerM2: number; warnings: string[] };
@@ -136,6 +136,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       ends++;
       const w = Math.round(f.length / 5) * 5;
       add(`SE-${w}-${Math.round(f.height)}`, { code: `SE-${w}-${Math.round(f.height)}`, description: "Wall end closure (stop-end)", group: "end", w, h: Math.round(f.height), custom: true }, 1);
+      // the stop-end is a panel across the wall end (full height): placed like a filler so the model and the drawings show it
+      layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels: [], filler: w, top: 0, geo: f.geo, geo3: f.geo3, set: f.set, end: true });
       continue;
     }
     const fit = wallW.length ? fillRun(f.length, wallW) : { panels: [], left: Math.round(f.length) };

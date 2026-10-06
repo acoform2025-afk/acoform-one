@@ -31,6 +31,7 @@ export function codeOf(p: Panel3, cf: CodeFor, stdH: number): string {
     case "std": { const w = num(c, /·\s*(\d+)\s*×\s*(\d+)/), h = num(c, /·\s*(\d+)\s*×\s*(\d+)/, 2); return cf.wall(w || mm(dist(plan(p.p[0]), plan(p.p[1]))), h || stdH); }
     case "top": { const w = num(c, /top\s*(\d+)\s*×\s*(\d+)/), h = num(c, /top\s*(\d+)\s*×\s*(\d+)/, 2); return `WT-${w}-${h}`; }
     case "fill": {
+      const se = c.match(/\bSE\s*(\d+)\s*×\s*(\d+)/); if (se) return `SE-${se[1]}-${se[2]}`;
       const f = c.match(/filler\s*(\d+)\s*×\s*(\d+)/); if (f) return `WF-${f[1]}-${f[2]}`;
       const o = c.match(/\b(OH|OS)\s*(\d+)\s*×\s*(\d+)/); if (o) return `${o[1]}-${o[2]}-${o[3]}`;
       return `WF-${mm(dist(plan(p.p[0]), plan(p.p[1])))}-${mm(Math.abs(p.p[2][1] - p.p[0][1]))}`;

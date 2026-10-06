@@ -123,7 +123,7 @@ export function buildScene3(o: {
       if (top > 0) { quad(run, run + w, main, main + top, "top", `${f.code} · top ${w} × ${f.top}`); special++; }
       run += w;
     }
-    if (f.filler) { quad(run, run + f.filler, 0, Hm, "fill", `${f.code} · filler ${f.filler} × ${f.height}`); special++; }
+    if (f.filler) { quad(run, run + f.filler, 0, Hm, "fill", f.end ? `${f.code} · wall end SE ${f.filler} × ${f.height} — stop-end panel across the wall end, pinned to the face panels on both sides` : `${f.code} · filler ${f.filler} × ${f.height}`); special++; }
   }
   // soffit corner on every wall face: a vertical leg on the wall top and a horizontal leg under the slab into the room
   const scV = (o.scMm?.[1] ?? 125) / 1000, scH = (o.scMm?.[0] ?? 100) / 1000;
@@ -425,7 +425,7 @@ export function buildScene3(o: {
   // opposite face (same position). Walers (2 rows) on both faces; push-pull props on one face of each wall.
   const tH = (o.tieH ?? 800) / 1000, tV = (o.tieV ?? 800) / 1000;
   for (const f of o.faces) {
-    if (!f.geo || !(mpp > 0) || f.set === "column") continue;
+    if (!f.geo || !(mpp > 0) || f.set === "column" || f.end) continue;      // a stop-end is pinned to the face panels, no ties of its own
     const { a: A, b: B, off } = f.geo;
     const dx = B[0] - A[0], dy = B[1] - A[1], Lp = Math.hypot(dx, dy); if (!Lp) continue;
     const ux = dx / Lp, uy = dy / Lp; let nx = -uy, ny = ux;

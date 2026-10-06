@@ -146,7 +146,7 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
 }
 
 /** Every wall panel numbered face by face (F12-01 …), in the order laid from the start of the face. */
-export function wallPanelNumbers(faces: { code: string; height: number; panels: number[]; filler: number; top: number }[], stdHeight: number, codeFor: (w: number) => string) {
+export function wallPanelNumbers(faces: { code: string; height: number; panels: number[]; filler: number; top: number; end?: boolean }[], stdHeight: number, codeFor: (w: number) => string) {
   const out: { no: string; face: string; code: string; w: number; h: number }[] = [];
   for (const f of faces) {
     let k = 0;
@@ -154,7 +154,7 @@ export function wallPanelNumbers(faces: { code: string; height: number; panels: 
       out.push({ no: `${f.code}-${String(++k).padStart(2, "0")}`, face: f.code, code: codeFor(w), w, h: stdHeight });
       if (f.top > 0) out.push({ no: `${f.code}-${String(k).padStart(2, "0")}T`, face: f.code, code: `WT-${w}-${f.top}`, w, h: f.top });
     }
-    if (f.filler) out.push({ no: `${f.code}-${String(++k).padStart(2, "0")}F`, face: f.code, code: `WF-${f.filler}-${f.height}`, w: f.filler, h: f.height });
+    if (f.filler) out.push({ no: `${f.code}-${String(++k).padStart(2, "0")}${f.end ? "E" : "F"}`, face: f.code, code: f.end ? `SE-${f.filler}-${f.height}` : `WF-${f.filler}-${f.height}`, w: f.filler, h: f.height });
   }
   return out;
 }
