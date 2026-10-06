@@ -259,8 +259,11 @@ export function buildScene3(o: {
     // measured flights when the drawing gave them (risers, tread, width), else a typical dog-leg
     const g = (o.stairGeo ?? []).filter((x) => !x.assumed)[si];
     const per = g ? Math.max(2, g.risers) : Math.max(2, Math.ceil(FH / 2 / 0.17)), rise = g ? g.riser / 1000 : FH / 2 / per;
-    const land = g && ori ? Math.max(0.9, Lb - (Math.max(2, g.risers) - 1) * (g.tread / 1000)) : g && g.landingM2 > 0 ? Math.min(Lb / 2, Math.max(0.9, g.landingM2 / Math.max(0.9, Wb))) : Math.min(1.5, Math.max(0.9, Wb / 2));
-    const tread = g ? Math.min(g.tread / 1000, (Lb - land) / Math.max(1, per - 1)) : Math.min(0.3, (Lb - land) / Math.max(1, per - 1));
+    // assumed stair (no flight lines on the plan): 300 treads, and the mid-landing takes the rest of the stairwell so
+    // the flights always reach it (a short well shortens the treads, never shorter than a 900 landing)
+    const landA = Math.max(0.9, Lb - per * 0.3), treadA = Math.min(0.3, (Lb - landA) / per);
+    const land = g && ori ? Math.max(0.9, Lb - (Math.max(2, g.risers) - 1) * (g.tread / 1000)) : g && g.landingM2 > 0 ? Math.min(Lb / 2, Math.max(0.9, g.landingM2 / Math.max(0.9, Wb))) : landA;
+    const tread = g ? Math.min(g.tread / 1000, (Lb - land) / Math.max(1, per - 1)) : treadA;
     const half = g ? Math.min(g.width / 1000, Wb / 2) : Wb / 2;
     const fl = g ? Math.max(1, Math.min(2, g.flights)) : 2;
     const flipU = ori ? !ori.landHigh : false;               // landing at the low end: the plan is mirrored along the climb

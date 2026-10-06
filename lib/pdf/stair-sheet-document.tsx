@@ -421,6 +421,15 @@ function CChannelDetail({ s }: { s: StairLayout }) {
   );
 }
 
+/** How the concrete goes in when the stair is cast with the floor (the stair is a closed box; concrete that is simply
+ *  dropped from the landing runs down the slope and leaves the upper steps hollow). */
+const POUR: [string, string][] = [
+  ["Order", "Walls and columns first, then the slab, then the stair flights from the BOTTOM step upwards; the landing is poured with the slab it belongs to."],
+  ["Pour holes", "Every tread cover has a pour / vent opening (the Ø20 vent holes of every second cover let the air out). Concrete is placed step by step through the riser-top opening of each step, lowest first, and vibrated there before the next step is filled — never dropped from the top of the flight."],
+  ["Closed box", "Risers RS on every step, tread covers SPTR, stop panel STP at the top of each flight and C-channel CC at the foot: with all four in place no concrete can leak, and the flight cannot slide down the slope under the wet weight."],
+  ["Pressure", "The sloping soffit takes the full liquid head of the flight: props on SPH heads at ≤ 1.2 m under every soffit row, the cheek / dog-tooth panels pinned to the wall panels and tied through at every step row, push-pull props at the open side."],
+  ["Finish", "The top of each tread cover is left open for finishing after the pour; the landing surface is struck off with the slab. Strip the risers and covers after 24 h, the soffit with the slab."],
+];
 const FAB: [string, string][] = [
   ["Material", "Aluminium alloy 6061-T6 / 6082-T6 extrusions and plate (all stair pieces)."],
   ["Skin", "4 mm plate (min. 3.5 mm). Dog-tooth skin cut to the step profile by CNC / laser / water-jet; L-step skin brake-bent from one sheet."],
@@ -450,6 +459,12 @@ function DetailsPage({ s, info, si, total }: { s: StairLayout; info: StairInfo; 
       <View style={{ marginTop: 8, borderWidth: 0.8, borderColor: "#d6d3d1", padding: 6 }}>
         <Text style={{ fontSize: 9, fontWeight: "bold", marginBottom: 3 }}>FABRICATION NOTES (typical aluminium-formwork practice — confirm with your panel supplier)</Text>
         {FAB.map(([a, b]) => (
+          <View key={a} style={{ flexDirection: "row", paddingVertical: 1.5, borderBottomWidth: 0.3, borderColor: "#e5e5e5" }}>
+            <Text style={{ width: 80, fontWeight: "bold" }}>{a}</Text><Text style={{ flex: 1 }}>{b}</Text>
+          </View>
+        ))}
+        <Text style={{ marginTop: 6, fontSize: 9, fontWeight: "bold" }}>CONCRETING THE STAIR IN THE SAME POUR AS THE FLOOR</Text>
+        {POUR.map(([a, b]) => (
           <View key={a} style={{ flexDirection: "row", paddingVertical: 1.5, borderBottomWidth: 0.3, borderColor: "#e5e5e5" }}>
             <Text style={{ width: 80, fontWeight: "bold" }}>{a}</Text><Text style={{ flex: 1 }}>{b}</Text>
           </View>
