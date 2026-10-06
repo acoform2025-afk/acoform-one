@@ -16,11 +16,12 @@ const USE_LABEL: Record<LevelUse, string> = { typical: "Typical plan", own: "Own
  * has, whether the typical plan stands for it, and the open questions for the architect / structural engineer /
  * client. The whole-building formwork area is the sum over the formed levels.
  */
-export function BuildingPanel({ building, parts, typical, siblings, planId, canEdit, extra = [], onChange, onReread, onMeasure, onShowPart }: {
+export function BuildingPanel({ building, parts, typical, siblings, planId, canEdit, extra = [], onChange, onReread, onMeasure, onMakeAll, onShowPart }: {
   building: Building; parts: LevelPartInfo[]; typical: { contact: number; quote: number }; siblings: SiblingPlan[]; planId: string; canEdit: boolean;
   extra?: Question[];      // questions from the measurement itself (slab, beams, openings …) — shown with the level questions, printed on the sheet
   onChange: (b: Building) => void; onReread: () => void;
   onMeasure: (g: LevelGroup, part: LevelPartInfo | null) => Promise<void>;
+  onMakeAll?: () => Promise<void>;   // one plan per drawing for every level with its own drawing and no plan yet
   onShowPart: (part: LevelPartInfo) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -58,6 +59,14 @@ export function BuildingPanel({ building, parts, typical, siblings, planId, canE
         {canEdit ? <button type="button" onClick={onReread} className="text-[11px] text-brand-orange hover:underline">Read levels again</button> : null}
       </div>
       <p className="mb-2 mt-0.5 text-[11px] text-graphite-500">{building.note}. Every formed level counts: the typical plan stands for the floors without their own drawing.</p>
+      {(() => { const g0 = groups.filter((g) => g.use === "own" && !g.planId && g.partN); const drawings = new Set(g0.map((g) => g.partN)).size; return g0.length && canEdit && onMakeAll ? (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-signal-amber/40 bg-signal-amber/10 px-2 py-1.5 text-[11px] text-graphite-200">
+          <span>{g0.map((g) => g.name).join(", ")}: own drawing{drawings > 1 ? "s" : ""} in the file, no plan yet — counted as the typical floor until then.</span>
+          <button type="button" disabled={busy === "all"} onClick={async () => { setBusy("all"); try { await onMakeAll(); } finally { setBusy(null); } }} className="inline-flex items-center gap-1 rounded bg-brand-orange px-2 py-1 font-medium text-white hover:opacity-90 disabled:opacity-60">
+            {busy === "all" ? <Loader2 className="size-3 animate-spin" /> : null}Make the plans of all {drawings} drawing{drawings > 1 ? "s" : ""}
+          </button>
+        </div>
+      ) : null; })()}
       <table className="w-full text-[11px]">
         <thead className="text-graphite-500">
           <tr><th className="pb-1 text-left font-normal">Level</th><th className="pb-1 text-right font-normal">Nos</th><th className="pb-1 text-right font-normal">Height</th><th className="pb-1 text-left font-normal">Counted with</th><th className="pb-1 text-right font-normal">m²</th></tr>

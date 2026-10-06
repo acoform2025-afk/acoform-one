@@ -19,7 +19,7 @@ import {
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
 import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
-import { createLevelPlan, saveTakeoff } from "../actions";
+import { createAllLevelPlans, createLevelPlan, saveTakeoff } from "../actions";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
@@ -594,6 +594,15 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     router.push(`/floor-plans/${res.data.id}`);
   }
 
+  async function makeAllLevelPlans() {
+    // the levels as shown are saved first, so the server works from the same list
+    if (t.building) { const sv = await saveTakeoff(plan.id, t, totals, null); if (sv.error) { setMsg({ error: sv.error }); return; } }
+    const res = await createAllLevelPlans(plan.id);
+    if (res.error || !res.data) { setMsg({ error: res.error ?? "Could not make the plans." }); return; }
+    setMsg({ ok: `${res.data.made} plan${res.data.made === 1 ? "" : "s"} made and read: ${res.data.names.join("; ")}` });
+    window.location.reload();
+  }
+
   /* ---------- save ---------- */
   async function save() {
     if (!size || !canvasRef.current) return;
@@ -884,7 +893,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         {isDxf && t.building && !t.parentPlan ? (
           <BuildingPanel building={t.building} parts={parts.map((q) => ({ n: q.n, title: q.title, px: q.px }))} typical={{ contact: totals.contact_area, quote: totals.quote_area }} siblings={siblings} planId={plan.id} canEdit={canEdit}
             extra={measureQuestions(t, totals, auto, rules, modelRef.current ? drawingSection(modelRef.current) : null)}
-            onChange={setBuilding} onReread={() => { const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n); if (b) setBuilding({ ...b, edited: false }); }} onMeasure={makeLevelPlan} onShowPart={(q) => fitBox(q.px)} />
+            onMakeAll={makeAllLevelPlans} onChange={setBuilding} onReread={() => { const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n); if (b) setBuilding({ ...b, edited: false }); }} onMeasure={makeLevelPlan} onShowPart={(q) => fitBox(q.px)} />
         ) : null}
         {t.parentPlan ? <p className="rounded-lg border border-graphite-800 bg-graphite-900 p-3 text-[11px] text-graphite-400">This is one level&apos;s own plan. The whole building is listed on its typical plan: <Link href={`/floor-plans/${t.parentPlan}`} className="text-brand-orange hover:underline">open it</Link>.</p> : null}
 

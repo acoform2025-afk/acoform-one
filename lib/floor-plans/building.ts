@@ -43,7 +43,7 @@ const cnNum = (s: string): number | undefined => {
   return (m[1] ? CN_NUM[m[1]] : 1) * 10 + (m[2] ? CN_NUM[m[2]] : 0);
 };
 
-/** What a level name / drawing title says: its kind and floor number(s). "2ND TO 12TH FLOOR PLAN" → floor 2…12. */
+/** What a level name / drawing title says: its kind and floor number(s). "2ND TO 12TH FLOOR PLAN" → floor 2…12; "5TH,9TH,13TH&17TH" is a list ("&" / "and" never make a range). */
 export function parseLevelName(raw: string): { kind: LevelKind; nos: number[]; typical: boolean; tower?: string } {
   const t = raw.replace(/\\[A-Za-z]/g, "").replace(/_/g, " ").replace(/\s+/g, " ").trim();
   const low = t.toLowerCase();
@@ -52,7 +52,7 @@ export function parseLevelName(raw: string): { kind: LevelKind; nos: number[]; t
   const typical = /typical|标准层|\btyp\b/i.test(t);
   const nos: number[] = [];
   const range = (a: number, b: number) => { if (b >= a && b - a < 150) for (let i = a; i <= b; i++) nos.push(i); };
-  let m = low.match(/(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor|flr|fl)?\s*(?:to|-|–|~|&|upto|up to|and)\s*(\d{1,3})\s*(?:st|nd|rd|th)?/);
+  let m = low.match(/(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor|flr|fl)?\s*(?:to|-|–|~|upto|up to)\s*(\d{1,3})\s*(?:st|nd|rd|th)?/);
   if (m) range(+m[1], +m[2]);
   m = t.match(/(\d{1,3})\s*[-~–至]\s*(\d{1,3})\s*层/); if (m && !nos.length) range(+m[1], +m[2]);
   if (!nos.length) {

@@ -6,7 +6,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile, requirePermission } from "@/lib/auth/permissions";
 import { dbError } from "@/lib/format";
 import { dwgToDxf } from "@/lib/floor-plans/dwg";
-import { runPanels } from "@/lib/floor-plans/run-panels";
+import { loadModel, runPanels } from "@/lib/floor-plans/run-panels";
+import { drawingParts, dxfFrame } from "@/lib/floor-plans/dxf";
+import { UNIT_TO_M } from "@/lib/floor-plans/calc";
+import type { Building } from "@/lib/floor-plans/building";
 import { readingFingerprint, type ReadingFp } from "@/lib/floor-plans/reading-record";
 
 const FLOOR_PLAN_BUCKET_NAME = "floor-plans";
@@ -393,7 +396,74 @@ export async function createLevelPlan(input: z.infer<typeof levelPlanSchema>): P
     file_path: src.file_path, original_path: src.original_path, file_name: src.file_name, takeoff: takeoff as never,
   }).select("id").single();
   if (error || !data) return { error: dbError(error?.message ?? "Could not create the plan.") };
+  await measurePlan(data.id);
   revalidatePath("/floor-plans");
   if (src.lead_id) revalidatePath(`/leads/${src.lead_id}`);
   return { ok: true, data: { id: data.id } };
+}
+
+/** Read a plan on the server and store its totals, so a plan made from a drawing counts as measured without being opened. */
+async function measurePlan(id: string): Promise<boolean> {
+  const supabase = await createClient();
+  const r = await runPanels(supabase, id, {});
+  if (!r || r.error || !r.inp) return false;
+  const { error } = await supabase.from("floor_plans").update({ totals: r.inp.totals as never }).eq("id", id);
+  return !error;
+}
+
+/**
+ * Every level that has its own drawing in the file but no plan yet gets one — one plan per drawing (floors 2, 6, 10 …
+ * drawn as "2ND,6TH,10TH FLOOR PLAN" share it), read and measured on the server, and linked to its levels. After this
+ * the whole-building 3D and the "Set per level" list use each level's own drawing instead of the typical plan.
+ */
+export async function createAllLevelPlans(fromId: string): Promise<Result<{ made: number; names: string[] }>> {
+  const denied = await guard(); if (denied) return { error: denied };
+  if (!uuid.safeParse(fromId).success) return { error: "Invalid floor plan." };
+  const supabase = await createClient();
+  const { data: src } = await supabase.from("floor_plans").select("id, name, lead_id, source_kind, drawing_type, file_path, original_path, file_name, takeoff, tenant_id, updated_at").eq("id", fromId).maybeSingle();
+  if (!src) return { error: "Floor plan not found." };
+  const t = (src.takeoff && typeof src.takeoff === "object" && !Array.isArray(src.takeoff) ? src.takeoff : {}) as Record<string, unknown> & { building?: Building; dxf?: { units: keyof typeof UNIT_TO_M; layerRoles?: Record<string, never>; region?: number[] | null }; params?: Record<string, unknown> };
+  const b = t.building;
+  if (!b?.levels.length || !t.dxf) return { error: "Read the levels of the building first (Whole building → Read levels again)." };
+  const model = await loadModel(supabase, src);
+  if (!model) return { error: "The drawing file could not be read." };
+  const u = UNIT_TO_M[t.dxf.units], f = dxfFrame(model, 2400);
+  const parts = drawingParts(model, u, t.dxf.layerRoles as never);
+  const pxOf = (n: number): [number, number, number, number] | null => { const p = parts.find((x) => x.n === n); if (!p) return null; const a = f.toPx([p.box[0], p.box[1]]), c = f.toPx([p.box[2], p.box[3]]); return [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.max(a[0], c[0]), Math.max(a[1], c[1])]; };
+  // the typical plan's own drawing is not a level plan
+  const reg = t.dxf.region;
+  const area = (x: number[]) => Math.max(0, x[2] - x[0]) * Math.max(0, x[3] - x[1]);
+  const isTypical = (px: number[]) => !!reg && area([Math.max(px[0], reg[0]), Math.max(px[1], reg[1]), Math.min(px[2], reg[2]), Math.min(px[3], reg[3])]) > 0.6 * Math.min(area(px), area(reg));
+  const { data: sibs } = await supabase.from("floor_plans").select("id").eq("file_path", src.file_path ?? "");
+  const exists = new Set((sibs ?? []).map((x) => x.id));
+  const byPart = new Map<number, typeof b.levels>();
+  for (const l of b.levels) if (l.use === "own" && l.partN && !(l.planId && exists.has(l.planId))) byPart.set(l.partN, [...(byPart.get(l.partN) ?? []), l]);
+  const levels = [...b.levels];
+  const names: string[] = [];
+  for (const [n, group] of byPart) {
+    const px = pxOf(n); if (!px || isTypical(px)) { for (const l of group) { const i = levels.findIndex((x) => x.key === l.key); if (i >= 0 && isTypical(px ?? [0, 0, 0, 0])) levels[i] = { ...levels[i], use: "typical", planId: null }; } continue; }
+    const title = group[0].partTitle ?? `drawing ${n}`;
+    const floorMm = group[0].floorMm;
+    const takeoff = {
+      v: 1, metersPerPx: t.metersPerPx ?? null, calib: t.calib, image: t.image, shapes: [], columns: [], beams: [], extras: [], nonTypical: [], stairs: [],
+      system: t.system, shell: t.shell,
+      params: { ...(t.params ?? {}), floors: group.length, ...(floorMm ? { floorHeight: floorMm / 1000 } : {}) },
+      dxf: { ...t.dxf, region: px, excludeM: undefined, includeM: undefined, approved: null },
+      auto: { done: true, note: `made from "${src.name}" for ${group.map((l) => l.name).join(", ")}` },
+      parentPlan: src.id,
+    };
+    const { data, error } = await supabase.from("floor_plans").insert({
+      name: `${src.name} — ${title}`, lead_id: src.lead_id, source_kind: src.source_kind, drawing_type: src.drawing_type,
+      file_path: src.file_path, original_path: src.original_path, file_name: src.file_name, takeoff: takeoff as never,
+    }).select("id").single();
+    if (error || !data) return { error: dbError(error?.message ?? "Could not create the plan.") };
+    await measurePlan(data.id);
+    for (const l of group) { const i = levels.findIndex((x) => x.key === l.key); if (i >= 0) levels[i] = { ...levels[i], planId: data.id, use: "own" }; }
+    names.push(title);
+  }
+  const { error } = await supabase.from("floor_plans").update({ takeoff: { ...t, building: { ...b, edited: true, levels } } as never, updated_at: new Date().toISOString() }).eq("id", fromId);
+  if (error) return { error: dbError(error.message) };
+  revalidatePath("/floor-plans"); revalidatePath(`/floor-plans/${fromId}`);
+  if (src.lead_id) revalidatePath(`/leads/${src.lead_id}`);
+  return { ok: true, data: { made: names.length, names } };
 }
