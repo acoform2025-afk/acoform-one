@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile, requirePermission } from "@/lib/auth/permissions";
 import { dbError } from "@/lib/format";
 import { dwgToDxf } from "@/lib/floor-plans/dwg";
+import { runPanels } from "@/lib/floor-plans/run-panels";
+import { readingFingerprint, type ReadingFp } from "@/lib/floor-plans/reading-record";
 
 const FLOOR_PLAN_BUCKET_NAME = "floor-plans";
 type Result<T = undefined> = { ok?: boolean; error?: string; data?: T };
@@ -328,6 +330,31 @@ export async function applyReadingAnswer(id: string, input: z.infer<typeof revie
   if (error) return { error: dbError(error.message) };
   revalidatePath(`/floor-plans/${id}`); revalidatePath(`/floor-plans/${id}/review`);
   if (row.lead_id) revalidatePath(`/leads/${row.lead_id}`);
+  return { ok: true };
+}
+
+/** Approve the present reading of a plan (its fingerprint is kept; later reads are compared with it) or withdraw the approval. */
+export async function approveReading(id: string, approve: boolean): Promise<Result> {
+  const denied = await guard(); if (denied) return { error: denied };
+  if (!uuid.safeParse(id).success) return { error: "Invalid floor plan." };
+  const supabase = await createClient();
+  const { data: row } = await supabase.from("floor_plans").select("takeoff, lead_id").eq("id", id).maybeSingle();
+  if (!row) return { error: "Floor plan not found." };
+  const t = (row.takeoff && typeof row.takeoff === "object" ? row.takeoff : {}) as { dxf?: Record<string, unknown> };
+  if (!t.dxf) return { error: "This plan has no drawing to approve." };
+  let approved: { at: string; by?: string; fp: ReadingFp } | null = null;
+  if (approve) {
+    const r = await runPanels(supabase, id, {});
+    if (!r || r.error || !r.inp) return { error: r?.error ?? "The plan could not be read." };
+    const fp = readingFingerprint(r.inp, r.zones ?? [], r.result);
+    if (fp.openFaces) return { error: `${fp.openFaces} wall face${fp.openFaces > 1 ? "s have" : " has"} no panel — fix that before approving.` };
+    const me = await getCurrentProfile().catch(() => null);
+    approved = { at: new Date().toISOString(), by: me?.full_name ?? me?.email ?? undefined, fp };
+  }
+  // the save time is not touched: the reading itself did not change
+  const { error } = await supabase.from("floor_plans").update({ takeoff: { ...t, dxf: { ...t.dxf, approved } } as never }).eq("id", id);
+  if (error) return { error: dbError(error.message) };
+  revalidatePath(`/floor-plans/${id}`); revalidatePath(`/floor-plans/${id}/review`); revalidatePath("/floor-plans/check");
   return { ok: true };
 }
 

@@ -5,7 +5,8 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { runPanels } from "@/lib/floor-plans/run-panels";
 import { readChecks, type ReadBox } from "@/lib/floor-plans/read-checks";
 import type { Pt } from "@/lib/floor-plans/calc";
-import { AnswerButtons, ClearAnswers } from "./answer-buttons";
+import { AnswerButtons, ApproveButton, ClearAnswers } from "./answer-buttons";
+import { fingerprintDiff, readingFingerprint, type Approved } from "@/lib/floor-plans/reading-record";
 
 export const metadata = { title: "Reading review" };
 export const dynamic = "force-dynamic";
@@ -49,9 +50,15 @@ export default async function ReadingReviewPage({ params }: { params: Promise<{ 
   const pts = walls.flat();
   const box: ReadBox = pts.length ? [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))] : [0, 0, 10, 10];
   const dxf = r.t.dxf as { includeM?: ReadBox[]; excludeM?: ReadBox[] } | undefined;
+  const mpp = r.shell?.mpp ?? 0, m = (p: Pt): Pt => [p[0] * mpp, p[1] * mpp];   // face geometry is in plan px
   const marked = { includeM: dxf?.includeM ?? [], excludeM: dxf?.excludeM ?? [] };
-  const checks = readChecks({ notes: (inp.readNotes ?? []) as never, zoneWalls: walls, zones: r.zones ?? [], faces: r.result.faces, stairs: inp.zoneStairs.length, box, marked });
+  const checks = readChecks({ notes: (inp.readNotes ?? []) as never, zoneWalls: walls, zones: r.zones ?? [], faces: r.result.faces.map((f) => ({ ...f, geo: f.geo ? { a: m(f.geo.a), b: m(f.geo.b) } : undefined })), stairs: inp.zoneStairs.length, box, marked });
   const counts = { error: checks.filter((c) => c.sev === "error").length, warn: checks.filter((c) => c.sev === "warn").length, info: checks.filter((c) => c.sev === "info").length };
+  // the approved reading (kept on the plan) against the present one
+  const approved = ((r.plan.takeoff as { dxf?: { approved?: Approved | null } } | null)?.dxf?.approved ?? null) as Approved | null;
+  const fp = readingFingerprint(inp, r.zones ?? [], r.result);
+  const drift = approved ? fingerprintDiff(approved.fp, fp) : [];
+  const when = approved ? new Date(approved.at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "";
   return (
     <div className="fade-in">
       {back}
@@ -70,6 +77,25 @@ export default async function ReadingReviewPage({ params }: { params: Promise<{ 
         <Link href={`/floor-plans/${id}/panels/3d`} className="rounded-md border border-graphite-700 px-2 py-1 text-graphite-200 hover:bg-graphite-800">3D model</Link>
         <Link href={`/floor-plans/${id}/read`} className="rounded-md border border-graphite-700 px-2 py-1 text-graphite-200 hover:bg-graphite-800">Drawing read-out</Link>
       </div>
+      {approved && drift.length ? (
+        <div className="mb-4 rounded-md border border-signal-red/40 bg-signal-red/10 p-3 text-xs">
+          <div className="font-semibold text-signal-red">The reading changed since it was approved on {when}{approved.by ? ` by ${approved.by}` : ""}</div>
+          <ul className="mt-1 list-disc pl-5 text-graphite-200">{drift.map((d, i) => <li key={i}>{d}</li>)}</ul>
+          <p className="mt-1 text-graphite-400">Either the drawing was read again with new answers, or the reader itself changed. Check the plan; if the new reading is the right one, approve it instead.</p>
+          {canEdit ? <div className="mt-2 flex gap-2"><ApproveButton id={id} approved={false} label="The new reading is right — approve it" /><ApproveButton id={id} approved={true} /></div> : null}
+        </div>
+      ) : approved ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-signal-green/40 bg-signal-green/10 p-3 text-xs text-graphite-200">
+          <span><span className="font-semibold text-signal-green">Approved reading</span> — same as approved on {when}{approved.by ? ` by ${approved.by}` : ""}: {fp.walls} wall outlines, {fp.faces} faces, {fp.zones} deck zones, {fp.stairs} stair{fp.stairs === 1 ? "" : "s"}, {fp.panels} pieces.</span>
+          {canEdit ? <ApproveButton id={id} approved={true} /> : null}
+          <a href={`/floor-plans/${id}/training`} className="text-graphite-400 underline hover:text-graphite-200">Training record (JSON)</a>
+        </div>
+      ) : (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-graphite-800 p-3 text-xs text-graphite-300">
+          <span>Not approved yet. When the reading is right, approve it: the app keeps it and warns on this page and on <Link href="/floor-plans/check" className="underline">Check approved readings</Link> if a later read of this plan comes out differently.</span>
+          {canEdit && !counts.error ? <ApproveButton id={id} approved={false} /> : null}
+        </div>
+      )}
       {checks.length === 0 ? <p className="rounded-md border border-graphite-800 p-4 text-sm text-graphite-300">Nothing doubtful: the reader found one connected floor, every wall face has a panel and no decision needed a guess.</p> : null}
       <ul className="space-y-3">
         {checks.map((c) => (

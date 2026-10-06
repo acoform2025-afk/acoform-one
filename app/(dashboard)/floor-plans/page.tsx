@@ -22,7 +22,10 @@ export default async function FloorPlansPage() {
           <h1 className="text-2xl font-semibold text-graphite-50">Floor plans &amp; area take-off</h1>
           <p className="mt-1 max-w-2xl text-sm text-graphite-400">Upload an AutoCAD plan, measure it, and use the formwork area in a quotation.</p>
         </div>
-        {canCreate ? <Link href="/floor-plans/new" className="rounded-md bg-brand-orange px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Upload floor plan</Link> : null}
+        <div className="flex items-center gap-2">
+          <Link href="/floor-plans/check" className="rounded-md border border-graphite-700 px-3 py-2 text-xs text-graphite-200 hover:bg-graphite-800">Check approved readings</Link>
+          {canCreate ? <Link href="/floor-plans/new" className="rounded-md bg-brand-orange px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Upload floor plan</Link> : null}
+        </div>
       </div>
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-graphite-800">

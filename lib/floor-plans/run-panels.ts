@@ -45,16 +45,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   const key = JSON.stringify([id, plan.updated_at, plan.file_path, q.h ?? "", q.kg ?? "", q.prop ?? "", layoutRules, rules, eng, (catalog ?? []).map((c) => `${c.panel_code}:${c.width_mm}:${c.height_mm}:${c.weight_kg}`).join("|")]);
   const hit = runCache.get(key);
   if (hit) return { ...(hit as Computed), plan, lead: Array.isArray(plan.leads) ? plan.leads[0] : plan.leads };
-  let model: DxfModel | null = null;
-  if (plan.source_kind === "dxf") {
-    const mk = `${plan.tenant_id}/${plan.file_path}/${plan.updated_at}`;   // a re-read drawing (same path) is read again
-    if (modelCache.has(mk)) model = modelCache.get(mk)!;
-    else {
-      const { data: blob } = await supabase.storage.from("floor-plans").download(plan.file_path);
-      if (blob) { try { model = readDxf(await dxfTextFromBlob(blob)); } catch { model = null; } }
-      if (model) remember(modelCache, mk, model, 2);
-    }
-  }
+  const model = await loadModel(supabase, plan);
   // a plan measured before the whole-building list existed (or never saved since): its levels are read here, unsaved
   if (!t.building && model && t.dxf) {
     try {
@@ -73,6 +64,17 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   const computed = { t, opt, totals: inp.totals, result, shell: inp.shell, error: null, inp, catalog: (catalog ?? []) as unknown as CatPanel[], layoutRules, companySystem: companyRules.system, zones };
   remember(runCache, key, computed, 3);
   return { plan, lead, ...computed };
+}
+/** The plan's DXF model (cached by path and save time; null for a PDF / picture plan or an unreadable file). */
+export async function loadModel(supabase: Supa, plan: { source_kind: string | null; file_path: string | null; tenant_id: string | null; updated_at: string | null }): Promise<DxfModel | null> {
+  if (plan.source_kind !== "dxf" || !plan.file_path) return null;
+  const mk = `${plan.tenant_id}/${plan.file_path}/${plan.updated_at}`;   // a re-read drawing (same path) is read again
+  if (modelCache.has(mk)) return modelCache.get(mk)!;
+  let model: DxfModel | null = null;
+  const { data: blob } = await supabase.storage.from("floor-plans").download(plan.file_path);
+  if (blob) { try { model = readDxf(await dxfTextFromBlob(blob)); } catch { model = null; } }
+  if (model) remember(modelCache, mk, model, 2);
+  return model;
 }
 type Computed = { t: Takeoff; opt: ReturnType<typeof readOptions>; totals: ReturnType<typeof panelInputs>["totals"]; result: ReturnType<typeof layoutFloor>; shell: ReturnType<typeof panelInputs>["shell"]; error: null; inp: ReturnType<typeof panelInputs>; catalog: CatPanel[]; layoutRules: LayoutRules; companySystem: LayoutRules["system"]; zones: Zone[] };
 

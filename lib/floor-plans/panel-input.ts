@@ -380,5 +380,8 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   }
   // what the reader decided on its own, in plan metres, for the review screen
   const readNotes = frame && auto?.notes ? auto.notes.map((n) => { const a = toM(frame!.toPx([n.box[0], n.box[1]])), b = toM(frame!.toPx([n.box[2], n.box[3]])); return { ...n, box: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] as [number, number, number, number] }; }) : [];
-  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneStairOrient, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [], readNotes };
+  // for the training record: drawing units → plan metres, the reader's keep / drop decision, and the plan's own region
+  const reg = t.dxf?.region;
+  const readFrame = frame ? { toM: (q: Pt): Pt => toM(frame!.toPx(q)), inRegion: reg ? (q: Pt) => { const [x, y] = frame!.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; } : undefined, onFloor: auto?.onFloor } : null;
+  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneStairOrient, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [], readNotes, readFrame };
 }

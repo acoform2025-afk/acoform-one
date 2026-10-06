@@ -92,6 +92,7 @@ export type Takeoff = {
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null;
     excludeM?: [number, number, number, number][];   // boxes (plan metres) the user marked "not part of this floor"
     includeM?: [number, number, number, number][];   // boxes (plan metres) the user marked "part of this floor"
+    approved?: { at: string; by?: string; fp: Record<string, number | string> } | null;   // the reading the user approved (its fingerprint); later reads are compared with it
   };
 };
 
