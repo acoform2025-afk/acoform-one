@@ -298,6 +298,39 @@ export async function touchPlanFile(id: string): Promise<Result> {
   return { ok: true };
 }
 
+const boxSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);
+const reviewSchema = z.object({ kind: z.enum(["include", "exclude", "clear"]), box: boxSchema.optional() });
+/**
+ * Reading review: the user answers one of the reader's doubts — a box (plan metres) is "part of this floor" (the reader
+ * keeps everything in it) or "not part of this floor" (left out). Stored on the plan; the plan is read again with it.
+ * "clear" forgets every answer.
+ */
+export async function applyReadingAnswer(id: string, input: z.infer<typeof reviewSchema>): Promise<Result> {
+  const denied = await guard(); if (denied) return { error: denied };
+  if (!uuid.safeParse(id).success) return { error: "Invalid floor plan." };
+  const parsed = reviewSchema.safeParse(input); if (!parsed.success) return { error: "Invalid answer." };
+  const supabase = await createClient();
+  const { data: row } = await supabase.from("floor_plans").select("takeoff, lead_id").eq("id", id).maybeSingle();
+  if (!row) return { error: "Floor plan not found." };
+  const t = (row.takeoff && typeof row.takeoff === "object" ? row.takeoff : {}) as { dxf?: { excludeM?: number[][]; includeM?: number[][] } & Record<string, unknown> };
+  if (!t.dxf) return { error: "This plan has no drawing to review." };
+  const dxf = { ...t.dxf };
+  if (parsed.data.kind === "clear") { delete dxf.excludeM; delete dxf.includeM; }
+  else {
+    const key = parsed.data.kind === "include" ? "includeM" : "excludeM", other = parsed.data.kind === "include" ? "excludeM" : "includeM";
+    const b = parsed.data.box!.map((v) => Math.round(v * 1000) / 1000);
+    const list = (dxf[key] ?? []).filter((x) => !(Math.abs(x[0] - b[0]) < 0.05 && Math.abs(x[1] - b[1]) < 0.05 && Math.abs(x[2] - b[2]) < 0.05 && Math.abs(x[3] - b[3]) < 0.05));
+    if (list.length >= 200) return { error: "Too many answers on this plan — clear them first." };
+    dxf[key] = [...list, b];
+    dxf[other] = (dxf[other] ?? []).filter((x) => !(x[0] <= b[0] + 0.05 && x[1] <= b[1] + 0.05 && x[2] >= b[2] - 0.05 && x[3] >= b[3] - 0.05));   // an opposite answer on the same spot is withdrawn
+  }
+  const { error } = await supabase.from("floor_plans").update({ takeoff: { ...t, dxf } as never, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) return { error: dbError(error.message) };
+  revalidatePath(`/floor-plans/${id}`); revalidatePath(`/floor-plans/${id}/review`);
+  if (row.lead_id) revalidatePath(`/leads/${row.lead_id}`);
+  return { ok: true };
+}
+
 const levelPlanSchema = z.object({
   fromId: uuid,
   name: z.string().trim().min(1).max(150),

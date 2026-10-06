@@ -704,7 +704,9 @@ const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
  * floor. `on(p)` answers for an element path (true / false), undefined for anything else (texts, generic lines);
  * `near(pts)` tells whether a point set lies within a metre of the floor's elements.
  */
-export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u: number, keep?: (p: DxfPath) => boolean): { on: (p: DxfPath) => boolean | undefined; near: (pts: Pt[]) => boolean; count: number; dropped: number } {
+export type ReadNote = { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled"; box: [number, number, number, number]; n?: number; text?: string };
+export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u: number, keep?: (p: DxfPath) => boolean, force: [number, number, number, number][] = []): { on: (p: DxfPath) => boolean | undefined; near: (pts: Pt[]) => boolean; count: number; dropped: number; notes: ReadNote[] } {
+  const forced = (b: [number, number, number, number]) => force.some((f) => b[0] >= f[0] - 1 && b[2] <= f[2] + 1 && b[1] >= f[1] - 1 && b[3] <= f[3] + 1);
   const gap = 3 / u, axisTol = 0.02;            // 3 m: a doorway, a stairwell, a lift opening or a balcony between two walls still joins them
   // a captioned detail / section / legend ("…示意", "…大样", "…详图", "DETAIL", "SECTION", "LEGEND") drawn next to the plan:
   // the geometry standing over its caption is that detail, never the floor
@@ -732,10 +734,11 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
     if (kind === "link") { const xs0 = p.pts.map((q) => q[0]), ys0 = p.pts.map((q) => q[1]); const b0: [number, number, number, number] = [Math.min(...xs0), Math.min(...ys0), Math.max(...xs0), Math.max(...ys0)]; if (!inCaption(b0) && (!keep || keep(p))) els.push({ p, box: b0, strong: false, wallA: 0, link: true }); continue; }
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
     const box: [number, number, number, number] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-    if (inCaption(box)) { detail.add(p); continue; }
+    if (inCaption(box) && !forced(box)) { detail.add(p); continue; }
     els.push({ p, box, strong: kind !== "beam" || p.closed, wallA: kind === "wall" && p.closed ? Math.abs(polyArea(p.pts)) : kind === "wall" ? L * 0.2 / u : 0 });
   }
-  if (!els.length) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size };
+  const capNotes: ReadNote[] = capBoxes.filter((c) => [...detail].some((p) => p.pts.some((q) => q[0] >= c[0] && q[0] <= c[2] && q[1] >= c[1] && q[1] <= c[3]))).map((c) => ({ kind: "detail", box: c }));
+  if (!els.length) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size, notes: capNotes };
   // union-find over box nearness, with a coarse grid so big drawings stay fast
   const parent = els.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
@@ -749,16 +752,19 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
   const area = new Map<number, number>();
   els.forEach((e, i) => { if (inReg(e)) { const g = find(i); area.set(g, (area.get(g) ?? 0) + e.wallA); } });
   let main = -1, best = -1; for (const [g, a] of area) if (a > best) { best = a; main = g; }
-  if (main < 0) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size };
+  if (main < 0) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size, notes: capNotes };
   const onEl = new Map<DxfPath, boolean>();
   let count = 0, dropped = 0;
-  els.forEach((e, i) => { if (e.link) return; const ok = find(i) === main && (inReg(e) || e.strong); onEl.set(e.p, ok); if (ok) count++; else dropped++; });
-  const mainBoxes = els.filter((e, i) => find(i) === main && !e.link).map((e) => e.box);
+  // what was left out, grouped by island (one note per island inside the region) — the review screen shows these
+  const droppedBy = new Map<number, { box: [number, number, number, number]; n: number }>();
+  els.forEach((e, i) => { if (e.link) return; const g = find(i); const ok = (g === main && (inReg(e) || e.strong)) || forced(e.box); onEl.set(e.p, ok); if (ok) count++; else { dropped++; if (inReg(e)) { const d = droppedBy.get(g); if (d) { d.n++; d.box = [Math.min(d.box[0], e.box[0]), Math.min(d.box[1], e.box[1]), Math.max(d.box[2], e.box[2]), Math.max(d.box[3], e.box[3])]; } else droppedBy.set(g, { box: [...e.box] as [number, number, number, number], n: 1 }); } } });
+  const mainBoxes = els.filter((e, i) => (find(i) === main || forced(e.box)) && !e.link).map((e) => e.box);
   const near = (pts: Pt[]) => pts.some((q) => mainBoxes.some((b) => q[0] >= b[0] - gap && q[0] <= b[2] + gap && q[1] >= b[1] - gap && q[1] <= b[3] + gap));
-  return { on: (p) => (detail.has(p) ? false : onEl.get(p)), near, count, dropped: dropped + detail.size };
+  const notes: ReadNote[] = [...capNotes, ...[...droppedBy.values()].map((d) => ({ kind: "dropped" as const, box: d.box, n: d.n }))];
+  return { on: (p) => (detail.has(p) && !forced([p.pts[0][0], p.pts[0][1], p.pts[0][0], p.pts[0][1]]) ? false : onEl.get(p)), near, count, dropped: dropped + detail.size, notes };
 }
 
-export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary } = {}): DxfAuto {
+export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][] } = {}): DxfAuto {
   const u = unitToM, u2 = unitToM * unitToM;
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
   const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m] as [number, number, number, number]; });
@@ -771,7 +777,11 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   // breaks); details, legends, sketches and notes drawn beside the plan do not touch it. The structure with the most
   // wall area inside the region is the floor; every other island is left out, and a wall / column / slab edge that
   // continues outside the region joins the floor (a hand-drawn box that cuts the building is widened by what it cuts).
-  const island = floorIsland(model, roles, u, keep);
+  const island = floorIsland(model, roles, u, keep, opts.force ?? []);
+  // "part of this floor" boxes answered on the review screen override every later guess too
+  const forcedPts = (pts: Pt[]) => (opts.force ?? []).some((f) => pts.some((q) => q[0] >= f[0] && q[0] <= f[2] && q[1] >= f[1] && q[1] <= f[3]));
+  const notes: ReadNote[] = [...island.notes];
+  for (const c of clouds) notes.push({ kind: "cloud", box: c });
   const keep0 = keep;
   keep = (p: DxfPath) => island.on(p) ?? (!keep0 || keep0(p));
   const of = (r: LayerRole) => model.paths.filter((p) => (roles[p.layer] ?? "ignore") === r && (!keep || keep(p)) && !markup(p));
@@ -852,7 +862,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
   // the wall panels and gets no column set of its own
   { const wallRef = [...wallPolys, ...colWalls];
     const touches = (pts: Pt[]) => pts.some((q) => nearRings(q, wallRef, 0.03 / u) || wallRef.some((w) => inside(q, w)));
-    for (const c of colAll) if (c.isCol && wallRef.length && touches(c.p.pts)) { c.isCol = false; colWalls.push(c.p.pts); } }
+    for (const c of colAll) if (c.isCol && wallRef.length && touches(c.p.pts)) { c.isCol = false; colWalls.push(c.p.pts); const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]); notes.push({ kind: "wall-column", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] }); } }
   const U = wallUnion([...wallPolys, ...colWalls], wallHoles);
   const UP = parapetPolys.length ? wallUnion(parapetPolys) : null;
   let looseLen = 0, unpairedLen = 0; const loose: Pt[][] = [];
@@ -996,7 +1006,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
     const byArea = [...outer].sort((p1, p2) => Math.abs(polyArea(p2)) - Math.abs(polyArea(p1)));
     const floor: Pt[][] = byArea.length ? [byArea[0]] : [];
     for (let grew = true; grew;) { grew = false; for (const o2 of byArea) if (!floor.includes(o2) && o2.some((q) => nearRings(q, floor, 0.5 / u) || floor.some((f0) => inside(q, f0)))) { floor.push(o2); grew = true; } }
-    onFloor2 = (r: Pt[]) => !floor.length || r.some((q) => floor.some((f0) => inside(q, f0)) || nearRings(q, floor, 1 / u));
+    onFloor2 = (r: Pt[]) => !floor.length || forcedPts(r) || r.some((q) => floor.some((f0) => inside(q, f0)) || nearRings(q, floor, 1 / u));
     if (floor.length && U.rings.some((r, i) => !U.isHole?.[i] && !onFloor2(r))) {
       const keepR = U.rings.map((r, i) => !!U.isHole?.[i] || onFloor2(r));
       U.rings = U.rings.filter((_, i) => keepR[i]); if (U.isHole) U.isHole = U.isHole.filter((_, i) => keepR[i]);
@@ -1014,7 +1024,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       for (let i = 0; i < pts.length; i++) { const a0 = pts[i], b0 = pts[(i + 1) % pts.length], L = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]), steps = Math.max(1, Math.round((L * u) / 0.25)); for (let k = 0; k < steps; k++) { const t = (k + 0.5) / steps; n++; if (nearRings([a0[0] + (b0[0] - a0[0]) * t, a0[1] + (b0[1] - a0[1]) * t], structRings, 0.3 / u)) hit++; } }
       return n > 0 && hit >= 0.5 * n;
     };
-    const kept = outer.filter((pts) => (walled(pts) || framed(pts)) && Math.abs(polyArea(pts)) * u2 >= 1);
+    const kept = outer.filter((pts) => (walled(pts) || framed(pts) || forcedPts(pts)) && Math.abs(polyArea(pts)) * u2 >= 1);
     // small cantilever slabs outside the wall line (AC platforms, sunshades, 飘板 / 空调板): a closed outline on a beam or
     // slab layer, 0.3 … 8 m², touching the floor from outside — slab of its own (suspended formwork), with the
     // outermost of nested outlines taken (the inner one is the kerb / drop line)
@@ -1024,6 +1034,8 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
       if (kept.some((k) => inside(c, k)) || !pts.some((q) => nearRings(q, kept, 0.3 / u))) return false;
       return !bayCands.some((o) => o !== pts && Math.abs(polyArea(o)) > Math.abs(polyArea(pts)) && pts.every((q) => inside(q, o) || nearRings(q, [o], 0.02 / u)));   // nested: outer only
     });
+    for (const b2 of bays) { const xs = b2.map((q) => q[0]), ys = b2.map((q) => q[1]); notes.push({ kind: "bay", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] }); }
+    for (const k2 of kept) if (!walled(k2)) { const xs = k2.map((q) => q[0]), ys = k2.map((q) => q[1]); notes.push({ kind: "unwalled", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] }); }
     kept.push(...bays);
     const use = kept.length ? kept : outer;
     if (use.length) { slab = use.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
@@ -1196,7 +1208,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
           if (!sp2 || sp2.area < 5 || sp2.area > 45) continue;
           const w = (sp2.box[2] - sp2.box[0]) * u, h = (sp2.box[3] - sp2.box[1]) * u;
           if (Math.min(w, h) < 1.8 || Math.max(w, h) < 3.5 || Math.max(w, h) > 9) continue;
-          s.push(sp2.box);
+          s.push(sp2.box); notes.push({ kind: "label-stair", box: sp2.box, text: t.text.trim() });
         }
       }
       // a "stair" outside the floor slab (a detail sketch beside the plan) is not a staircase of this floor
@@ -1264,6 +1276,7 @@ export function dxfAuto(model: DxfModel, roles: Record<string, LayerRole>, unitT
         windowGaps: { count: win.length, span: win.reduce((s, x) => s + x.span, 0), top: win.reduce((s, x) => s + x.span * x.thk, 0) },
         edgeBeamLength: edgeLen, edgeBeams: edgeSegs.slice(0, 4000), parapetRings: UP?.rings ?? [],
         onFloor: (p) => (!keep || keep(p as DxfPath)) && island.near(p.pts),
+        notes,
       };
     })(),
   };

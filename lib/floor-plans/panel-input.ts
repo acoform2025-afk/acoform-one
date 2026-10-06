@@ -46,8 +46,13 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
       } catch { details = []; }
     }
     const inDetail = (x: number, y: number) => details.some((b) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]);
-    const keep = reg ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3] && !inDetail(x, y); }) : undefined;
-    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0 });
+    // boxes the user marked on the review screen (plan metres): "not part of this floor" / "part of this floor"
+    const exM = t.dxf.excludeM ?? [], inM = t.dxf.includeM ?? [];
+    const inEx = (x: number, y: number) => exM.some((b) => x * mpp >= b[0] && x * mpp <= b[2] && y * mpp >= b[1] && y * mpp <= b[3]);
+    const keep = reg || exM.length ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return (!reg || (x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3] && !inDetail(x, y))) && !inEx(x, y); }) : undefined;
+    // "part of this floor" boxes in drawing units for the reader
+    const force = inM.map((b) => { const a = f.fromPx([b[0] / mpp, b[1] / mpp]), c = f.fromPx([b[2] / mpp, b[3] / mpp]); return [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.max(a[0], c[0]), Math.max(a[1], c[1])] as [number, number, number, number]; });
+    auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0, force });
     // architecture around the formwork, for the 3D model only: balcony railings, parapet walls, sunshades / projections
     const roles = t.dxf.layerRoles ?? {};
     const kindOf = (layer: string): "rail" | "parapet" | "proj" | null => {
@@ -373,5 +378,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 + z.n[0] * z.thk / 2 - mid[0], (z.a[1] + z.b[1]) / 2 + z.n[1] * z.thk / 2 - mid[1]) < 0.3)) continue;
     zoneOpenings.push({ a: [ca[0] - nx * h, ca[1] - ny * h], b: [cb[0] - nx * h, cb[1] - ny * h], n: [nx, ny], thk: dg.thk, door: dg.door, sill: dg.door ? 0 : OPENING_DEFAULTS.windowSill, head: dg.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, gap: true, ...(dg.free ? { free: true } : {}) });
   }
-  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneStairOrient, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [] };
+  // what the reader decided on its own, in plan metres, for the review screen
+  const readNotes = frame && auto?.notes ? auto.notes.map((n) => { const a = toM(frame!.toPx([n.box[0], n.box[1]])), b = toM(frame!.toPx([n.box[2], n.box[3]])); return { ...n, box: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] as [number, number, number, number] }; }) : [];
+  return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneStairOrient, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [], readNotes };
 }
