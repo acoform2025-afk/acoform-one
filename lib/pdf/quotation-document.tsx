@@ -440,12 +440,11 @@ function AccessoriesDocument({ q, lines, company }: { q: PdfQuotation; lines: Pd
             <Text style={[s.cell, { width: W.amt }, s.right]}>Amount (₹)</Text>
           </View>
           {items.map((l, i) => {
-            // the same item in several sizes: its name is written once, the sizes under it
-            const same = i > 0 && items[i - 1].description === l.description && items[i - 1].line_type === l.line_type;
+            // every row carries the full item name (also when the item repeats in another size)
             return (
               <View key={l.id} style={i % 2 ? [s.tr, s.alt] : s.tr} wrap={false}>
                 <Text style={[s.cell, { width: W.sr }, s.center]}>{i + 1}</Text>
-                <Text style={[s.cell, { width: W.item }, same ? { color: GRAY } : {}]}>{same ? "-do-" : l.description}</Text>
+                <Text style={[s.cell, { width: W.item }]}>{l.description}</Text>
                 <Text style={[s.cell, { width: W.spec }]}>{l.notes ?? ""}</Text>
                 <Text style={[s.cell, { width: W.qty }, s.right]}>{formatQty(l.quantity)}</Text>
                 <Text style={[s.cell, { width: W.unit }, s.center]}>{l.unit}</Text>
