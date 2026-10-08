@@ -235,9 +235,14 @@ export async function submitForApproval(quotationId: string): Promise<ActionResu
   const supabase = await createClient();
   const { data: quotation } = await supabase.from("quotations").select("quotation_type").eq("id", quotationId).single();
 
-  if (quotation?.quotation_type === "detailed") {
+  if (quotation?.quotation_type === "detailed" || quotation?.quotation_type === "accessories") {
     const { count } = await supabase.from("quotation_lines").select("*", { count: "exact", head: true }).eq("quotation_id", quotationId);
     if (!count || count === 0) return { success: false, error: "Add at least one line before submitting for approval." };
+  }
+  // an accessories quotation goes out only when every item is priced
+  if (quotation?.quotation_type === "accessories") {
+    const { count } = await supabase.from("quotation_lines").select("*", { count: "exact", head: true }).eq("quotation_id", quotationId).eq("unit_rate", 0);
+    if (count) return { success: false, error: `${count} item${count > 1 ? "s have" : " has"} no rate yet. Enter every rate before submitting.` };
   }
 
   const { error } = await supabase.from("quotations").update({ status: "pending_approval" }).eq("id", quotationId);

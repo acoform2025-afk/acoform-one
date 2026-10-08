@@ -58,7 +58,9 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
     }).filter((b): b is NonNullable<typeof b> => !!b);
     if (blocks.length) { fromLead.blocks = blocks; fromLead.areaSqm = String(Math.round(blocks.reduce((s, b) => s + b.full, 0) * 100) / 100); }
   }
-  const initialMode = mode === "quick" ? "quick" : fromLead ? "detailed" : undefined;
+  const initialMode = mode === "quick" ? "quick" : mode === "accessories" ? "accessories" : fromLead ? "detailed" : undefined;
+  // accessory rates quoted before: offered again for the same item and size
+  const { data: knownRates } = await supabase.from("accessory_rates").select("item, spec, unit, rate").order("times_quoted", { ascending: false }).limit(500);
   const { data: quickRates } = await supabase.from("quick_quote_rates").select("formwork_type, rate_per_sqm").eq("is_active", true);
   const canCreate = await hasPermission("quotations", "create");
   const { data: nextCode } = canCreate ? await supabase.rpc("next_quotation_code") : { data: null };
@@ -67,10 +69,10 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
     <div className="fade-in mx-auto max-w-7xl">
       <PageHeader
         title="Quotations"
-        description={canCreate ? "Create detailed panel-by-panel quotes or fast area-based quick quotes." : "Viewing quotations. Your role doesn't include quotation creation."}
+        description={canCreate ? "Create detailed panel-by-panel quotes, fast area-based quick quotes, or accessories-only quotes." : "Viewing quotations. Your role doesn't include quotation creation."}
       />
 
-      {canCreate && <div className="mt-6"><QuotationCreationTabs key={fromLead?.leadId ?? "none"} leads={leads} rates={quickRates ?? []} nextCode={nextCode ?? ""} initialMode={initialMode} fromLead={fromLead} /></div>}
+      {canCreate && <div className="mt-6"><QuotationCreationTabs key={fromLead?.leadId ?? "none"} leads={leads} rates={quickRates ?? []} nextCode={nextCode ?? ""} initialMode={initialMode} fromLead={fromLead} knownRates={(knownRates ?? []).map((k) => ({ ...k, rate: Number(k.rate) }))} /></div>}
 
       <div className="mt-6">
         <QuotationsTable

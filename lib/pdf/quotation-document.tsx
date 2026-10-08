@@ -9,6 +9,7 @@ import {
 } from "@/lib/quotations/document-content";
 import { EXTRA_LINE_TYPES, LINE_TYPE_LABELS, formatQty, summariseLines } from "@/lib/quotations/line-types";
 import { rupeesInWords } from "@/lib/quotations/amount-words";
+import { ACCESSORY_PAYMENT_TERMS, accessoryTerms } from "@/lib/quotations/accessory-quote";
 
 const PUBLIC = path.join(process.cwd(), "public");
 Font.register({
@@ -99,6 +100,8 @@ export type PdfQuotation = {
   accessories?: unknown; // edited accessories list (null = standard list)
   show_references?: boolean | null; // print the "Our work at site & esteemed clients" page
   options?: QuoteOptions | null;   // quote with two alternatives (wall options), one line per block
+  delivery_place?: string | null;  // accessories quotation: where the material is delivered
+  application?: string | null;     // accessories quotation: what it is used for ("Aluminium Formwork")
 };
 export type QuoteOptions = { labels: [string, string]; blocks: { name: string; area: number[] }[]; note?: string };
 
@@ -374,7 +377,122 @@ function DetailedSchedule({ q, lines }: { q: PdfQuotation; lines: PdfLine[] }) {
   );
 }
 
+/**
+ * Accessories-only quotation: a short commercial offer — who it is for, the items as the customer asked for them
+ * (item, size, quantity, rate, amount), GST and total, terms, bank details and signatures. No formwork pages.
+ */
+function AccessoriesDocument({ q, lines, company }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany }) {
+  const draft = ["draft", "pending_approval"].includes(q.status);
+  const validUntil = addDays(q.quotation_date, q.validity_days);
+  const companyName = titleCase(company.company_name ?? "Aco Form Work Pvt Ltd");
+  const items = [...lines.filter((l) => l.line_type !== "transport"), ...lines.filter((l) => l.line_type === "transport")];
+  const freight = lines.some((l) => l.line_type === "transport");
+  const payment = q.payment_terms && q.payment_terms.length > 0 ? q.payment_terms : ACCESSORY_PAYMENT_TERMS;
+  const hasBank = company.bank_account_number || company.bank_name;
+  const use = q.application?.trim();
+  const W = { sr: "6%", item: "32%", spec: "17%", qty: "9%", unit: "10%", rate: "11%", amt: "15%" };
+  return (
+    <Document title={`${q.quotation_code} – ${q.customer_name}`} author={companyName} subject="Quotation for formwork accessories">
+      <Page size="A4" style={s.page}>
+        <Chrome c={company} code={q.quotation_code} draft={draft} />
+        <View style={s.titleBar}>
+          <View style={s.titleAccent} />
+          <View>
+            <Text style={s.title}>QUOTATION</Text>
+            <Text style={s.subtitle}>Supply of Formwork Accessories{use ? ` – for use in ${use}` : ""}</Text>
+          </View>
+        </View>
+        <View style={s.cols}>
+          <View style={s.panel}>
+            <Text style={s.panelHead}>TO</Text>
+            <View style={s.panelBody}>
+              <Text style={s.company}>{q.customer_name}</Text>
+              <KV k="Kind Attn" v={q.kind_attn} />
+              <KV k="Phone" v={q.customer_phone} />
+              <KV k="Email" v={q.customer_email} />
+              <KV k="GSTIN" v={q.customer_gstin} />
+              <KV k="Address" v={q.customer_address} />
+            </View>
+          </View>
+          <View style={s.panel}>
+            <Text style={s.panelHead}>QUOTATION DETAILS</Text>
+            <View style={s.panelBody}>
+              <KV k="Ref. No." v={q.quotation_code} />
+              <KV k="Date" v={dmy(q.quotation_date)} />
+              <KV k="Valid until" v={`${dmy(validUntil)} (${q.validity_days} days)`} />
+              <KV k="Project" v={q.project_name} />
+              <KV k="Delivery at" v={q.delivery_place} />
+              <KV k="Revision" v={q.revision_no ? `R${q.revision_no}` : "R0"} />
+            </View>
+          </View>
+        </View>
+
+        <Text style={s.p}>Dear Sir, with reference to your enquiry for the supply of formwork accessories{use ? ` for use in ${use}` : ""}{q.delivery_place ? `, delivery at ${q.delivery_place}` : ""}, we are pleased to quote our rates as under:</Text>
+
+        <View style={s.table}>
+          <View style={s.thead} fixed>
+            <Text style={[s.cell, { width: W.sr }, s.center]}>Sr.</Text>
+            <Text style={[s.cell, { width: W.item }]}>Item</Text>
+            <Text style={[s.cell, { width: W.spec }]}>Size / Spec.</Text>
+            <Text style={[s.cell, { width: W.qty }, s.right]}>Qty</Text>
+            <Text style={[s.cell, { width: W.unit }, s.center]}>Unit</Text>
+            <Text style={[s.cell, { width: W.rate }, s.right]}>Rate (₹)</Text>
+            <Text style={[s.cell, { width: W.amt }, s.right]}>Amount (₹)</Text>
+          </View>
+          {items.map((l, i) => {
+            // the same item in several sizes: its name is written once, the sizes under it
+            const same = i > 0 && items[i - 1].description === l.description && items[i - 1].line_type === l.line_type;
+            return (
+              <View key={l.id} style={i % 2 ? [s.tr, s.alt] : s.tr} wrap={false}>
+                <Text style={[s.cell, { width: W.sr }, s.center]}>{i + 1}</Text>
+                <Text style={[s.cell, { width: W.item }, same ? { color: GRAY } : {}]}>{same ? "-do-" : l.description}</Text>
+                <Text style={[s.cell, { width: W.spec }]}>{l.notes ?? ""}</Text>
+                <Text style={[s.cell, { width: W.qty }, s.right]}>{formatQty(l.quantity)}</Text>
+                <Text style={[s.cell, { width: W.unit }, s.center]}>{l.unit}</Text>
+                <Text style={[s.cell, { width: W.rate }, s.right]}>{num(l.unit_rate, 2)}</Text>
+                <Text style={[s.cell, { width: W.amt }, s.right]}>{num(l.line_total, 2)}</Text>
+              </View>
+            );
+          })}
+        </View>
+        <View style={[s.table, { marginTop: 6 }]} wrap={false}>
+          <GstAndTotal q={q} />
+        </View>
+        <Text style={s.words}><Text style={s.bold}>Amount in words: </Text>{rupeesInWords(Math.round(Number(q.total_with_gst ?? 0)))}</Text>
+
+        <Text style={s.h2}>TERMS &amp; CONDITIONS</Text>
+        <Bullets items={[...payment.map((p) => `Payment: ${p}`), ...accessoryTerms({ delivery: q.delivery_place, freightQuoted: freight, gstPct: Number(q.gst_percentage) || 18, validityDays: q.validity_days, validUntil: dmy(validUntil) })]} numbered />
+
+        <View wrap={false}>
+          <Text style={[s.p, { marginTop: 8 }]}>We hope our offer meets your requirement and look forward to your valued order.</Text>
+          <View style={[s.signRow, { marginTop: 6, gap: 10 }]}>
+            {hasBank ? (
+              <View style={[s.signBox, { flex: 1.4, height: 82, justifyContent: "flex-start" }]}>
+                <Text style={[s.bold, { marginBottom: 3, color: GRAY_DARK }]}>Bank Details</Text>
+                <KV k="A/C Name" v={company.bank_account_name} />
+                <KV k="Bank" v={company.bank_name} />
+                <KV k="A/C No." v={company.bank_account_number} />
+                <KV k="IFSC" v={company.bank_ifsc_code} />
+                <KV k="Branch" v={company.bank_branch} />
+              </View>
+            ) : null}
+            <View style={[s.signBox, { height: 82 }]}>
+              <Text style={s.bold}>For {companyName}</Text>
+              <View><Text>Authorised Signatory</Text><Text style={s.small}>(Sign & Stamp)</Text></View>
+            </View>
+            <View style={[s.signBox, { height: 82 }]}>
+              <Text style={s.bold}>Accepted by {q.customer_name}</Text>
+              <View><Text>Name, Signature & Stamp</Text><Text style={s.small}>Date:</Text></View>
+            </View>
+          </View>
+        </View>
+      </Page>
+    </Document>
+  );
+}
+
 export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] }, plan = null, plans }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia; plan?: PdfFloorPlan | null; plans?: PdfFloorPlan[] }) {
+  if (q.quotation_type === "accessories") return <AccessoriesDocument q={q} lines={lines} company={company} />;
   const planPages: PdfFloorPlan[] = plans?.length ? plans : plan ? [plan] : [];
   const kind = formworkKind(q.formwork_type);
   const setLabel = SET_LABEL[kind];

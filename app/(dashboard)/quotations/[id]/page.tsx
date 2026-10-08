@@ -11,6 +11,7 @@ import { EditableNumberCell } from "./editable-number-cell";
 import { AccessoriesEditor } from "./accessories-editor";
 import { ReferencesToggle } from "./references-toggle";
 import { FloorPlanCard } from "./floor-plan-card";
+import { AccessoriesQuoteSection } from "./accessories-quote-section";
 import { formworkKind, standardAccessories, type AccessoryRow } from "@/lib/quotations/document-content";
 import Link from "next/link";
 import { Lock, Pencil } from "lucide-react";
@@ -45,14 +46,15 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
   if (!quotation) notFound();
 
   const isQuick = quotation.quotation_type === "quick";
+  const isAcc = quotation.quotation_type === "accessories";   // accessories only: priced per item, its own PDF
 
-  const { data: lines } = !isQuick
+  const { data: lines } = !isQuick && !isAcc
     ? await supabase.from("quotation_lines")
         .select(`id, quantity, unit_weight_kg, rate_per_kg, line_total, notes, panel_master_id, panel_master ( panel_code, panel_category, width_mm, height_mm, area_sqm )`)
         .eq("quotation_id", id).eq("line_type", "panel").order("sort_order").order("created_at")
     : { data: null };
 
-  const { data: panels } = !isQuick
+  const { data: panels } = !isQuick && !isAcc
     ? await supabase.from("panel_master").select("id, panel_code, panel_category, width_mm, height_mm, weight_kg").eq("is_active", true).order("panel_category").order("width_mm")
     : { data: null };
 
@@ -82,6 +84,7 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
             <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-graphite-50">{quotation.quotation_code}</h1>
             <span className={`rounded-full px-2.5 py-1 text-xs capitalize ${STATUS_STYLES[quotation.status] ?? ""}`}>{quotation.status.replace("_", " ")}</span>
             {isQuick && <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-xs capitalize text-violet-700 dark:text-violet-300">Quick · {quotation.formwork_type}</span>}
+            {isAcc && <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-xs text-sky-700 dark:text-sky-300">Accessories only</span>}
           </div>
           <p className="mt-1 text-sm text-graphite-400">{quotation.customer_name}</p>
           <p className="mt-0.5 text-xs text-graphite-500">
@@ -116,27 +119,29 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
 
       <DocumentDetails key={edit ?? "view"} q={quotation} editable={canEdit} defaultOpen={edit === "1" && canEdit} />
 
-      <AccessoriesEditor
+      {isAcc ? <AccessoriesQuoteSection q={quotation} editable={canEdit} /> : null}
+
+      {!isAcc && <AccessoriesEditor
         quotationId={id}
         rows={Array.isArray(quotation.accessories) ? (quotation.accessories as unknown as AccessoryRow[]) : standardAccessories(formworkKind(quotation.formwork_type))}
         isCustom={Array.isArray(quotation.accessories)}
         standard={standardAccessories(formworkKind(quotation.formwork_type))}
         editable={canEdit}
-      />
+      />}
 
-      <FloorPlanCard
+      {!isAcc && <FloorPlanCard
         quotationId={id} leadId={quotation.lead_id} editable={canEdit} isQuick={quotation.quotation_type === "quick"}
         attached={attachedPlan ? { id: attachedPlan.id, name: attachedPlan.name, previewUrl: planPreview, totals: (attachedPlan.totals ?? {}) as Record<string, number> } : null}
         options={(planRows ?? []).map((p) => ({ id: p.id, name: p.name, drawing_type: p.drawing_type, contact: Number((p.totals as Record<string, number> | null)?.contact_area ?? 0) || null }))}
-      />
+      />}
 
-      <ReferencesToggle
+      {!isAcc && <ReferencesToggle
         quotationId={id}
         value={quotation.show_references !== false}
         editable={canEdit}
         photos={mediaCounts.site_photo}
         logos={mediaCounts.client_logo}
-      />
+      />}
 
       {isQuick && (
         <div className="mt-6 rounded-lg border border-graphite-800 bg-graphite-900 p-5">
@@ -173,7 +178,7 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
         </div>
       )}
 
-      {!isQuick && (
+      {!isQuick && !isAcc && (
         <>
           <div className="mt-6 grid grid-cols-4 gap-3">
             <div className="rounded-lg border border-graphite-800 bg-graphite-900 p-4"><p className="text-xs uppercase tracking-wide text-graphite-500">Panels</p><p className="mt-1.5 font-mono text-base text-graphite-100">{totalPanels}</p></div>

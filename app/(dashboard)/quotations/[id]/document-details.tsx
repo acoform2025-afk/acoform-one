@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { saveQuotationDetails } from "../document-actions";
 import { DEFAULT_PAYMENT_TERMS, formworkKind } from "@/lib/quotations/document-content";
+import { ACCESSORY_PAYMENT_TERMS } from "@/lib/quotations/accessory-quote";
 
 type Q = {
   id: string; customer_name: string; kind_attn: string | null; customer_address: string | null;
@@ -28,7 +29,8 @@ export function DocumentDetails({ q, editable, defaultOpen = false }: { q: Q; ed
   const [state, action, pending] = useActionState(saveQuotationDetails, undefined);
   const [open, setOpen] = useState(defaultOpen);
   const kind = formworkKind(q.formwork_type);
-  const terms = (q.payment_terms ?? DEFAULT_PAYMENT_TERMS[kind]).join("\n");
+  const acc = q.quotation_type === "accessories";
+  const terms = (q.payment_terms ?? (acc ? ACCESSORY_PAYMENT_TERMS : DEFAULT_PAYMENT_TERMS[kind])).join("\n");
   const d = !editable;
 
   return (
@@ -50,16 +52,16 @@ export function DocumentDetails({ q, editable, defaultOpen = false }: { q: Q; ed
             <L label="Customer GSTIN"><input name="customerGstin" defaultValue={q.customer_gstin ?? ""} disabled={d} className={input} /></L>
             <L label="Project / site name"><input name="projectName" defaultValue={q.project_name ?? ""} disabled={d} className={input} /></L>
             <L label="City / address" wide><input name="customerAddress" defaultValue={q.customer_address ?? ""} placeholder="Ahmedabad, Gujarat" disabled={d} className={input} /></L>
-            <L label="Price schedule description" wide>
+            {!acc && <L label="Price schedule description" wide>
               <input name="scheduleDescription" defaultValue={q.schedule_description ?? ""} placeholder="Acoform Aluminium Formwork – A Wing   (several blocks: Title; Block A: 4675 Sqm; Block C: 8810 Sqm)" disabled={d} className={input} />
-            </L>
+            </L>}
             {q.quotation_type === "quick" && (
               <L label="Quantity (Sqm)"><input name="areaSqm" type="number" step="0.01" min="0" defaultValue={q.total_area_sqm ?? ""} disabled={d} className={input} /></L>
             )}
             <L label="Quotation date"><input name="quotationDate" type="date" defaultValue={q.quotation_date} required disabled={d} className={input} /></L>
             <L label="Validity (days)"><input name="validityDays" type="number" min="1" defaultValue={q.validity_days} required disabled={d} className={input} /></L>
-            <L label="Nalco rate (₹/kg)"><input name="nalcoRate" type="number" step="0.01" defaultValue={q.nalco_rate_per_kg ?? ""} disabled={d} className={input} /></L>
-            <L label="Nalco rate date"><input name="nalcoDate" type="date" defaultValue={q.nalco_rate_date ?? ""} disabled={d} className={input} /></L>
+            {!acc && <L label="Nalco rate (₹/kg)"><input name="nalcoRate" type="number" step="0.01" defaultValue={q.nalco_rate_per_kg ?? ""} disabled={d} className={input} /></L>}
+            {!acc && <L label="Nalco rate date"><input name="nalcoDate" type="date" defaultValue={q.nalco_rate_date ?? ""} disabled={d} className={input} /></L>}
             <L label="Payment terms (one per line)" wide>
               <textarea name="paymentTerms" rows={4} defaultValue={terms} disabled={d} className={input} />
             </L>

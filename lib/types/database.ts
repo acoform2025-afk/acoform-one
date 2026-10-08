@@ -1624,6 +1624,12 @@ export type Database = {
           },
         ]
       }
+      accessory_rates: {
+        Row: { id: string; tenant_id: string; item: string; spec: string; unit: string; rate: number; times_quoted: number; updated_at: string }
+        Insert: { id?: string; tenant_id: string; item: string; spec?: string; unit?: string; rate: number; times_quoted?: number; updated_at?: string }
+        Update: { id?: string; tenant_id?: string; item?: string; spec?: string; unit?: string; rate?: number; times_quoted?: number; updated_at?: string }
+        Relationships: []
+      }
       quick_quote_rates: {
         Row: {
           created_at: string
@@ -1801,6 +1807,8 @@ export type Database = {
           customer_gstin: string | null
           customer_name: string
           customer_phone: string | null
+          delivery_place: string | null
+          application: string | null
           formwork_type: string | null
           gst_percentage: number
           id: string
@@ -1842,6 +1850,8 @@ export type Database = {
           customer_gstin?: string | null
           customer_name: string
           customer_phone?: string | null
+          delivery_place?: string | null
+          application?: string | null
           formwork_type?: string | null
           gst_percentage?: number
           id?: string
@@ -1883,6 +1893,8 @@ export type Database = {
           customer_gstin?: string | null
           customer_name?: string
           customer_phone?: string | null
+          delivery_place?: string | null
+          application?: string | null
           formwork_type?: string | null
           gst_percentage?: number
           id?: string

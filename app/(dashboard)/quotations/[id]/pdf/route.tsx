@@ -92,7 +92,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} plan={plan} plans={plans} />,
   );
 
-  const name = pdfFileName(q.quotation_code, q.revision_no, formworkKind(q.formwork_type), q.quotation_date);
+  const name = q.quotation_type === "accessories"
+    ? pdfFileName(q.quotation_code, q.revision_no, formworkKind(q.formwork_type), q.quotation_date).replace(/Acoform .*? \(/, "Acoform Accessories (")
+    : pdfFileName(q.quotation_code, q.revision_no, formworkKind(q.formwork_type), q.quotation_date);
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",

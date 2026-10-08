@@ -22,9 +22,9 @@ const columns: ColumnDef<QuotationRow, unknown>[] = [
   { id: "project", header: "Project", accessorFn: (r) => r.project_name ?? "", cell: ({ getValue }) => <span className="text-graphite-400">{(getValue() as string) || "—"}</span> },
   {
     id: "type", header: "Type", filterFn: "equalsString",
-    accessorFn: (r) => (r.quotation_type === "quick" ? "quick" : "detailed"),
-    meta: { exportValue: (r) => { const q = r as QuotationRow; return q.quotation_type === "quick" ? `Quick · ${q.formwork_type ?? ""}` : "Detailed"; } } satisfies ColumnMeta,
-    cell: ({ row }) => <span className="text-xs text-graphite-400">{row.original.quotation_type === "quick" ? `Quick · ${row.original.formwork_type ?? ""}` : "Detailed"}</span>,
+    accessorFn: (r) => r.quotation_type,
+    meta: { exportValue: (r) => { const q = r as QuotationRow; return q.quotation_type === "quick" ? `Quick · ${q.formwork_type ?? ""}` : q.quotation_type === "accessories" ? "Accessories" : "Detailed"; } } satisfies ColumnMeta,
+    cell: ({ row }) => <span className="text-xs text-graphite-400">{row.original.quotation_type === "quick" ? `Quick · ${row.original.formwork_type ?? ""}` : row.original.quotation_type === "accessories" ? "Accessories" : "Detailed"}</span>,
   },
   {
     accessorKey: "total_area_sqm", header: "Area (m²)", meta: { align: "right", nowrap: true } satisfies ColumnMeta,
