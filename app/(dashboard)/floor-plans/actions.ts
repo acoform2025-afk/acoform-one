@@ -10,6 +10,7 @@ import { loadModel, runPanels } from "@/lib/floor-plans/run-panels";
 import { drawingParts, dxfFrame } from "@/lib/floor-plans/dxf";
 import { UNIT_TO_M, type Takeoff } from "@/lib/floor-plans/calc";
 import { remapTakeoff, type FrameAnchor } from "@/lib/floor-plans/frame-remap";
+import { readProjectFiles } from "@/lib/floor-plans/project-load";
 import type { Building } from "@/lib/floor-plans/building";
 import { readingFingerprint, type ReadingFp } from "@/lib/floor-plans/reading-record";
 
@@ -316,7 +317,8 @@ export async function touchPlanFile(id: string, frames?: { from: FrameAnchor; to
       if (e2) return { error: dbError(e2.message) };
     }
   }
-  const { error } = await supabase.from("floor_plans").update({ updated_at: now }).eq("file_path", row.file_path);
+  // the drawing changed: what it states for the project is read again
+  const { error } = await supabase.from("floor_plans").update({ updated_at: now, drawing_facts: null }).eq("file_path", row.file_path);
   if (error) return { error: dbError(error.message) };
   revalidatePath("/floor-plans"); revalidatePath(`/floor-plans/${id}`);
   if (row.lead_id) revalidatePath(`/leads/${row.lead_id}`);
@@ -486,4 +488,21 @@ export async function createAllLevelPlans(fromId: string): Promise<Result<{ made
   revalidatePath("/floor-plans"); revalidatePath(`/floor-plans/${fromId}`);
   if (src.lead_id) revalidatePath(`/leads/${src.lead_id}`);
   return { ok: true, data: { made: names.length, names } };
+}
+
+/**
+ * The other drawings of this plan's project (sections, elevations, other floor plans, beam schedules) are read for
+ * what they state for the whole building, so this plan can use it. Only drawings not read yet are read.
+ */
+export async function readProjectDrawings(id: string): Promise<Result<{ read: number }>> {
+  const denied = await guard(); if (denied) return { error: denied };
+  if (!uuid.safeParse(id).success) return { error: "Invalid floor plan." };
+  const supabase = await createClient();
+  const { data: row } = await supabase.from("floor_plans").select("lead_id, file_path").eq("id", id).maybeSingle();
+  if (!row) return { error: "Floor plan not found." };
+  try {
+    const n = await readProjectFiles(supabase, row);
+    if (n) revalidatePath(`/floor-plans/${id}`);
+    return { ok: true, data: { read: n } };
+  } catch (e) { return { error: e instanceof Error ? e.message : "Could not read the project drawings." }; }
 }

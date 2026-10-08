@@ -129,6 +129,29 @@ export function ReadOut({ planName, fileUrl, indexPath, dict: dict0, canEdit, un
         </div>
       </section>
 
+      {/* tables pasted from Excel (OLE objects): shown as AutoCAD shows them; the same table on every sheet is listed once */}
+      {(() => {
+        const seen = new Map<string, { rows: string[][]; n: number }>();
+        for (const t of model.current?.tables ?? []) { const k = JSON.stringify(t.rows); const e = seen.get(k); if (e) e.n++; else seen.set(k, { rows: t.rows, n: 1 }); }
+        if (!seen.size) return null;
+        return (
+          <section>
+            <h2 className="mb-2 text-sm font-semibold text-graphite-100">Tables pasted from Excel ({seen.size})</h2>
+            <p className="mb-2 text-xs text-graphite-400">Tables kept inside the drawing as Excel objects (concrete grades, schedules, notes). They are shown on the plan and read like any other text.</p>
+            <div className="space-y-3">
+              {[...seen.values()].map((t, i) => (
+                <div key={i} className="overflow-x-auto rounded-md border border-graphite-800">
+                  {t.n > 1 ? <p className="border-b border-graphite-800 px-2 py-1 text-[11px] text-graphite-500">on {t.n} sheets</p> : null}
+                  <table className="w-full text-[11px]">
+                    <tbody>{t.rows.map((r, ri) => <tr key={ri} className="border-b border-graphite-800/60 last:border-0">{r.map((c, ci) => <td key={ci} className="px-2 py-1 align-top text-graphite-200">{c}</td>)}</tr>)}</tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })()}
+
       {/* building */}
       <section>
         <h2 className="mb-2 text-sm font-semibold text-graphite-100">2 · Levels of the building</h2>

@@ -25,7 +25,7 @@ export type Level = {
   partN?: number; partTitle?: string;   // the drawing of this level in the file
   planId?: string | null;      // measured separately in the app (its own plan)
   use: LevelUse;               // counted with the typical plan / its own plan / not formed with this formwork
-  src: "table" | "names" | "section" | "assumed" | "drawings";
+  src: "table" | "names" | "section" | "assumed" | "drawings" | "project";   // project: from another drawing of the same project
 };
 export type Question = { id: string; to: "architect" | "structure" | "client"; text: string; why: string; done?: boolean };
 export type Building = { v: 1; levels: Level[]; questions: Question[]; note: string; edited?: boolean };
@@ -278,10 +278,23 @@ export type BuildingInput = {
   said: { floors?: number; floorMm?: number; slabMm?: number };
   planName?: string;           // "Tarya Block A" → tower A: only block-A drawings (or drawings of no particular tower) match
   typicalPartN?: number;       // the drawing counted as the typical floor (its region)
+  // what the other drawings of the project say (their section, their level list) — used where this drawing says nothing
+  project?: { section?: SectionLevels | null; levels?: Level[]; from?: string };
 };
 
+/** The level list a drawing itself states — a level table, level marks or level names down a section — or null. */
+export function statedLevels(texts: DxfText[], unitToM: number): { levels: Level[]; note: string } | null {
+  const t = levelTable(texts, unitToM); if (t) return { levels: t, note: "level table" };
+  const m = levelMarks(texts, unitToM); if (m) return { levels: m, note: "level marks on the section" };
+  const n = levelNames(texts, unitToM); if (n) return { levels: n, note: "level names on the section" };
+  return null;
+}
+
 /** The building read from the drawing + its questions. */
-export function readBuilding(inp: BuildingInput): Building {
+export function readBuilding(inpIn: BuildingInput): Building {
+  // no section in this drawing: the section of another drawing of the project
+  const inp = { ...inpIn, section: inpIn.section ?? inpIn.project?.section ?? null };
+  const fromProject = !inpIn.section && !!inp.section;
   const said = inp.said;
   const myTower = inp.planName ? parseLevelName(inp.planName).tower : undefined;
   let levels = levelTable(inp.texts, inp.unitToM);
@@ -294,7 +307,23 @@ export function readBuilding(inp: BuildingInput): Building {
   }
   if (!levels) { levels = levelMarks(inp.texts, inp.unitToM); if (levels) note = "levels from the level marks on the section"; }
   if (!levels) { levels = levelNames(inp.texts, inp.unitToM); if (levels) note = "levels from the level names on the section"; }
+  // this drawing has no level list of its own: the one read from another drawing of the project (its section /
+  // elevation / level table) — the levels are the same building
+  const pl = inp.project?.levels?.length ? inp.project.levels : null;
+  if (!levels && pl) { levels = pl.map((l) => ({ ...l, src: "project" as const, partN: undefined, partTitle: undefined, planId: null, use: "typical" as LevelUse })); note = `levels from ${inp.project?.from ?? "another drawing of the project"}`; }
   if (!levels) { levels = levelsFromLayouts(inp.parts, inp.texts, layoutFloorMm); if (levels) note = "levels from the floor plans in the drawing"; }
+  // heights this drawing does not state (levels from its plan titles): the heights of the same levels in the project's section
+  if (pl && levels) {
+    let n = 0;
+    for (const l of levels) {
+      if (l.src !== "drawings" && l.src !== "assumed") continue;
+      const p = pl.find((x) => x.key === l.key); if (!p) continue;
+      if (p.floorMm && p.floorMm !== l.floorMm) { l.floorMm = p.floorMm; n++; }
+      if (p.elevMm != null && l.elevMm == null) l.elevMm = p.elevMm;
+    }
+    if (n) note += ` · floor heights from ${inp.project?.from ?? "another drawing of the project"}`;
+  }
+  if (fromProject) note += ` · section from ${inp.project?.from ?? "another drawing of the project"}`;
   const Q: Question[] = [];
   const ask = (to: Question["to"], text: string, why: string) => Q.push({ id: `q${Q.length + 1}`, to, text, why });
   // the typical floor height: as stated, else the height most floors have, else the sections

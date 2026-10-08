@@ -3,6 +3,7 @@
  * a picture of the plan, and automatic quantities per layer role (walls / columns / slab outline / openings).
  */
 import DxfParser from "dxf-parser";
+import { hexBytes, oleTable } from "./ole-table";
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type DxfAuto, type DxfUnits, type LayerRole, type Pt } from "./calc";
 import { labelledSpaces, nearRings, outlineFromWalls, pairedWallStrips, wallGaps, wallUnion, xMarkedBoxes } from "./geom";
@@ -17,7 +18,9 @@ export type DxfFill = DxfPath & { kind: "hatch" | "leader" };
 export type DxfText = { text: string; x: number; y: number; h: number; layer?: string; r?: number; al?: "c" | "r"; kind?: "dim" | "attr" };   // r: rotation (radians, drawing axes); kind: a dimension value / a block attribute (grid bubble, tag)
 /** A named drawing inside the file (Revit view / AutoCAD block), box in drawing units. */
 export type DxfView = { name: string; box: [number, number, number, number] };
-export type DxfModel = { fills?: DxfFill[]; texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+/** A table pasted from Excel (OLE object): its cells, in its frame (drawing units). */
+export type DxfTable = { layer: string; box: [number, number, number, number]; rows: string[][] };
+export type DxfModel = { tables?: DxfTable[]; fills?: DxfFill[]; texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -111,7 +114,7 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
   const layerLt: Record<string, string> = {}, ltDashed: Record<string, boolean> = {};
   let tab: { type: string; name?: string; lt?: string; n?: number } | null = null;
   const endTab = () => { if (tab?.name) { if (tab.type === "LAYER" && tab.lt) layerLt[tab.name] = tab.lt; if (tab.type === "LTYPE") ltDashed[tab.name.toUpperCase()] = (tab.n ?? 0) > 0; } tab = null; };
-  const RAW = new Set(["HATCH", "LEADER", "SPLINE", "SOLID", "TRACE", "ELLIPSE", "DIMENSION", "MULTILEADER", "MLEADER"]);
+  const RAW = new Set(["OLE2FRAME", "HATCH", "LEADER", "SPLINE", "SOLID", "TRACE", "ELLIPSE", "DIMENSION", "MULTILEADER", "MLEADER"]);
   const flush = () => {
     if (!cur) return;
     const e = cur; cur = null;
@@ -206,6 +209,13 @@ function decodeRaw(type: string, raw: [number, string][]): AnyEnt | null {
   const deg = Math.PI / 180;
   switch (type) {
     case "LEADER": { const v = pairs(10, 20); return v.length >= 2 ? { type: "LEADER", vertices: v } : null; }
+    case "OLE2FRAME": {
+      // a table pasted from Excel: the workbook inside, placed in the frame (upper-left 10/20, lower-right 11/21)
+      const a = pairs(10, 20)[0], b = pairs(11, 21)[0];
+      if (!a || !b) return null;
+      const tab = oleTable(hexBytes(raw.filter((r) => r[0] === 310).map((r) => r[1])));
+      return tab ? { type: "OLETABLE", table: tab, box: [a.x, a.y, b.x, b.y] } : null;
+    }
     case "SPLINE": {
       const fit = pairs(11, 21), ctrl = pairs(10, 20), v = fit.length >= 2 ? fit : ctrl;
       return v.length >= 2 ? { type: "LWPOLYLINE", shape: ((first(70) ?? 0) & 1) === 1, vertices: v.map((q) => ({ ...q, bulge: 0 })) } : null;
@@ -315,6 +325,7 @@ export function readDxf(raw: string): DxfModel {
   let marksNoExtent = false;
 
   const fills: DxfFill[] = [];
+  const tables: DxfTable[] = [];
   const lateKinds = new WeakSet<DxfPath>();
   // textOnly: a dimension's own block — only its written value is wanted, not its extension lines / arrows
   // a broken linetype: by the linetype table (has dash elements), else by its name
@@ -368,6 +379,25 @@ export function readDxf(raw: string): DxfModel {
         case "HATCH": {
           if (textOnly || fills.length > 60_000) break;
           for (const loop of e.loops ?? []) if (loop.length >= 3) fills.push({ kind: "hatch", layer, pts: loop.map(([x, y]: Pt) => ap(m, x, y)), closed: true });
+          break;
+        }
+        case "OLETABLE": {
+          // every cell becomes a text in its place in the frame, so the table shows on the drawing and its notes
+          // (concrete grades, beam sizes, slab thickness …) are read like any other text
+          const [ax, ay, bx, by] = e.box as number[];
+          const tab = e.table as { rows: string[][]; colW: number[] };
+          const p = ap(m, Math.min(ax, bx), Math.max(ay, by)), q = ap(m, Math.max(ax, bx), Math.min(ay, by));
+          const x0 = Math.min(p[0], q[0]), x1 = Math.max(p[0], q[0]), y0 = Math.min(p[1], q[1]), y1 = Math.max(p[1], q[1]);
+          const nR = tab.rows.length, rowH = (y1 - y0) / Math.max(1, nR), wSum = tab.colW.reduce((s2, w) => s2 + w, 0) || 1;
+          tables.push({ layer, box: [x0, y0, x1, y1], rows: tab.rows });
+          tab.rows.forEach((row, ri) => {
+            let cx = x0;
+            row.forEach((cell, ci) => {
+              const w = ((tab.colW[ci] ?? 8.43) / wSum) * (x1 - x0);
+              if (cell && texts.length < 40000) texts.push({ text: cell.slice(0, 400), x: cx + Math.min(w * 0.03, rowH * 0.3), y: y1 - (ri + 0.7) * rowH, h: rowH * 0.45, layer });
+              cx += w;
+            });
+          });
           break;
         }
         case "LEADER": {
@@ -487,7 +517,7 @@ export function readDxf(raw: string): DxfModel {
     }
   }
 
-  return { fills, texts, views, sections, dw, rails, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count || (b.texts ?? 0) + (b.fills ?? 0) - (a.texts ?? 0) - (a.fills ?? 0)), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  return { tables, fills, texts, views, sections, dw, rails, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count || (b.texts ?? 0) + (b.fills ?? 0) - (a.texts ?? 0) - (a.fills ?? 0)), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */
@@ -965,6 +995,51 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
   return { on: (p) => (detail.has(p) && !forced([p.pts[0][0], p.pts[0][1], p.pts[0][0], p.pts[0][1]]) ? false : onEl.get(p)), near, count, dropped: dropped + detail.size, notes };
 }
 
+/**
+ * The beam schedule of a drawing: beam elevations / tables titled "B12A" with the size "(600X900)" written beside, a
+ * schedule table row "B1 | 450 X 900 BEAM DEPTH", and beam cross-sections "17A-17A" with their width and depth
+ * dimensions. Several schedules in one file are all listed (with where they are written).
+ */
+export function beamSchedule(model: DxfModel, u: number): { name: string; sz: { b: number; d: number }; x: number; y: number }[] {
+  const all = model.texts ?? [];
+  // "(600X900)" beside a beam elevation title, or a schedule table row "B1 | 450 X 900 BEAM DEPTH"
+  const pure = all.filter((t) => t.text.trim().length <= 40 && (/^\(?\s*\d{2,4}\s*[xX×*]\s*\d{2,4}\s*\)?$/.test(t.text.trim()) || /^\d{2,4}\s*[xX×*]\s*\d{2,4}\s*(mm\s*)?(beam|depth|deep|size|\(|$)/i.test(t.text.trim())));
+  const isName = (s2: string) => /^[A-Z]{0,3}B[A-Z]?\d{1,3}[A-Z]{0,2}$/i.test(s2) || /^B\d{1,3}[A-Z]{0,2}$/i.test(s2);
+  const names = all.filter((t) => isName(t.text.trim()));
+  const sched: { name: string; sz: { b: number; d: number }; x: number; y: number }[] = [];
+  for (const p of pure) {
+    const sz = beamSizeFromLayer(p.text); if (!sz) continue;
+    const hh = Math.max(p.h, 0.2 / u) * 1.6;
+    const c = names.filter((n) => Math.abs(n.y - p.y) <= hh && p.x - n.x <= 8 / u && p.x - n.x >= -0.5 / u)
+      .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+    if (c) sched.push({ name: c.text.trim().toUpperCase(), sz, x: c.x, y: c.y });
+  }
+  // beam cross-sections "17A-17A" / "L1-L1" with their width (horizontal dimension) and depth (vertical dimension)
+  // drawn just above the section title → beam B17A / LB1
+  {
+    const dims = all.filter((t) => t.kind === "dim" && /^\d{2,4}$/.test(t.text.trim()));
+    for (const st of all) {
+      const m = st.text.trim().toUpperCase().match(/^([A-Z]{0,2}\d{1,3}[A-Z]{0,2})-([A-Z]{0,2}\d{1,3}[A-Z]{0,2})$/);
+      if (!m || m[1] !== m[2]) continue;
+      const win = dims.filter((t) => Math.abs(t.x - st.x) <= 3 / u && t.y - st.y >= 0 && t.y - st.y <= 5 / u);
+      const vert = win.filter((t) => Math.abs(Math.abs(t.r ?? 0) - Math.PI / 2) < 0.2).map((t) => Number(t.text)).filter((v) => v >= 150 && v <= 2500);
+      const hor = win.filter((t) => Math.abs(t.r ?? 0) < 0.2).sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y)).map((t) => Number(t.text)).filter((v) => v >= 100 && v <= 1200);
+      if (!vert.length || !hor.length) continue;
+      const sz = { b: hor[0], d: Math.max(...vert) };
+      if (sz.d <= sz.b) continue;
+      const id = m[1];
+      const keys = /^L\d/.test(id) ? [`L${id.startsWith("LB") ? id.slice(2) : id.slice(1)}`.replace(/^L/, "LB"), id] : id.startsWith("B") ? [id] : [`B${id}`, id];
+      for (const k of keys) sched.push({ name: k, sz, x: st.x, y: st.y });
+    }
+  }
+  return sched;
+}
+
+/** The layer roles the app suggests for a drawing (no estimator choices) — for reading what a drawing contains. */
+export function suggestedRoles(model: DxfModel): Record<string, LayerRole> {
+  const r: Record<string, LayerRole> = {}; for (const l of model.layers) r[l.name] = l.suggested; return r;
+}
+
 /** The layer roles as used: a role the layer's own content rules out (DxfLayerInfo.vetoed) counts as "ignore", also
  *  when it was saved on the plan or taught for that layer name by another drawing. */
 export function effectiveRoles(model: DxfModel, roles: Record<string, LayerRole>): Record<string, LayerRole> {
@@ -973,7 +1048,7 @@ export function effectiveRoles(model: DxfModel, roles: Record<string, LayerRole>
   return out ?? roles;
 }
 
-export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][]; beamDepthMm?: number } = {}): DxfAuto {
+export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][]; beamDepthMm?: number; projectBeams?: Record<string, { b: number; d: number }> } = {}): DxfAuto {
   const u = unitToM, u2 = unitToM * unitToM;
   const roles = effectiveRoles(model, rolesIn);
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
@@ -1153,47 +1228,23 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   let unsizedLen = 0, loneBeamLen = 0;
   // a size written next to the beam ("B:125X750H", "IVP:100X375H", "B1 230x450") when the layer has none
   const sizeTexts: { t: DxfText; sz: { b: number; d: number } | null }[] = (model.texts ?? []).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
-  // a beam schedule: beam elevations / tables titled "B12A" with the size "(600X900)" written beside — every "B12A"
-  // label on the plan then carries that size (several schedules in one file: the nearest one)
+  const projUsed = new Set<string>();     // beam marks sized from another drawing of the project
+  // a beam schedule (this drawing's own, else the one in another drawing of the project) — every "B12A" label on the
+  // plan then carries that size (several schedules in one file: the nearest one)
   {
     const all = model.texts ?? [];
-    // "(600X900)" beside a beam elevation title, or a schedule table row "B1 | 450 X 900 BEAM DEPTH"
-    const pure = all.filter((t) => t.text.trim().length <= 40 && (/^\(?\s*\d{2,4}\s*[xX×*]\s*\d{2,4}\s*\)?$/.test(t.text.trim()) || /^\d{2,4}\s*[xX×*]\s*\d{2,4}\s*(mm\s*)?(beam|depth|deep|size|\(|$)/i.test(t.text.trim())));
     const isName = (s2: string) => /^[A-Z]{0,3}B[A-Z]?\d{1,3}[A-Z]{0,2}$/i.test(s2) || /^B\d{1,3}[A-Z]{0,2}$/i.test(s2);
     const names = all.filter((t) => isName(t.text.trim()));
-    const sched: { name: string; sz: { b: number; d: number }; x: number; y: number }[] = [];
-    for (const p of pure) {
-      const sz = beamSizeFromLayer(p.text); if (!sz) continue;
-      const hh = Math.max(p.h, 0.2 / u) * 1.6;
-      const c = names.filter((n) => Math.abs(n.y - p.y) <= hh && p.x - n.x <= 8 / u && p.x - n.x >= -0.5 / u)
-        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
-      if (c) sched.push({ name: c.text.trim().toUpperCase(), sz, x: c.x, y: c.y });
-    }
-    // beam cross-sections "17A-17A" / "L1-L1" with their width (horizontal dimension) and depth (vertical dimension)
-    // drawn just above the section title → beam B17A / LB1
-    {
-      const dims = all.filter((t) => t.kind === "dim" && /^\d{2,4}$/.test(t.text.trim()));
-      for (const st of all) {
-        const m = st.text.trim().toUpperCase().match(/^([A-Z]{0,2}\d{1,3}[A-Z]{0,2})-([A-Z]{0,2}\d{1,3}[A-Z]{0,2})$/);
-        if (!m || m[1] !== m[2]) continue;
-        const win = dims.filter((t) => Math.abs(t.x - st.x) <= 3 / u && t.y - st.y >= 0 && t.y - st.y <= 5 / u);
-        const vert = win.filter((t) => Math.abs(Math.abs(t.r ?? 0) - Math.PI / 2) < 0.2).map((t) => Number(t.text)).filter((v) => v >= 150 && v <= 2500);
-        const hor = win.filter((t) => Math.abs(t.r ?? 0) < 0.2).sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y)).map((t) => Number(t.text)).filter((v) => v >= 100 && v <= 1200);
-        if (!vert.length || !hor.length) continue;
-        const sz = { b: hor[0], d: Math.max(...vert) };
-        if (sz.d <= sz.b) continue;
-        const id = m[1];
-        const keys = /^L\d/.test(id) ? [`L${id.startsWith("LB") ? id.slice(2) : id.slice(1)}`.replace(/^L/, "LB"), id] : id.startsWith("B") ? [id] : [`B${id}`, id];
-        for (const k of keys) sched.push({ name: k, sz, x: st.x, y: st.y });
-      }
-    }
-    if (sched.length) {
+    const sched = beamSchedule(model, u);
+    const proj = opts.projectBeams ?? {};
+    if (sched.length || Object.keys(proj).length) {
       const used = new Set(sched.map((e) => `${e.x},${e.y}`));
       for (const n of names) {
         if (used.has(`${n.x},${n.y}`)) continue;                     // the schedule's own titles
         const k = n.text.trim().toUpperCase();
         const e = sched.filter((x) => x.name === k).sort((a, b) => Math.hypot(a.x - n.x, a.y - n.y) - Math.hypot(b.x - n.x, b.y - n.y))[0];
         if (e) sizeTexts.push({ t: n, sz: e.sz });
+        else if (proj[k]) { sizeTexts.push({ t: n, sz: proj[k] }); projUsed.add(k); }
       }
     }
   }
@@ -1472,6 +1523,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       return out;
     })(),
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
+    ...(projUsed.size ? { projectBeamsUsed: [...projUsed].sort() } : {}),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose.filter((l) => onFloor2(l)),
     // sunk slabs (toilets, balconies): their edge is formed with drop (suspended) formwork

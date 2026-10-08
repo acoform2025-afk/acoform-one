@@ -12,6 +12,7 @@ import { ScopePanel } from "./scope-panel";
 import { BuildingPanel, type SiblingPlan } from "./building-panel";
 import { readBuilding, type Building } from "@/lib/floor-plans/building";
 import { EMPTY_DICT, layerKey, learnedRole, type Dictionary } from "@/lib/floor-plans/vocab";
+import type { ProjectFacts } from "@/lib/floor-plans/project-facts";
 import { teachDrawing } from "../dictionary-actions";
 import { measureQuestions } from "@/lib/floor-plans/questions";
 import {
@@ -81,7 +82,7 @@ function normalise(t: Partial<Takeoff> | null): Takeoff {
   };
 }
 
-export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = DEFAULT_RULES, siblings = [], dict = EMPTY_DICT }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[]; dict?: Dictionary }) {
+export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = DEFAULT_RULES, siblings = [], dict = EMPTY_DICT, project = null, projectPending = false }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[]; dict?: Dictionary; project?: ProjectFacts | null; projectPending?: boolean }) {
   const router = useRouter();
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -169,6 +170,14 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
         p.pts.forEach((q, i) => { const [x, y] = f.toPx(q); xy[2 * i] = x; xy[2 * i + 1] = y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; });
         return { layer: p.layer, xy, hatch: p.kind === "hatch", b: [x0, y0, x1, y1] as [number, number, number, number] };
       });
+      // tables pasted from Excel: their frame and row lines (the cells are texts)
+      for (const tb of m.tables ?? []) {
+        const [a, b] = [f.toPx([tb.box[0], tb.box[3]]), f.toPx([tb.box[2], tb.box[1]])];
+        const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+        pxFillsRef.current.push({ layer: tb.layer, xy: new Float32Array([x0, y0, x1, y0, x1, y1, x0, y1, x0, y0]), hatch: false, b: [x0, y0, x1, y1] });
+        const n = tb.rows.length;
+        for (let i = 1; i < n; i++) { const y = y0 + ((y1 - y0) * i) / n; pxFillsRef.current.push({ layer: tb.layer, xy: new Float32Array([x0, y, x1, y]), hatch: false, b: [x0, y, x1, y] }); }
+      }
     }
   }, []);
 
@@ -324,9 +333,9 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0, dict });
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0, dict, projectBeams: project?.beams });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|")]);
+  }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|"), project]);
   const totals: Totals = useMemo(() => computeTotals(t, auto, rules), [t, auto, rules]);
   // the other wall option (all walls concrete ⇄ thin walls in block), shown next to the chosen one
   const altMin = (Number(t.params.minWallMm) || 0) > 75 ? 0 : 125;
@@ -335,7 +344,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: altMin, dict });
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: altMin, dict, projectBeams: project?.beams });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, altMin]);
   const totalsAlt: Totals | null = useMemo(() => (autoAlt ? computeTotals({ ...t, params: { ...t.params, minWallMm: altMin || undefined } }, autoAlt, rules) : null), [t, autoAlt, altMin, rules]);
@@ -381,6 +390,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   const [autoNote, setAutoNote] = useState<string | null>(null);
   const [autoSave, setAutoSave] = useState(false);
   const autoDone = useRef(false);
+  const [waitedProject, setWaitedProject] = useState(false);
+  useEffect(() => { if (!projectPending) return; const h = setTimeout(() => setWaitedProject(true), 90_000); return () => clearTimeout(h); }, [projectPending]);
   const current = useMemo(() => {
     const r = t.dxf?.region; if (!r) return null;
     // the drawing the region covers best (a hand-drawn region around a drawing still shows its title)
@@ -402,13 +413,14 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   // the open questions; what the estimator set by hand (own plans made, questions ticked) is kept across readings
   const readLevels = useCallback((said: { floors?: number; floorMm?: number; slabMm?: number }, typicalPartN?: number): Building | null => {
     if (!modelRef.current || !t.dxf) return null;
-    const bld = readBuilding({ texts: modelRef.current.texts ?? [], unitToM: UNIT_TO_M[t.dxf.units], parts, section: drawingSection(modelRef.current), said, planName: plan.name, typicalPartN });
+    const bld = readBuilding({ texts: modelRef.current.texts ?? [], unitToM: UNIT_TO_M[t.dxf.units], parts, section: drawingSection(modelRef.current), said, planName: plan.name, typicalPartN,
+      project: project ? { section: project.section, levels: project.levels, from: project.levelsFrom ?? (project.sectionFrom ? `the section of "${project.sectionFrom}"` : undefined) } : undefined });
     if (t.building) {
       for (const l of bld.levels) { const o = t.building.levels.find((x) => x.key === l.key); if (o?.planId) { l.planId = o.planId; l.use = o.use; } }
       for (const q of bld.questions) { const o = t.building.questions.find((x) => x.text === q.text); if (o?.done) q.done = true; }
     }
     return bld;
-  }, [t.dxf, t.building, parts, plan.name]);
+  }, [t.dxf, t.building, parts, plan.name, project]);
   // a plan measured before this existed: its levels are read once, without touching anything else
   const levelsDone = useRef(false);
   useEffect(() => {
@@ -430,18 +442,21 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     const info = floorInfoFromTexts(modelRef.current.texts ?? [], UNIT_TO_M[t.dxf.units], [plan.name, plan.lead?.label ?? ""]);
     // first time: floor height / floors only replace the untouched defaults (3000 mm, 1 floor); "read again" replaces them
     // sections in the drawing: floor-to-floor and slab (concrete only — a floor finish / screed line is left out)
-    const sec = drawingSection(modelRef.current);
-    const fhRead = sec?.floorMm ?? info.heightMm;
+    // this drawing has no section / height of its own: what the project's other drawings state (its section drawing …)
+    const ownSec = drawingSection(modelRef.current);
+    const sec = ownSec ?? project?.section ?? null;
+    const secFrom = ownSec ? "from the sections" : `from the section in "${project?.sectionFrom}"`;
+    const fhRead = sec?.floorMm ?? info.heightMm ?? project?.floorMm;
     const fh = fhRead && (force || (Math.round((t.params.floorHeight || 0) * 1000) === 3000 && fhRead !== 3000)) ? fhRead : undefined;
     const slabMm = sec && (force || (t.params.slabMm ?? 150) === 150) && sec.slabMm !== (t.params.slabMm ?? 150) ? sec.slabMm : undefined;
     const beamDepthMm = sec?.beamMm && (force || t.params.beamDepthMm == null) ? sec.beamMm : undefined;
-    const fl = pick?.floors ?? info.floors;
+    const fl = pick?.floors ?? info.floors ?? project?.floors;
     const floors = fl && (force || (t.params.floors ?? 1) <= 1) ? fl : undefined;
     const notes: string[] = [];
     if (pick) notes.push(`picked ${pick.title ? `"${pick.title}"` : `drawing ${pick.n}`} (${pick.w.toFixed(1)} × ${pick.h.toFixed(1)} m) as the typical floor`);
-    if (floors) notes.push(`${floors} floors (${pick?.floors ? "from the drawing title" : info.source ?? "from the drawing"})`);
-    if (fh) notes.push(`floor height ${fh} mm (${sec?.floorMm ? "from the sections" : info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing"})`);
-    if (sec) notes.push(`sections: slab ${sec.slabMm} mm concrete${sec.finishMm ? ` (+ ${sec.finishMm} mm floor finish, ${sec.totalMm} mm in all — finish not formed)` : ""}${slabMm ? "" : " — kept the slab you set"}${sec.beamMm ? ` · beams / lintels ${sec.beamMm} mm deep` : ""}`);
+    if (floors) notes.push(`${floors} floors (${pick?.floors ? "from the drawing title" : info.floors ? info.source ?? "from the drawing" : `from "${project?.floorsFrom}"`})`);
+    if (fh) notes.push(`floor height ${fh} mm (${sec?.floorMm ? secFrom : info.heightMm ? (info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing") : `from "${project?.floorMmFrom}"`})`);
+    if (sec) notes.push(`${ownSec ? "" : `section of "${project?.sectionFrom}" — `}sections: slab ${sec.slabMm} mm concrete${sec.finishMm ? ` (+ ${sec.finishMm} mm floor finish, ${sec.totalMm} mm in all — finish not formed)` : ""}${slabMm ? "" : " — kept the slab you set"}${sec.beamMm ? ` · beams / lintels ${sec.beamMm} mm deep` : ""}`);
     if (force && !pick && !fh && !floors && !sec) notes.push("nothing new could be read — set the region, floors and floor height by hand");
     // the whole building: every level, its drawing and the open questions (kept once the estimator has edited it, unless read again)
     const pickedPart = pick ? parts.find((q) => { const i = boxI(q.px, pick.px); return i > 0.85 * boxA(q.px) && i > 0.6 * boxA(pick.px); }) : currentPart;
@@ -460,14 +475,15 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
     setAutoNote(note ?? null);
     if (note) setAutoSave(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, parts, currentPart, readLevels, t.dxf, t.building, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update, dict]);
+  }, [candidates, parts, currentPart, readLevels, t.dxf, t.building, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update, dict, project]);
   useEffect(() => {
-    if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size) return;
+    // the project's other drawings are being read: the first reading waits for them (their section, levels …), 90 s at most
+    if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size || (projectPending && !waitedProject)) return;
     // only the first time a plan is opened: once the user has a region / saved values, nothing is changed automatically
     autoDone.current = true;
     if (t.auto?.done || t.dxf.region) return;
     detect(false);
-  }, [canEdit, isDxf, t.dxf, t.auto?.done, size, detect]);
+  }, [canEdit, isDxf, t.dxf, t.auto?.done, size, detect, projectPending, waitedProject]);
   const pickPlan = (c: { px: [number, number, number, number]; floors?: number }) => { setChoosing(false); setAutoNote(null); update((pp) => ({ ...pp, params: c.floors ? { ...pp.params, floors: c.floors } : pp.params, dxf: pp.dxf ? { ...pp.dxf, region: c.px } : pp.dxf })); };
   const mpp = t.metersPerPx;
   const codes = useMemo(() => shapeCodes(t.shapes), [t.shapes]);

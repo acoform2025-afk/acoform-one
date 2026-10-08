@@ -787,6 +787,7 @@ export type Database = {
       floor_plans: {
         Row: {
           created_at: string
+          drawing_facts: Json | null
           drawing_type: string
           created_by: string | null
           file_name: string | null
@@ -804,6 +805,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          drawing_facts?: Json | null
           drawing_type?: string
           created_by?: string | null
           file_name?: string | null
@@ -821,6 +823,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          drawing_facts?: Json | null
           drawing_type?: string
           created_by?: string | null
           file_name?: string | null

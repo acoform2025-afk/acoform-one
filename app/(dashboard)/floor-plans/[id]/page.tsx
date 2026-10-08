@@ -6,6 +6,9 @@ import { loadRules } from "@/lib/floor-plans/rules";
 import { loadDictionary } from "@/lib/floor-plans/dictionary";
 import { getCurrentProfile, hasPermission } from "@/lib/auth/permissions";
 import { TakeoffTool } from "./takeoff-tool";
+import { ProjectDrawings } from "./project-drawings";
+import { loadProjectFacts } from "@/lib/floor-plans/project-load";
+import { FACTS_V } from "@/lib/floor-plans/project-facts";
 import { DeletePlanButton } from "./delete-plan-button";
 import { ReReadDwgButton } from "./reread-button";
 import type { QuoteOption } from "./use-in-quotation";
@@ -22,13 +25,16 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
   const supabase = await createClient();
   const { data: plan } = await supabase
     .from("floor_plans")
-    .select("id, name, source_kind, drawing_type, file_path, original_path, file_name, takeoff, lead_id, updated_at, leads ( id, lead_code, project_name, customer_name )")
+    .select("id, name, source_kind, drawing_type, file_path, original_path, file_name, takeoff, lead_id, updated_at, drawing_facts, leads ( id, lead_code, project_name, customer_name )")
     .eq("id", id).maybeSingle();
   if (!plan) notFound();
   const profile = await getCurrentProfile();
   const canEdit = await hasPermission("quotations", "create");
   const canDesign = await hasPermission("designs", "create");
-  const [rules, dict] = await Promise.all([loadRules(supabase), loadDictionary(supabase)]);
+  const [rules, dict, project] = await Promise.all([loadRules(supabase), loadDictionary(supabase), loadProjectFacts(supabase, plan).catch(() => null)]);
+  // drawings of the project (this one included) not yet read for what they state for the whole building
+  const ownFacts = plan.drawing_facts as { v?: number } | null;
+  const projectPending = !!plan.lead_id && ((plan.source_kind === "dxf" && ownFacts?.v !== FACTS_V) || !!project?.missing.length);
 
   const bucket = supabase.storage.from("floor-plans");
   const { data: fileUrl } = await bucket.createSignedUrl(plan.file_path, 60 * 60);
@@ -92,11 +98,13 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
         </div>
       </div>
 
+      <ProjectDrawings id={plan.id} project={project} pending={projectPending} canEdit={canEdit} />
+
       <div className="mt-4">
         {fileUrl?.signedUrl ? (
           <TakeoffTool
             plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}` } : null }}
-            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules} siblings={siblings} dict={dict}
+            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules} siblings={siblings} dict={dict} project={project} projectPending={projectPending && !!project?.missing.length}
           />
         ) : <p className="text-sm text-signal-red">The plan file could not be opened.</p>}
       </div>
