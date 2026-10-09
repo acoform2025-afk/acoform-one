@@ -12,7 +12,7 @@ import { meaningOf, type Dictionary } from "./vocab";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean; dashed?: boolean };   // dashed: drawn with a broken linetype (hidden / dashed)
-export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole };   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
+export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole; colStrip?: boolean };   // colStrip: a layer named by a size (750, 1200 …) whose filled outlines are built onto the columns — part of the columns   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
 /** A hatch boundary (filled area: columns, sunk / raised zones, cut-outs) or a leader line — kept apart from the lines so the reading of walls / beams is not changed by them. */
 export type DxfFill = DxfPath & { kind: "hatch" | "leader" };
 export type DxfText = { text: string; x: number; y: number; h: number; layer?: string; r?: number; al?: "c" | "r"; kind?: "dim" | "attr" };   // r: rotation (radians, drawing axes); kind: a dimension value / a block attribute (grid bubble, tag)
@@ -494,6 +494,35 @@ export function readDxf(raw: string): DxfModel {
     }
     for (const li of byLayer.values()) if ((li.suggested === "walls" || li.suggested === "columns") && li.count >= 3 && (circ.get(li.name) ?? 0) >= 0.75 * li.count) { li.vetoed = li.suggested; li.suggested = "ignore"; }
   }
+  // COLUMN STRIPS: some offices draw each column as a core plus strips stacked on it, one layer per strip size
+  // ("750", "900", "1200" …, often hatched in its own colour). A layer named only by a size whose closed outlines
+  // nearly all sit against a column (or against another such strip that does) is part of the columns — left out,
+  // the strips are holes in the slab and the columns come out too small.
+  {
+    const isSizeName = (n: string) => /^\s*\d{3,4}\s*(mm)?\s*$/i.test(n);
+    const box = (p: DxfPath) => { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const [x, y] of p.pts) { if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y; } return [a, b, c, d] as const; };
+    const colLayers = new Set([...byLayer.values()].filter((l) => l.suggested === "columns").map((l) => l.name));
+    const cand = [...byLayer.values()].filter((l) => l.suggested === "ignore" && isSizeName(l.name) && l.closed >= 3);
+    if (colLayers.size && cand.length) {
+      const span = Math.max(x1 - x0, y1 - y0), t = span * 2e-5;            // touching: within ~0.002 % of the drawing (≈ 2 mm on a 100 m plan)
+      const big = span * 0.05;
+      const shapes = paths.filter((p) => p.closed && (colLayers.has(p.layer) || cand.some((l) => l.name === p.layer))).map((p) => ({ l: p.layer, b: box(p) })).filter((x) => x.b[2] - x.b[0] < big && x.b[3] - x.b[1] < big);
+      const touch = (a: readonly number[], b: readonly number[]) => a[0] <= b[2] + t && b[0] <= a[2] + t && a[1] <= b[3] + t && b[1] <= a[3] + t;
+      // grow from the column layers: a strip counts once it touches a column or an accepted strip
+      const ok = new Set<string>(colLayers);
+      for (let pass = 0; pass < 4; pass++) {
+        let grew = false;
+        for (const l of cand) {
+          if (ok.has(l.name)) continue;
+          const mine = shapes.filter((x) => x.l === l.name); if (mine.length < 3) continue;
+          const others = shapes.filter((x) => x.l !== l.name && ok.has(x.l));
+          const hit = mine.filter((x) => others.some((o) => touch(x.b, o.b))).length;
+          if (hit >= 0.7 * mine.length) { ok.add(l.name); l.colStrip = true; l.suggested = "columns"; grew = true; }
+        }
+        if (!grew) break;
+      }
+    }
+  }
   // every layer of the drawing is listed — also those with only texts (beam marks, dimensions) or only hatches
   for (const t of texts) if (t.layer) { const li = info(t.layer); li.texts = (li.texts ?? 0) + 1; }
   for (const f of fills) { const li = info(f.layer); li.fills = (li.fills ?? 0) + 1; }
@@ -577,6 +606,43 @@ function inside(pt: Pt, poly: Pt[]) {
   return c;
 }
 /** Closed outlines of a role, dropping ones drawn inside a bigger one (e.g. inner line of a slab edge). */
+/**
+ * Column pieces drawn side by side (a core with strips stacked on it, each on its own layer): rectangles that meet
+ * along a whole side become one rectangle, again and again, so the column is one outline of its full size.
+ * Shapes that are not upright rectangles, and pieces that only meet at a corner or part of a side, stay as drawn.
+ */
+export function mergeColumnStrips(paths: DxfPath[], tol: number): DxfPath[] {
+  type R = { x0: number; y0: number; x1: number; y1: number; src?: DxfPath };
+  const rects: R[] = [], rest: DxfPath[] = [];
+  for (const p of paths) {
+    const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
+    const r = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), src: p };
+    const boxA = (r.x1 - r.x0) * (r.y1 - r.y0), a = polyArea(p.pts);
+    if (p.pts.length <= 5 && boxA > 0 && a >= 0.98 * boxA) rects.push(r); else rest.push(p);
+  }
+  const near = (a: number, b: number) => Math.abs(a - b) <= tol;
+  let merged = true;
+  while (merged) {
+    merged = false;
+    outer: for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i], b = rects[j];
+      const sameX = near(a.x0, b.x0) && near(a.x1, b.x1), sameY = near(a.y0, b.y0) && near(a.y1, b.y1);
+      const stackY = sameX && (near(a.y1, b.y0) || near(b.y1, a.y0)), stackX = sameY && (near(a.x1, b.x0) || near(b.x1, a.x0));
+      // or side by side with sides of nearly the same length (a 1750 strip on an 1800 column): one outline when
+      // together they fill ≥ 95 % of their common box
+      const touching = a.x0 <= b.x1 + tol && b.x0 <= a.x1 + tol && a.y0 <= b.y1 + tol && b.y0 <= a.y1 + tol;
+      const ox = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)), oy = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+      const area = (r: R) => (r.x1 - r.x0) * (r.y1 - r.y0);
+      const boxAll = (Math.max(a.x1, b.x1) - Math.min(a.x0, b.x0)) * (Math.max(a.y1, b.y1) - Math.min(a.y0, b.y0));
+      const fills = touching && (ox > tol || oy > tol) && area(a) + area(b) - ox * oy >= 0.95 * boxAll;
+      if (!stackY && !stackX && !fills) continue;
+      rects[i] = { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
+      rects.splice(j, 1); merged = true; break outer;
+    }
+  }
+  return [...rest, ...rects.map((r) => r.src ?? ({ layer: "columns", closed: true, pts: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]] } as DxfPath))];
+}
+
 function outermost(paths: DxfPath[]) {
   const withA = paths.map((p) => ({ p, a: polyArea(p.pts) })).filter((x) => x.a > 0).sort((a, b) => b.a - a.a);
   const keep: typeof withA = [];
@@ -1045,6 +1111,8 @@ export function suggestedRoles(model: DxfModel): Record<string, LayerRole> {
 export function effectiveRoles(model: DxfModel, roles: Record<string, LayerRole>): Record<string, LayerRole> {
   let out: Record<string, LayerRole> | null = null;
   for (const l of model.layers) if (l.vetoed && roles[l.name] === l.vetoed) { out ??= { ...roles }; out[l.name] = "ignore"; }
+  // column strips saved as "ignore" (read before strips were recognised) are columns
+  for (const l of model.layers) if (l.colStrip && (roles[l.name] ?? "ignore") === "ignore") { out ??= { ...roles }; out[l.name] = "columns"; }
   return out ?? roles;
 }
 
@@ -1074,7 +1142,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   const loops = (r: LayerRole, gaps = false) => closedLoops(of(r), tol, gaps).map((pts) => ({ layer: r, pts, closed: true }) as DxfPath);
 
   // columns: small rectangular / round outlines; big or L-shaped ones (shear walls, lift cores) are walls
-  const colAll = outermost(loops("columns", true).filter((p) => p.pts.length >= 3)).map(({ p }) => {
+  const colAll = outermost(mergeColumnStrips(loops("columns", true).filter((p) => p.pts.length >= 3), tol)).map(({ p }) => {
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
     const w = (Math.max(...xs) - Math.min(...xs)) * u, d = (Math.max(...ys) - Math.min(...ys)) * u, area = polyArea(p.pts) * u2;
     // round: many points, as wide as deep and about π/4 of its box; anything else that is not a rectangle is a wall
