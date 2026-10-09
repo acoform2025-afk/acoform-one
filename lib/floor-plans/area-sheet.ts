@@ -97,8 +97,9 @@ export function sheetSections(t: Takeoff, totals: Totals, auto: DxfAuto | null):
 
 /** Geometry for the sheet's small drawings (drawing units), from the automatic DXF quantities. */
 export function sheetGeo(auto: DxfAuto | null): SheetGeo | null {
-  if (!auto || !(auto.wallRings?.length || auto.wallLoose?.length)) return null;
-  const all: Pt[] = [...(auto.wallRings ?? []).flat(), ...(auto.wallLoose ?? []).flat(), ...(auto.slabLoops ?? []).flat()];
+  // a shear-wall building has walls; a column-and-beam frame may have almost none — its columns and beams are the drawing
+  if (!auto || !(auto.wallRings?.length || auto.wallLoose?.length || auto.columnRings?.length || auto.beamRings?.length)) return null;
+  const all: Pt[] = [...(auto.wallRings ?? []).flat(), ...(auto.wallLoose ?? []).flat(), ...(auto.slabLoops ?? []).flat(), ...(auto.columnRings ?? []).flat(), ...(auto.beamRings ?? []).flat()];
   if (!all.length) return null;
   const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
   return {
@@ -108,5 +109,6 @@ export function sheetGeo(auto: DxfAuto | null): SheetGeo | null {
     gaps: (auto.gaps ?? []).map((g) => [g.a, g.b] as [Pt, Pt]),
     stairs: auto.stairBoxes ?? [], columns: auto.columnRings ?? [],
     parapets: auto.parapetRings ?? [], edgeBeams: auto.edgeBeams ?? [],
+    beams: auto.beamRings ?? [], beamDepths: auto.beamRingDepth ?? [],
   };
 }

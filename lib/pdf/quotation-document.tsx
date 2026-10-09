@@ -655,9 +655,9 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
             <Page size="A4" style={s.page}>
               {chrome}
               <Text style={[s.h2, { marginTop: 0 }]}>WHAT WE FORM — {plan.name.toUpperCase()}</Text>
-              <Text style={{ fontSize: 8.5, color: GRAY, marginBottom: 6 }}>Concrete of the typical floor as read from your drawing: walls, parapets and columns shown in 3D (deck panels sit on top of the walls and are not drawn). Heights from the drawing's sections.</Text>
+              <Text style={{ fontSize: 8.5, color: GRAY, marginBottom: 6 }}>Concrete of the typical floor as read from your drawing: walls, parapets, columns and beams shown in 3D (the deck panels under the slab are not drawn). Heights from the drawing's sections.</Text>
               <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, alignItems: "center" }} wrap={false}>
-                <IsoFigure geo={plan.geo} H={(plan.dims.floorMm - plan.dims.slabMm) / 1000} parapetH={plan.dims.parapetMm / 1000} w={500} h={320} unitToM={plan.dims.unitToM} />
+                <IsoFigure geo={plan.geo} H={(plan.dims.floorMm - plan.dims.slabMm) / 1000} parapetH={plan.dims.parapetMm / 1000} w={500} h={320} unitToM={plan.dims.unitToM} slabM={plan.dims.slabMm / 1000} />
               </View>
               <View style={{ borderWidth: 0.75, borderColor: "#dddddd", borderRadius: 3, padding: 4, marginTop: 8, alignItems: "center" }} wrap={false}>
                 <SectionFigure floorMm={plan.dims.floorMm} slabMm={plan.dims.slabMm} beamMm={plan.dims.beamMm} parapetMm={plan.dims.parapetMm} w={500} h={210} thin={plan.dims.thin} />

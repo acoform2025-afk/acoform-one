@@ -2,7 +2,7 @@
  * Vector drawings for the quotation PDF, built from the measured drawing:
  *  • PlanFigure   — the floor plan with every measured element in its own colour (walls, slab, ducts, beams over
  *                   openings, edge beams, balcony parapets, columns, stairs) + legend
- *  • IsoFigure    — isometric view of the concrete walls / parapets / columns of the typical floor (what the
+ *  • IsoFigure    — isometric view of the concrete walls / parapets / columns / beams of the typical floor (what the
  *                   formwork forms), drawn from the same outlines
  *  • SectionFigure — a typical wall–slab–beam–parapet section with the formed faces marked and the plan's own
  *                   heights written on it
@@ -70,14 +70,14 @@ export function PlanFigure({ geo, w, h, legend = true }: { geo: SheetGeo; w: num
 }
 
 /** Isometric view: wall / parapet / column outlines extruded to their heights (metres), drawn back to front. */
-export function IsoFigure({ geo, H, parapetH, w, h, unitToM = 0.001 }: { geo: SheetGeo; H: number; parapetH: number; w: number; h: number; unitToM?: number }) {
+export function IsoFigure({ geo, H, parapetH, w, h, unitToM = 0.001, slabM = 0.15 }: { geo: SheetGeo; H: number; parapetH: number; w: number; h: number; unitToM?: number; slabM?: number }) {
   // drawing units → metres, then isometric: X = (x − y)·cos30, Y = (x + y)·sin30 − z
   const m = (p: Pt): [number, number] => [(p[0] - geo.box[0]) * unitToM, (p[1] - geo.box[1]) * unitToM];
   const c30 = Math.cos(Math.PI / 6), s30 = Math.sin(Math.PI / 6);
   const iso = (x: number, y: number, z: number): [number, number] => [(x - y) * c30, (x + y) * s30 - z];
   type Face = { pts: [number, number][]; fill: string; stroke: string; depth: number };
   const faces: Face[] = [];
-  const prism = (r: Pt[], z: number, fill: string, dark: string, darker: string, stroke: string) => {
+  const prism = (r: Pt[], z: number, fill: string, dark: string, darker: string, stroke: string, z0 = 0) => {
     const P = r.map(m); const n = P.length; if (n < 3) return;
     // winding so the side shading is consistent
     let area = 0; for (let i = 0; i < n; i++) { const a = P[i], b = P[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
@@ -88,7 +88,7 @@ export function IsoFigure({ geo, H, parapetH, w, h, unitToM = 0.001 }: { geo: Sh
       const nx = ccw ? dy : -dy, ny = ccw ? -dx : dx;           // outward normal
       if (nx + ny <= 0) continue;                                // faces away from the viewer (viewer at +x +y)
       const shade = nx > ny ? dark : darker;
-      faces.push({ pts: [iso(a[0], a[1], 0), iso(b[0], b[1], 0), iso(b[0], b[1], z), iso(a[0], a[1], z)], fill: shade, stroke, depth: (a[0] + a[1] + b[0] + b[1]) / 2 });
+      faces.push({ pts: [iso(a[0], a[1], z0), iso(b[0], b[1], z0), iso(b[0], b[1], z), iso(a[0], a[1], z)], fill: shade, stroke, depth: (a[0] + a[1] + b[0] + b[1]) / 2 });
     }
     faces.push({ pts: P.map((p) => iso(p[0], p[1], z)), fill, stroke, depth: P.reduce((s2, p) => s2 + p[0] + p[1], 0) / n + z * 0.01 + 50 });
   };
@@ -96,6 +96,8 @@ export function IsoFigure({ geo, H, parapetH, w, h, unitToM = 0.001 }: { geo: Sh
   for (const r of geo.walls) prism(r, H, "#c7d2fe", "#a5b4fc", "#818cf8", "#3730a3");
   for (const r of geo.parapets ?? []) prism(r, parapetH, "#e9d5ff", "#d8b4fe", "#c084fc", "#7e22ce");
   for (const r of geo.columns) prism(r, H, "#fde68a", "#fcd34d", "#f59e0b", "#b45309");
+  // beams hang under the slab: from the soffit (H) down by their depth below the slab
+  (geo.beams ?? []).forEach((r, i) => { const d = (geo.beamDepths?.[i] ?? 600) / 1000; prism(r, H, "#d6b48a", "#c19a6b", "#a47a4b", "#7c4a1e", Math.max(0, H - Math.max(0.1, d - slabM))); });
   faces.sort((a, b) => a.depth - b.depth);
   const all = faces.flatMap((f) => f.pts);
   if (!all.length) return null;

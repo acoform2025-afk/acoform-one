@@ -243,6 +243,9 @@ export function autoStairRows(auto: DxfAuto | null | undefined, floorHeight: num
   return out;
 }
 
+/** Quoted areas: to the nearest 10 m². */
+export const round10 = (v: number) => Math.round(v / 10) * 10;
+
 export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: Partial<MeasureRules> | null): Totals {
   const { floorHeight, slabMm, floors } = t.params;
   const base = normaliseRules(companyRules ?? DEFAULT_RULES);
@@ -508,8 +511,9 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     column_sizes: [...sizes.entries()].map(([size, qty]) => ({ size, qty })).sort((a, b) => b.qty - a.qty),
     beam_area: r2(beamArea), extra_area: r2(extraArea + loftArea), wall_top_area: r2(wallTop),
     vertical_area: r2(wallArea + colArea),
-    contact_area: r2(contact), extra_pct: extraPct, typical_quote: r2(contact * (1 + extraPct / 100)), nontypical_area: r2(nonTyp),
-    quote_area: r2(contact * (1 + extraPct / 100) + nonTyp),
+    // the quoted areas are rounded to the nearest 10 m² (contact area stays as measured)
+    contact_area: r2(contact), extra_pct: extraPct, typical_quote: round10(contact * (1 + extraPct / 100)), nontypical_area: r2(nonTyp),
+    quote_area: round10(contact * (1 + extraPct / 100) + nonTyp),
     clear_height: r2(H), floors: Math.max(1, Math.round(floors || 1)), params: t.params,
     source: auto && hasManual ? "mixed" : auto ? "dxf" : "manual",
     wall_top_drawn: r2(wallTopDrawn + (auto?.wallTopArea ?? 0)),
