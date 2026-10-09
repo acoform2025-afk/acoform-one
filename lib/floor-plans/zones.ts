@@ -167,7 +167,15 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
     // the soffit-corner band along every side of the room
     ...(E > 0 ? z.rings.flatMap((r) => r.map((a, i) => { const b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1; const nx = (-dy / L) * (E + 0.002), ny = (dx / L) * (E + 0.002); return [ring([[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]])] as Polygon; })) : []),
   ];
-  try { if (cover.length) rest = polygonClipping.difference(rest, ...cover); } catch { rest = []; }
+  // the clipping library can fail on near-touching edges (panels laid exactly against the zone outline): retry with
+  // every point snapped to the millimetre before giving up, so the specials are not silently lost
+  if (cover.length) {
+    try { rest = polygonClipping.difference(rest, ...cover); }
+    catch {
+      const snap = (m: MultiPolygon): MultiPolygon => m.map((poly) => poly.map((r) => r.map(([x, y]) => [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000] as [number, number])));
+      try { rest = polygonClipping.difference(snap(rest), ...cover.map((c) => snap([c]))); } catch { rest = []; }
+    }
+  }
   const specials = rest.map((poly) => { const rings = poly.map((r) => r.slice(0, -1) as Pt[]); return { rings, area: Math.abs(polyArea(rings[0])) - rings.slice(1).reduce((x, r) => x + Math.abs(polyArea(r)), 0) }; }).filter((q) => q.area > 0.02);
   return { code, rings: z.rings, area: z.area, box: z.box, along, panels, mb, specials, specialArea: specials.reduce((x, q) => x + q.area, 0) };
 }

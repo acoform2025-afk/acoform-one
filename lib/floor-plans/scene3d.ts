@@ -244,6 +244,25 @@ export function buildScene3(o: {
     panels.push({ p: [[p.x0, y, p.y0], [p.x1, y, p.y0], [p.x1, y, p.y1], [p.x0, y, p.y1]], k: p.custom ? "dspec" : "deck", c: `${p.no} · ${p.code}`, z: z.code, n: [0, -1, 0] });
     deckN++; if (p.custom) special++;
   }
+  // what the standard rows leave (a column corner notch, an odd strip): the made-to-size deck specials of the zone,
+  // drawn as rectangles so the 3D shows the slab closed there (they are in the parts list already)
+  for (const z of o.zones) for (const sp of (z as { specials?: { rings: Pt[][]; area: number }[] }).specials ?? []) {
+    const r = sp.rings[0]; if (!r || r.length < 3) continue;
+    const holesIn = sp.rings.slice(1);
+    const inRing = (q: Pt, ring: Pt[]) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j]; if (yi > q[1] !== yj > q[1] && q[0] < ((xj - xi) * (q[1] - yi)) / (yj - yi) + xi) c = !c; } return c; };
+    const xs = [...new Set(r.map((q) => Math.round(q[0] * 1000) / 1000))].sort((a2, b2) => a2 - b2);
+    for (let i = 0; i + 1 < xs.length; i++) {
+      const xa = xs[i], xb = xs[i + 1]; if (xb - xa < 0.02) continue;
+      const xm = (xa + xb) / 2, ys: number[] = [];
+      for (let k = 0, j = r.length - 1; k < r.length; j = k++) { const a2 = r[j], b2 = r[k]; if ((a2[0] - xm) * (b2[0] - xm) < 0) ys.push(a2[1] + ((b2[1] - a2[1]) * (xm - a2[0])) / (b2[0] - a2[0])); }
+      ys.sort((a2, b2) => a2 - b2);
+      for (let k = 0; k + 1 < ys.length; k += 2) {
+        const ya = ys[k], yb = ys[k + 1]; if (yb - ya < 0.02 || holesIn.some((h) => inRing([xm, (ya + yb) / 2], h))) continue;
+        const y = H - 0.005;
+        panels.push({ p: [[xa, y, ya], [xb, y, ya], [xb, y, yb], [xa, y, yb]], k: "dspec", c: `${z.code} · deck special (made to size) ${Math.round((xb - xa) * 1000)} × ${Math.round((yb - ya) * 1000)}`, z: z.code, n: [0, -1, 0] });
+      }
+    }
+  }
   // staircases: a dog-leg stair in each stair box — flight 1 up one half of the box, landing across the far end,
   // flight 2 back down the other half to the floor above (risers ≤ 170 mm, tread 270 mm)
   const steps: Scene3["steps"] = [];
