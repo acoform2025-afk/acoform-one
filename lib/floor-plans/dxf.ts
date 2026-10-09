@@ -1664,6 +1664,27 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       // a "stair" outside the floor slab (a detail sketch beside the plan) is not a staircase of this floor
       if (slab.length) s = s.filter((b) => { const c: Pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; return slab.some((x) => inside(c, x.p.pts)); });
       const meas = measureStairs(src, s, u);
+      // two staircases side by side in one stairwell (their flights are within 1.5 m, so they were taken as one): one
+      // staircase per "UP" arrow, the flights shared out in order across the climb (each dog-leg keeps its two flights)
+      {
+        const ups = (model.texts ?? []).filter((t) => /^up\b/i.test(t.text.trim()) && t.text.trim().length <= 6);
+        const ns: typeof s = [], nm: StairMeasure[] = [];
+        s.forEach((b, i) => {
+          const m = meas[i], fl = m?.flights ?? [];
+          const e2 = 0.8 / u, k = ups.filter((t) => t.x >= b[0] - e2 && t.x <= b[2] + e2 && t.y >= b[1] - e2 && t.y <= b[3] + e2).length;   // arrows sit at the flight foot, often just outside the treads
+          const a0 = fl[0]?.ang ?? 0, vert = Math.abs(Math.cos(a0)) < 0.09, horiz = Math.abs(Math.sin(a0)) < 0.09;
+          if (m && k >= 2 && fl.length >= 2 * k && fl.length % k === 0 && (vert || horiz) && fl.every((f) => f.span && Math.abs((f.ang ?? 0) - a0) < 0.09)) {
+            const sorted = [...fl].sort((p1, p2) => p1.span![0] - p2.span![0]), per = fl.length / k;
+            for (let g = 0; g < k; g++) {
+              const part = sorted.slice(g * per, (g + 1) * per);
+              const c0 = Math.min(...part.map((f) => f.span![0])), c1 = Math.max(...part.map((f) => f.span![1]));
+              const nb: [number, number, number, number] = vert ? [b[0], c0, b[2], c1] : [c0, b[1], c1, b[3]];
+              ns.push(nb); nm.push({ ...m, box: nb, flights: part, landingM2: Math.round((m.landingM2 / k) * 100) / 100 });
+            }
+          } else { ns.push(b); nm.push(m); }
+        });
+        s = ns; meas.splice(0, meas.length, ...nm);
+      }
       // the stairwell is the flights AND the mid-landing: the climb runs across the tread lines; the landing is at the
       // end away from the "UP" / "DN" arrows (both sit at the floor end of a dog-leg stair). A box that holds only the
       // tread lines is extended by a landing as deep as the flights are wide.

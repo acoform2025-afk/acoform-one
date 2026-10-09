@@ -38,7 +38,12 @@ export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[]
     strips.push([ring([[g.a[0] + nx, g.a[1] + ny], [g.b[0] + nx, g.b[1] + ny], [g.b[0] - nx, g.b[1] - ny], [g.a[0] - nx, g.a[1] - ny]])] as Polygon);
   }
   const holes: MultiPolygon = slabs.flatMap((s) => s.holes.filter((h) => h.length >= 3).map((h) => [ring(h)] as Polygon));
-  const solid: MultiPolygon = solids.filter((r) => r.length >= 3).map((r) => [ring(r)] as Polygon);
+  // beams and columns grown by 3 mm: two that only touch (a beam butting onto a column face) leave a zero-width slit
+  // in the difference, which joins the decks on both sides of the beam into one zone (panels then cross the beam and
+  // are dropped, leaving bare strips)
+  const grow = (r: Pt[]): Pt[] => { const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]); const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2, e = 0.003; return r.map((q) => [q[0] + (q[0] > cx ? e : q[0] < cx ? -e : 0), q[1] + (q[1] > cy ? e : q[1] < cy ? -e : 0)] as Pt); };
+  const solid0: MultiPolygon = solids.filter((r) => r.length >= 3).map((r) => [ring(r)] as Polygon);
+  const solid: MultiPolygon = solids.filter((r) => r.length >= 3).map((r) => [ring(grow(r))] as Polygon);
   // the slab outline trimmed 40 mm inwards along its outer edge: a slab edge drawn a few cm outside the wall (groove
   // lines, edge lines) must not leave a sliver that chains rooms together along the outside of the wall
   const skin: MultiPolygon = [];
@@ -47,7 +52,21 @@ export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[]
     const h = 0.04, nx = (-dy / L) * h, ny = (dx / L) * h, ex = (dx / L) * h, ey = (dy / L) * h;
     skin.push([ring([[a[0] + nx - ex, a[1] + ny - ey], [b[0] + nx + ex, b[1] + ny + ey], [b[0] - nx + ex, b[1] - ny + ey], [a[0] - nx - ex, a[1] - ny - ey]])] as Polygon);
   }
-  const zones = safeDiff(slab, walls, strips, holes, skin, ...solid.map((p) => [p] as MultiPolygon));
+  // the zones are found with the grown solids (so they are split at every beam), then given back their exact size:
+  // each grown-solid zone, widened by the same 3 mm, cut from the exact (ungrown) difference
+  const zonesG = safeDiff(slab, walls, strips, holes, skin, ...solid.map((p) => [p] as MultiPolygon));
+  const exact = solids.length ? safeDiff(slab, walls, strips, holes, skin, ...solid0.map((p) => [p] as MultiPolygon)) : zonesG;
+  let zones: MultiPolygon = zonesG;
+  if (solids.length) {
+    zones = [];
+    for (const poly of zonesG) {
+      let part: MultiPolygon = [];
+      try { part = polygonClipping.intersection(exact, [[ring(grow(poly[0].slice(0, -1) as Pt[]))]]); } catch { part = [poly]; }
+      // a widened zone can catch a sliver of its neighbour across a touching beam end: keep only its own piece(s)
+      const big = part.filter((q) => Math.abs(polyArea(q[0].slice(0, -1) as Pt[])) >= 0.02);
+      zones.push(...(big.length ? big : [poly]));
+    }
+  }
   const out: { rings: Pt[][]; area: number; box: [number, number, number, number] }[] = [];
   for (const poly of zones) {
     const rings = poly.map((r) => r.slice(0, -1) as Pt[]);

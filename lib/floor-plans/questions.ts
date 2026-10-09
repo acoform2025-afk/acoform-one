@@ -3,7 +3,7 @@
  * could not find, or had to assume. Each question says what is assumed meanwhile, so the quote is not held up.
  * The level questions (missing floor plans, basement in or out …) come from building.ts; these are the plan-level ones.
  */
-import type { DxfAuto, Takeoff, Totals } from "./calc";
+import { autoStairRows, type DxfAuto, type Takeoff, type Totals } from "./calc";
 import type { Question } from "./building";
 import type { MeasureRules } from "./rules";
 import type { SectionLevels } from "./section-read";
@@ -35,6 +35,14 @@ export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | nul
   if (deck && (auto?.openingLoops?.length ?? 0) === 0 && (totals.plan_area ?? 0) > 200) ask("m-ducts", "architect", "No ducts / shafts / lift wells were found as cut-outs in the slab. Please confirm the duct and lift positions and sizes.", "Cut-outs are deducted from the deck and add slab-edge formwork.");
   if ((auto?.stairCount ?? 0) === 0 && (totals.plan_area ?? 0) > 150) ask("m-stair", "architect", "No staircase was found on the plan. Please confirm the stair position, flights and whether the stair is cast with the formwork or precast / later.", "Each staircase adds flight soffits, risers and landings to the set.");
   else if ((auto?.stairCount ?? 0) > 0 && !(auto?.stairsMeasured ?? []).some((m) => m.flights.length) && rules.stairs) ask("m-stair2", "architect", `${auto!.stairCount} staircase(s) found but the treads could not be read: ${rules.stairAllowanceM2} m² per staircase is allowed. Please send the staircase detail (risers, tread, width, landing).`, "Measured flights replace the allowance.");
+  // the measured stair says what floor height it was drawn for: risers per floor × a 150–175 mm riser
+  {
+    const odd = autoStairRows(auto, p.floorHeight || 3).filter((r) => r.oddRiser);
+    if (odd.length) {
+      const n = Math.max(...odd.map((r) => r.risers)), lo = (n * 0.15).toFixed(2), hi = (n * 0.175).toFixed(2);
+      ask("m-stairfh", "architect", `The staircase on the plan has ${n} risers per floor. With the floor height used (${(p.floorHeight || 3).toFixed(2)} m) each riser would be ${Math.round(((p.floorHeight || 3) * 1000) / n)} mm, so the floor-to-floor height is probably about ${lo}–${hi} m. Please confirm the floor-to-floor height (and the riser height).`, "The floor height sets the wall panel height, the stair risers and the quoted area.");
+    }
+  }
   if ((auto?.columns?.length ?? 0) === 0 && (t.columns?.length ?? 0) === 0 && scope !== "vertical") ask("m-cols", "structure", "No columns were found — the building is taken as a shear-wall structure (walls carry the load). Please confirm, or send the column schedule.", "Column panels are a separate set of pieces.");
   if (walls && (totals.wall_length ?? 0) > 0 && p.floorHeight && section && Math.abs(section.floorMm - Math.round(p.floorHeight * 1000)) > 10) ask("m-fh", "architect", `Floor height: the sections show ${section.floorMm} mm but ${Math.round(p.floorHeight * 1000)} mm is used. Which is right?`, "The floor height sets every wall panel height.");
   // what the client must settle

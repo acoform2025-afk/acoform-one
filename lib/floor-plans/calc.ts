@@ -218,21 +218,26 @@ export function stairBreakdown(st: StairRow) {
 
 /** Stair rows from the flights measured on the drawing: risers per flight = tread lines (+1 where that gives a riser
  *  nearer 150–180 mm), riser height = floor height ÷ risers of the staircase, one open side per flight (stair well). */
-export function autoStairRows(auto: DxfAuto | null | undefined, floorHeight: number): { row: StairRow; desc: string; width: number }[] {
-  const out: { row: StairRow; desc: string; width: number }[] = [];
+export function autoStairRows(auto: DxfAuto | null | undefined, floorHeight: number): { row: StairRow; desc: string; width: number; risers: number; oddRiser: boolean }[] {
+  const out: { row: StairRow; desc: string; width: number; risers: number; oddRiser: boolean }[] = [];
   const H = floorHeight * 1000;
   for (const st of auto?.stairsMeasured ?? []) {
     if (!st.flights.length) continue;
     const lines = st.flights.reduce((s, f) => s + f.treads, 0), nF = st.flights.length;
     const pick = [lines, lines + nF].map((n) => ({ n, r: H / n })).sort((a, b) => Math.abs(a.r - 165) - Math.abs(b.r - 165))[0];
     const risersTotal = pick.n, riser = H / risersTotal;
-    if (riser < 120 || riser > 200 || lines < 4) continue;      // not a staircase (a symbol, a ramp): the allowance applies
+    if (lines < 4) continue;                                    // not a staircase (a symbol, a ramp): the allowance applies
+    // the flights are real (read tread by tread); a riser far from 150–190 mm means the floor height used is not the
+    // one the stair was drawn for (e.g. 27 risers on a 3.0 m default = 111 mm) — the flights are still drawn as read
+    // and the floor height is asked (questions.ts); only a riser no stair can have means it is not a staircase
+    if (riser < 90 || riser > 260) continue;
+    const oddRiser = riser < 140 || riser > 195;
     const width = Math.round(st.flights.reduce((s, f) => s + f.width, 0) / nF), tread = Math.round(st.flights.reduce((s, f) => s + f.tread, 0) / nF);
     // one row for the whole staircase: risers per flight averaged (the area is the same), landing shared
     out.push({
       row: { width_mm: width, risers: Math.round(risersTotal / nF), riser_mm: Math.round(riser), tread_mm: tread, waist_mm: 150, open_sides: 1, landing_m2: st.landingM2 / nF, flights: nF },
       desc: `${nF} flight${nF > 1 ? "s" : ""}, ${risersTotal} risers ${Math.round(riser)}/${tread}, ${(width / 1000).toFixed(2)} m wide${st.landingM2 ? `, landing ${st.landingM2.toFixed(1)} m²` : ""}`,
-      width,
+      width, risers: risersTotal, oddRiser,
     });
   }
   return out;
