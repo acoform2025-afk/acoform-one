@@ -1575,7 +1575,15 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     const m: Pt = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
     return wallClosed.some((w) => inside(m, w)) && U.rings.some((r) => inside(m, r));
   };
-  const cols = colAll.filter((c) => c.isCol && !sepCols.includes(c) && !inWallOutline(c)).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
+  // when the slab is the outer face of the walls, a column standing clear outside it (a neighbouring block / drawing
+  // overlapping this one, or a column drawn on an overlay view) is not on this floor
+  const offSlab = (c: { p: DxfPath }) => {
+    if (!slabFromWalls || !slab.length) return false;
+    const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]); const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const m = 1 / u;
+    return !slab.some((x) => inside([cx, cy], x.p.pts) || [[m, 0], [-m, 0], [0, m], [0, -m]].some(([dx, dy]) => inside([cx + dx, cy + dy], x.p.pts)));
+  };
+  const cols = colAll.filter((c) => c.isCol && !sepCols.includes(c) && !inWallOutline(c) && !offSlab(c)).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
   return {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,

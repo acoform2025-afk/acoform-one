@@ -42,6 +42,9 @@ export function suggestLayerRole(name: string): Role {
   if (name.includes("$0$") && /大样|详图|示意|节点|剖面|detail|section|legend/i.test(name.slice(0, name.lastIndexOf("$0$")))) return "ignore";
   const n = normLayer(name.includes("$0$") ? name.slice(name.lastIndexOf("$0$") + 3) : name);
   // never formwork geometry: annotation, sheet furniture, sections / elevations, steel, sleeves, projections …
+  // "WALL-100MM (PROJECTION RCC WALL)": the RCC walls of balconies / projections are cast with the floor — walls, even
+  // though "projection" alone (projection lines of upper floors) is annotation
+  if (/projection/.test(n) && /wall|(^|[^a-z])rcc([^a-z]|$)/.test(n.replace(/\./g, ""))) return "walls";
   // site / plot lines are never the slab: plot boundary, property line, setback / margin, parcel, road
   if (/plot|parcel|property|setback|margin|(^|-)road|driveway|compound-?wall|site-?(boundary|plan|layout)/.test(n)) return "ignore";
   if (/parapet|compound|hatch|elev(?!ational)|(^|-)elv|sec(tion)?(-|$)|text|txt|(^|-)dim|furn|door|win(dow)?(-|$)|grid|axis|template|title|border|frame|table|legend|name-?plate|nmplt|revision|slab-?thk|thk-text|projection|leader|steel|reinf|sleeve|(^|-)level|symbol|note|defpoints|drip|mould|企口|文字|标注|轴|图框|说明|标高|门|窗|填充|索引|修改|问题|钢筋|信息|分界/.test(n)) return "ignore";
