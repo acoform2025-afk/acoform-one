@@ -1,0 +1,56 @@
+name: Hugging Face test Space
+
+# Pushes this app to a Hugging Face Docker Space (free CPU, 16 GB RAM) as a TEST copy:
+# https://huggingface.co/spaces/acodorm/acoform-one-test
+# Needs one GitHub secret: HF_TOKEN (a Hugging Face "write" token). The Space is created on first run.
+on:
+  push:
+    branches: [hf-test]
+  workflow_dispatch:
+
+concurrency:
+  group: hf-space
+  cancel-in-progress: true
+
+jobs:
+  push-to-space:
+    runs-on: ubuntu-latest
+    env:
+      SPACE_ID: acodorm/acoform-one-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q huggingface_hub
+      - name: Space README (Hugging Face needs this front matter)
+        run: |
+          cat > README.md <<'MD'
+          ---
+          title: ACOFORM ONE (test)
+          emoji: 🏗️
+          colorFrom: gray
+          colorTo: yellow
+          sdk: docker
+          app_port: 7860
+          pinned: false
+          ---
+          # ACOFORM ONE — test copy
+          Test deployment of the ACOFORM ONE formwork design app. The live app runs elsewhere; data lives in Supabase.
+          MD
+      - name: Create / update the Space and upload the app
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          sid = os.environ["SPACE_ID"]
+          api.create_repo(sid, repo_type="space", space_sdk="docker", private=False, exist_ok=True)
+          # 16 GB machine: let Node use a big heap (the Dockerfile reads NODE_HEAP_MB)
+          api.add_space_variable(sid, "NODE_HEAP_MB", "12000")
+          api.upload_folder(folder_path=".", repo_id=sid, repo_type="space",
+                            ignore_patterns=[".git/**", ".github/**", "node_modules/**", ".next/**", "*.log"],
+                            delete_patterns=["**"], commit_message=f"Sync from GitHub {os.environ.get('GITHUB_SHA','')[:7]}")
+          print("pushed to https://huggingface.co/spaces/" + sid)
+          PY
