@@ -42,6 +42,8 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   const opt = readOptions(q, layoutRules);
   // full-height system: one panel to the clear height less the bottom strip (unless a height was typed in)
   if (layoutRules.fullHeight && !q.h) opt.stdHeight = Math.max(1200, Math.round(((t.params.floorHeight - t.params.slabMm / 1000) * 1000 - layoutRules.bottomStrip) / 5) * 5);
+  // a standard wall-panel height set for this plan (project rule) wins over the company rule
+  if (Number(t.params.stdHeightMm) >= 1200 && Number(t.params.stdHeightMm) <= 3600 && !q.h) opt.stdHeight = Number(t.params.stdHeightMm);
   const rules = await loadRules(supabase);
   // what the project's other drawings state (sections, level list, beam schedule) — used where this drawing says nothing
   const project = await loadProjectFacts(supabase, plan).catch(() => null);

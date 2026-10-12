@@ -336,7 +336,9 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     ...(mpp > 0 ? g.shapes.filter((x) => x.kind === "column" && x.pts.length >= 2).map((x) => { if (x.pts.length >= 3) return x.pts.map((q) => toM(q)); const xs = x.pts.map((q) => q[0]), ys = x.pts.map((q) => q[1]); const a = toM([Math.min(...xs), Math.min(...ys)]), b = toM([Math.max(...xs), Math.max(...ys)]); return [a, [b[0], a[1]], b, [a[0], b[1]]] as Pt[]; }) : []),
   ];
   const zoneBeam3: { ring: Pt[]; d: number }[] = frame ? (auto?.beamRings ?? []).map((r, i) => ({ ring: r.map((q) => toM(frame!.toPx(q))), d: auto?.beamRingDepth?.[i] ?? (t.params.beamDepthMm ?? 600) })) : [];
-  const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : [];
+  const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : []
+  // hand-drawn plans: an opening shape labelled "stair" is the stairwell box (dog-leg stair drawn in the 3D model)
+  if (mpp > 0) for (const x of g.shapes) if (x.kind === "opening" && /stair/i.test(x.label ?? "") && x.pts.length >= 3) { const xs = x.pts.map((q) => toM(q)[0]), ys = x.pts.map((q) => toM(q)[1]); zoneStairs.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]); }
   // which way each stair climbs and at which end its mid-landing is (read from the tread lines and the UP / DN arrows)
   const zoneStairOrient: ({ along: boolean; landHigh: boolean; upHigh?: boolean; spans?: [number, number][] } | null)[] = zoneStairs.map((zb, i) => {
     const m = (auto as { stairsMeasured?: { run?: "x" | "y"; landPt?: Pt; upPt?: Pt; flights: { span?: [number, number] }[] }[] } | undefined)?.stairsMeasured?.[i];
@@ -368,6 +370,18 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     // both faces of one wall carry the same opening: once
     if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 - mid[0], (z.a[1] + z.b[1]) / 2 - mid[1]) <= Math.max(z.thk, thk) + 0.05)) continue;
     zoneOpenings.push({ a: pa, b: pb, n: [nx, ny], thk, door: op.door, sill: op.door ? 0 : OPENING_DEFAULTS.windowSill, head: op.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH });
+  }
+  // hand-drawn doors / windows (a line along the wall): the opening across the wall, as in the DXF reading
+  if (mpp > 0) for (const x of g.shapes) {
+    if ((x.kind !== "door" && x.kind !== "window") || x.pts.length < 2) continue;
+    const pa = toM(x.pts[0]), pb = toM(x.pts[x.pts.length - 1]);
+    const dx = pb[0] - pa[0], dy = pb[1] - pa[1], L = Math.hypot(dx, dy); if (L < 0.2) continue;
+    const door = x.kind === "door", thk = (t.params.wallThkMm ?? 150) / 1000;
+    let nx = -dy / L, ny = dx / L;
+    const mid: Pt = [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2];
+    if (!zoneWalls.length || !inRingsM([mid[0] + nx * thk * 0.5, mid[1] + ny * thk * 0.5], zoneWalls)) { nx = -nx; ny = -ny; }
+    const sill = door ? 0 : (x.sill ?? OPENING_DEFAULTS.windowSill);
+    zoneOpenings.push({ a: pa, b: pb, n: [nx, ny], thk, door, sill, head: door ? OPENING_DEFAULTS.doorH : sill + OPENING_DEFAULTS.windowH });
   }
   // doors / windows in a break of the wall: the opening across the gap (the face line on one side)
   if (frame) for (const dg of auto?.dwGaps ?? []) {

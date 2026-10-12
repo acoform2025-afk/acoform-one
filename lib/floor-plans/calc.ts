@@ -52,6 +52,7 @@ export type Params = {
   autoEdgeBeams?: boolean;  // edge beams under slab edges without a wall (balcony fronts) — default on when the drawing has no beam layers
   parapetMm?: number;       // balcony parapet height (walls with a railing on them), default 900
   sillMm?: number;          // window sill height (sill wall under windows found in wall openings), default 900    // beams / lintels over wall openings found on the drawing (default on)
+  stdHeightMm?: number;     // standard wall-panel height for this plan (mm), overrides the company rule
   wallThkMm?: number;       // default thickness of drawn walls (3D view, wall tops)
 };
 
