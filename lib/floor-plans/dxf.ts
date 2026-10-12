@@ -166,6 +166,10 @@ export function leanParseDxf(text: string): { header: AnyEnt; entities: AnyEnt[]
       continue;
     }
     if (!cur) continue;
+    // an MTEXT (AutoCAD 2018+, LibreDWG) may end with an "Embedded Object" block (code 101) that re-uses codes 10–46 for
+    // its column layout: those must not overwrite the text's own position and height
+    if (code === 101) { cur._emb = true; continue; }
+    if (cur._emb) continue;
     const num = Number(val);
     if (RAW.has(cur.type) && code !== 8 && code !== 67) { const raw: [number, string][] = (cur._raw ??= []); if (raw.length < 400_000) raw.push([code, val]); continue; }
     switch (code) {
@@ -909,7 +913,9 @@ function dwGapsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], 
     // which way the wall runs: walls just beyond both ends of the opening along that axis
     const probe = (ax: boolean): number | null => {
       const half = ((ax ? w : h) / 2), out1 = half + 0.12 / u;
-      for (const off of [0, -0.1 / u, 0.1 / u, -0.2 / u, 0.2 / u]) {
+      // a door's box includes its swing: the wall then runs along one EDGE of the box, not through its centre
+      const edge = (ax ? h : w) / 2;
+      for (const off of [0, -0.1 / u, 0.1 / u, -0.2 / u, 0.2 / u, ...(g.door ? [-edge, edge, -edge + 0.05 / u, edge - 0.05 / u, -edge - 0.05 / u, edge + 0.05 / u] : [])]) {
         const p1: Pt = ax ? [cx - out1, cy + off] : [cx + off, cy - out1], p2: Pt = ax ? [cx + out1, cy + off] : [cx + off, cy + out1];
         if (inWall(p1[0], p1[1]) && inWall(p2[0], p2[1])) return off;
       }
@@ -1243,9 +1249,26 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     const tx = (model.texts ?? []).filter((t) => isOpeningLabel(t.text, opts.dict) && t.text.length <= 30 && (!keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false })));
     // lift doors are open gaps in the core walls: bridged (up to 1.3 m), and lines on the generic layers (door / sill
     // lines across the shaft front) close it too
-    if (tx.length && U.rings.length) for (const sp of labelledSpaces(U.rings, [...loose, ...misc.map((p) => (p.closed ? [...p.pts, p.pts[0]] : p.pts))], tx.map((t) => [t.x, t.y] as Pt), u, 20, 0.65)) {
-      if (sp.area < 0.5 || sp.area > 20) continue;
-      const [x0, y0, x1, y1] = sp.box; extraOpen.push([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    if (tx.length && U.rings.length) {
+      const bounds = [...loose, ...misc.map((p) => (p.closed ? [...p.pts, p.pts[0]] : p.pts))];
+      for (const t of tx) {
+        // Indian plans write the size with the name ("LIFT - 01 2000 X 2500", "DUCT 1615 X 1030"): the hole is that size.
+        // When the space found round the label leaks through a lift door or a gap into the lobby / a room, the size wins.
+        const sz = t.text.match(/(\d{3,5})\s*[xX×]\s*(\d{3,5})/); const want = sz ? (Number(sz[1]) / 1000) * (Number(sz[2]) / 1000) : 0;
+        const sp = labelledSpaces(U.rings, bounds, [[t.x, t.y]], u, 20, 0.65)[0];
+        // the space found is a ROOM (its own name + size is written in it, e.g. "ATT.BATH 2675 X 2650") when the duct /
+        // shaft label sits at its edge and the shaft is open to it: not a hole
+        const roomOf = (b: [number, number, number, number]) => (model.texts ?? []).some((o) => o !== t && o.x >= b[0] && o.x <= b[2] && o.y >= b[1] && o.y <= b[3] && !isOpeningLabel(o.text, opts.dict) && (() => { const z = o.text.match(/(\d{3,5})\s*[xX×]\s*(\d{3,5})/); if (!z) return false; const A = (Number(z[1]) / 1000) * (Number(z[2]) / 1000); return sp!.area >= 0.6 * A && sp!.area <= 1.4 * A; })());
+        const ok = sp && sp.area >= 0.5 && sp.area <= 20 && (!want || (sp.area >= 0.5 * want && sp.area <= 1.8 * want)) && !roomOf(sp.box);
+        const same = (b: Pt[]) => extraOpen.some((e) => e.every((q, i) => Math.abs(q[0] - b[i][0]) < 0.05 / u && Math.abs(q[1] - b[i][1]) < 0.05 / u));
+        if (ok) { const [x0, y0, x1, y1] = sp.box; const b: Pt[] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]; if (!same(b)) extraOpen.push(b); continue; }
+        if (want >= 0.5 && want <= 20) {
+          // the labelled size, centred on the label (a shaft the size of the label text's box); walls round it fix the exact
+          // position in the viewer — the area and perimeter are right either way
+          const w2 = Number(sz![1]) / 1000 / u / 2, h2 = Number(sz![2]) / 1000 / u / 2, cx = t.x + (t.h ? t.text.length * t.h * 0.3 : 0), cy = t.y + (t.h ?? 0) * 0.5;
+          const b: Pt[] = [[cx - w2, cy - h2], [cx + w2, cy - h2], [cx + w2, cy + h2], [cx - w2, cy + h2]]; if (!same(b)) extraOpen.push(b);
+        }
+      }
     }
     for (const b of xMarkedBoxes(misc, 0.02 / u)) {
       const w = Math.abs(b[2][0] - b[0][0]) * u, h = Math.abs(b[2][1] - b[0][1]) * u;
@@ -2237,8 +2260,12 @@ export function drawingParts(model: DxfModel, unitToM: number, rolesIn?: Record<
     const others = raw.filter((o) => o !== r && boxInter(o.box, r.box) < 0.5 * boxArea(r.box)).map((o) => o.box);
     const tt = r.title ?? (texts.length ? titleFor(texts, r.box, others) : undefined);
     const vl = r.view ? viewLabel(r.view) : undefined;
-    const title = tt ?? vl ?? "";
-    return { box: r.box, w: (r.box[2] - r.box[0]) * unitToM, h: (r.box[3] - r.box[1]) * unitToM, title, sub: tt && vl && vl !== tt ? vl : undefined, kind: partKind(`${title} ${vl ?? ""}`), count: r.hits, n: 0 };
+    // a named drawing (xref / block view) keeps its own name when the nearest big text is only a section / elevation
+    // marker ("ELEVATION - A" arrows round a plan) or another drawing's sheet title
+    const marker = !!tt && !!vl && /section|elevation|elev\b/i.test(tt) && !/section|elevation|elev\b/i.test(vl);
+    const title = (marker ? vl : tt) ?? vl ?? "";
+    const sub = marker ? undefined : tt && vl && vl !== tt ? vl : undefined;
+    return { box: r.box, w: (r.box[2] - r.box[0]) * unitToM, h: (r.box[3] - r.box[1]) * unitToM, title, sub, kind: partKind(marker ? vl! : `${title} ${vl ?? ""}`), count: r.hits, n: 0 };
   });
   // reading order: rows from the top, left to right inside a row
   out.sort((a, b) => b.box[3] - a.box[3]);
