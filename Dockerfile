@@ -29,8 +29,7 @@ RUN npm run build && npm prune --omit=dev
 
 FROM node:22-slim
 WORKDIR /app
-# free server = 512 MB: keep Node's heap well under it so it cleans up temporary memory before the server is killed
-ENV NODE_OPTIONS=--max-old-space-size=380
+# Node heap: free Render server = 512 MB, so default 380 MB; a bigger machine (e.g. a Hugging Face Space, 16 GB) sets NODE_HEAP_MB.
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=7860 HOSTNAME=0.0.0.0 \
     PATH=/opt/libredwg/bin:$PATH LD_LIBRARY_PATH=/opt/libredwg/lib DWG2DXF_BIN=/opt/libredwg/bin/dwg2dxf
 COPY --from=libredwg /opt/libredwg/bin/dwg2dxf /opt/libredwg/bin/dwg2dxf
@@ -40,4 +39,4 @@ COPY --from=build /app /app
 RUN chown -R 1000:1000 /app && /opt/libredwg/bin/dwg2dxf --version
 USER 1000
 EXPOSE 7860
-CMD ["sh", "-c", "exec node_modules/.bin/next start -p ${PORT:-7860} -H 0.0.0.0"]
+CMD ["sh", "-c", "export NODE_OPTIONS=--max-old-space-size=${NODE_HEAP_MB:-380}; exec node_modules/.bin/next start -p ${PORT:-7860} -H 0.0.0.0"]
