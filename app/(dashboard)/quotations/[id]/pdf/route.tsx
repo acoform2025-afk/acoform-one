@@ -6,7 +6,7 @@ import { mediaForPdf } from "@/lib/quotations/media";
 import { fmtArea, UNIT_TO_M, type DxfAuto, type Takeoff, type Totals } from "@/lib/floor-plans/calc";
 import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import { dxfAuto, dxfFrame, readDxf, separateAreas, type DxfModel } from "@/lib/floor-plans/dxf";
-import { sheetGeo } from "@/lib/floor-plans/area-sheet";
+import { sheetGeo, sheetGeoFromShapes } from "@/lib/floor-plans/area-sheet";
 import type { PdfFloorPlan } from "@/lib/pdf/quotation-document";
 import { describeRules, loadRules, normaliseRules } from "@/lib/floor-plans/rules";
 
@@ -72,6 +72,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         geo = sheetGeo(auto);
       }
     }
+    // hand-traced plan (picture / PDF): 3D from the drawn walls, slab, columns, stair and openings
+    if (!geo && fp.source_kind !== "dxf" && tk && Number(tk.metersPerPx) > 0) { geo = sheetGeoFromShapes(tk); if (geo) unitToM = Number(tk.metersPerPx); }
     if (!geo && fp.preview_path) {
       const { data: img } = await supabase.storage.from("floor-plans").download(fp.preview_path);
       if (img) image = { data: Buffer.from(await img.arrayBuffer()), format: "jpg" };

@@ -112,3 +112,33 @@ export function sheetGeo(auto: DxfAuto | null): SheetGeo | null {
     beams: auto.beamRings ?? [], beamDepths: auto.beamRingDepth ?? [],
   };
 }
+
+/** 3D / coloured-plan geometry of a HAND-TRACED plan (picture / PDF): walls as thick strips, slab, columns, stair box,
+ *  door / window gaps. Units are the plan picture's pixels (y flipped up, like a drawing); unitToM = metersPerPx. */
+export function sheetGeoFromShapes(t: Takeoff): SheetGeo | null {
+  const mpp = Number(t.metersPerPx); if (!(mpp > 0) || !Array.isArray(t.shapes) || !t.shapes.length) return null;
+  const fl = (p: Pt): Pt => [p[0], -p[1]];
+  const defT = Number(t.params?.wallThkMm) || 150;
+  const strip = (a: Pt, b: Pt, thkMm: number): Pt[] => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (!L) return [];
+    const h = (thkMm / 1000 / mpp) / 2, nx = (-dy / L) * h, ny = (dx / L) * h;
+    return [[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]].map(fl);
+  };
+  const walls: Pt[][] = [], parapets: Pt[][] = [], slab: Pt[][] = [], ducts: Pt[][] = [], columns: Pt[][] = [], gaps: [Pt, Pt][] = [];
+  const stairs: [number, number, number, number][] = [];
+  for (const s of t.shapes) {
+    if (s.kind === "wall" && s.pts.length >= 2) {
+      const r = strip(s.pts[0], s.pts[s.pts.length - 1], s.t ?? defT);
+      if (r.length) (s.h && s.h < 1500 ? parapets : walls).push(r);
+    } else if (s.kind === "slab" && s.pts.length >= 3) slab.push(s.pts.map(fl));
+    else if (s.kind === "opening" && s.pts.length >= 3) {
+      if (/stair/i.test(s.label ?? "")) { const xs = s.pts.map((q) => q[0]), ys = s.pts.map((q) => -q[1]); stairs.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]); }
+      else ducts.push(s.pts.map(fl));
+    } else if (s.kind === "column" && s.pts.length >= 3) columns.push(s.pts.map(fl));
+    else if ((s.kind === "door" || s.kind === "window") && s.pts.length >= 2) gaps.push([fl(s.pts[0]), fl(s.pts[s.pts.length - 1])]);
+  }
+  const all = [...walls, ...parapets, ...slab, ...columns].flat();
+  if (!all.length) return null;
+  const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
+  return { box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], walls, wallLines: [], slab, ducts, gaps, stairs, columns, parapets, edgeBeams: [], beams: [], beamDepths: [] };
+}
