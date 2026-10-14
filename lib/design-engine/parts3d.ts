@@ -53,6 +53,11 @@ class B {
     });
     this.poly(pts, DARK, true);
   }
+  /** Slotted pin hole mark: a dark rectangle elongated along the length (y) of the profile, on a surface facing ±axis (x or z). */
+  slot(at: V3, axis: "x" | "z", long: number, short: number) {
+    const l = long / 2, w = short / 2;
+    this.poly((axis === "x" ? [[at[0], at[1] - l, at[2] - w], [at[0], at[1] + l, at[2] - w], [at[0], at[1] + l, at[2] + w], [at[0], at[1] - l, at[2] + w]] : [[at[0] - w, at[1] - l, at[2]], [at[0] + w, at[1] - l, at[2]], [at[0] + w, at[1] + l, at[2]], [at[0] - w, at[1] + l, at[2]]]) as V3[], DARK, true);
+  }
 }
 const make = (fn: (b: B) => void) => () => { const b = new B(); fn(b); return b.f; };
 const rotY = (deg: number) => { const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a); return (p: V3): V3 => [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c]; };
@@ -73,15 +78,40 @@ function panel(b: B, W: number, L: number, o: { rib?: number; holeStep?: number;
   for (let x = 100; x < W - 50; x += 100) { b.hole([x, -0.6, 44], "y", 8); b.hole([x, L + 0.6, 44], "y", 8); }
 }
 
-/** An L-shaped corner piece: two skins (legs a along x, c along z) with rails at their free edges, length L along y. */
+/**
+ * An L-shaped extruded corner (internal corner / soffit corner): two skins (leg a along x, leg c along z) joined by a
+ * solid fillet web at the inside of the angle, a lip on the free edge of each leg and slotted pin holes along both legs
+ * (every 100 mm, two rows on the longer leg), length L along y.
+ */
 function corner(b: B, a: number, c: number, L: number) {
-  const T = 4, F = 65, R = 6;
+  const T = 5, F = 65, R = 8, W = 26;
   b.box([0, 0, -T], [a, L, 0], SKIN);                     // leg 1 skin (concrete at z < 0)
   b.box([-T, 0, -T], [0, L, c], SKIN);                    // leg 2 skin (concrete at x < 0)
-  b.box([a - R, 0, 0], [a, L, F], AL);                    // rail at the end of leg 1
-  b.box([0, 0, c - R], [F, L, c], AL);                    // rail at the end of leg 2
+  b.prism([[0, 0], [W, 0], [0, W]], "y", 0, L, AL);       // solid fillet web in the angle (the thick root of the extrusion)
+  b.box([a - R, 0, 0], [a, L, F], AL);                    // lip at the end of leg 1
+  b.box([0, 0, c - R], [F, L, c], AL);                    // lip at the end of leg 2
+  b.box([a - R, 0, F - 6], [a + 6, L, F], ALD);           // small return on the lip, as on the extrusion
   for (let y = 0; y <= L; y += Math.min(300, L)) { const y0 = Math.min(Math.max(0, y - 3), L - 6); b.prism([[0, 0], [a - R, 0], [0, c - R]], "y", y0, y0 + 6, ALD); }
-  for (let y = 75; y < L; y += 150) { b.hole([a + 0.6, y, 40], "x", 8); b.hole([40, y, c + 0.6], "z", 8); }
+  for (let y = 50; y < L; y += 100) { b.slot([a + 0.6, y, 36], "x", 16, 8); b.slot([36, y, c + 0.6], "z", 16, 8); b.hole([a * 0.55, y, 0.6], "z", 6); }
+}
+
+/** External corner profile: a hollow square tube (the corner itself) with one flat flange carrying a row of pin holes. */
+function extCorner(b: B, L: number) {
+  const S = 40, T = 4;
+  b.box([0, 0, 0], [S, L, T], AL); b.box([0, 0, S - T], [S, L, S], AL);            // tube: bottom and top walls
+  b.box([0, 0, T], [T, L, S - T], AL); b.box([S - T, 0, T], [S, L, S - T], AL);    // tube: side walls
+  b.box([S, 0, 0], [S + 55, L, T], SKIN);                                          // flat flange with pin holes
+  b.box([S + 51, 0, T], [S + 55, L, 16], AL);                                      // flange lip
+  for (let y = 50; y < L; y += 100) { b.hole([S + 28, y, T + 0.6], "z", 6); b.slot([S - T / 2 - 0.4, y, S / 2], "x", 16, 8); }
+}
+
+/** Wall-end angle: a U channel (web + two flanges) with a row of pin holes in the web and in both flanges, length L. */
+function endAngle(b: B, L: number) {
+  const S = 65, T = 4, D = 40;
+  b.box([0, 0, 0], [S, L, T], SKIN);                                               // web
+  b.box([0, 0, T], [T, L, D], AL); b.box([S - T, 0, T], [S, L, D], AL);            // two flanges
+  b.box([0, 0, D - T], [14, L, D], ALD); b.box([S - 14, 0, D - T], [S, L, D], ALD); // returns
+  for (let y = 50; y < L; y += 100) { b.hole([S / 2, y, 0.6 + 0], "z", 7); b.slot([-0.6, y, 22], "x", 16, 8); b.slot([S + 0.6, y, 22], "x", 16, 8); }
 }
 
 /** Adjustable prop of overall height h: base plate, outer tube, collar nut with handles, inner tube, pin, top plate. */
@@ -101,8 +131,9 @@ export const PARTS: PartDef[] = [
   { key: "beam-bottom", name: "Beam bottom panel", group: "Panels", size: "200–300 × 1200", material: "Aluminium 6061-T6", use: "Forms the underside of the beam, as wide as the beam. Its side rails are pinned to the bottom rails of the two beam side panels (an outside-corner joint: pins and wedges through the matching holes, no corner piece). Carried on beam prop heads at the prop spacing, ends 150 mm in from the walls.", match: /^BB-/, build: make((b) => b.with((p) => [p[0], 65 - p[2], p[1]], () => panel(b, 230, 1200))) },
   { key: "stop-end", name: "Stop end (wall end closure)", group: "Panels", size: "wall thickness × floor height", material: "Aluminium 6061-T6", use: "Closes the end of a wall between the two wall faces.", match: /^SE-/, build: make((b) => panel(b, 160, 2400, { holeStep: 300 })) },
   // ---------------- corners & edges ----------------
-  { key: "ic", name: "Internal corner", group: "Corners & edges", size: "100 × 100 × 2400", material: "Aluminium 6061-T6", use: "Forms the inside corner where two walls meet; both legs pinned to the wall panels.", match: /^IC-/, build: make((b) => corner(b, 100, 100, 2400)) },
-  { key: "ec", name: "External corner angle", group: "Corners & edges", size: "65 × 65 × 2400", material: "Aluminium angle 6 mm", use: "Joins the rails of two wall panels at an outside corner.", match: /^EC-/, build: make((b) => { b.box([0, 0, 0], [65, 2400, 6], AL); b.box([0, 0, 0], [6, 2400, 65], AL); for (let y = 75; y < 2400; y += 150) { b.hole([40, y, 6.6], "z", 8); b.hole([6.6, y, 40], "x", 8); } }) },
+  { key: "ic", name: "Internal corner", group: "Corners & edges", size: "100 × 100 × 2400", material: "Aluminium 6061-T6", use: "Forms the inside corner where two walls meet; both legs pinned to the wall panels.", match: /^IC-|^ICT-|^CT-/, build: make((b) => corner(b, 100, 100, 2400)) },
+  { key: "ec", name: "External corner angle", group: "Corners & edges", size: "65 × 65 × 2400", material: "Aluminium extrusion (hollow corner with pin-hole flange)", use: "Joins the rails of two wall panels at an outside corner. Also closes both corners of a wall end (stop-end) when the rule is switched on; on a wall taller than the standard panel a top piece of the same profile (ECT) goes above it.", match: /^EC-|^ECT-/, build: make((b) => extCorner(b, 2400)) },
+  { key: "end-angle", name: "Wall-end angle (stop-end channel)", group: "Corners & edges", size: "65 × 40 × 2400", material: "Aluminium U channel, 4 mm", use: "Runs down each edge of a stop-end panel and is pinned to the face panels on both sides, so the wall end has no slot for the concrete.", build: make((b) => endAngle(b, 2400)) },
   { key: "sc", name: "Soffit corner (slab corner)", group: "Corners & edges", size: "100 × 100 × 1200", material: "Aluminium 6061-T6", use: "Joins the top of the wall panels to the deck panels round every room.", match: /^SC/, build: make((b) => b.with((p) => [p[1], -p[0], p[2]], () => corner(b, 100, 100, 1200))) },
   { key: "kicker", name: "Kicker", group: "Corners & edges", size: "150 × 1200", material: "Aluminium 6061-T6", use: "Fixed on the outside face at slab level; the next lift of wall panels starts on it.", match: /^K(CE|IC|K)?-|^KICK/, build: make((b) => { b.box([0, 0, 0], [1200, 150, 4], SKIN); b.box([0, 144, 4], [1200, 150, 65], AL); b.box([0, 0, 4], [1200, 6, 65], AL); for (let x = 0; x <= 1200; x += 300) { const x0 = Math.min(Math.max(0, x - 3), 1194); b.box([x0, 6, 4], [x0 + 6, 144, 65], ALD); } for (let x = 75; x < 1200; x += 150) { b.hole([x, 150.6, 40], "y", 8); b.hole([x, -0.6, 40], "y", 8); } b.hole([600, 75, -0.6], "z", 12); }) },
   // ---------------- deck support ----------------
