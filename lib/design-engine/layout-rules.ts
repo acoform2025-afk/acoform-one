@@ -50,7 +50,102 @@ export type LayoutRules = {
   // accessories
   lossPct: number;               // extra % on small parts (pins, wedges, ties, sleeves)
   sparePct: Record<string, number>;   // site spare % per panel family (learned from site reports), e.g. { deck: 2 }
+  pk?: PkRules;                  // detailed beam / wall rules (priority lists, back-ribs, K-plates, props)
 };
+
+// ---------- detailed (PKPM-style) rules: beam + wall tabs, priority lists, back-ribs, K-plates, props ----------
+export type PropGroup = { maxBeamW: number; extend: number; width: number };
+export type PkRules = {
+  enabled: boolean;                   // off = lists/layout use the simple rules above only
+  // beam tab
+  beamTallVertMm: number;             // beam side taller than this: panels go vertical
+  beamSideWidths: number[];           // beam side panel width priority (try in order)
+  beamSideLens: number[];             // beam side panel length priority
+  beamMinSplit: number;               // min split width
+  beamSplitWidths: number[];          // beam cross-direction split width priority
+  beamKWidth: number; beamKLens: number[]; beamKUpturn50: boolean;
+  beamRibLens: number[]; beamRibWidth: number; beamRibFromBeam: number; beamRib2Height: number; beamRib2From: number; beamRibTie: number;
+  beamCornerWidth: number; beamCornerOut: number;
+  beamBottomMode: "auto" | "slab" | "wall";
+  beamBottomLens: number[]; beamBottomMin: number;
+  propGroups: PropGroup[];            // beam-bottom props by beam width limit
+  propSpread: "even" | "multiple100" | "maxlen";
+  beamAutoRib: boolean; beamAutoProps: boolean; beamTiePlate: boolean; beamUseSupport: boolean; beam200250Support: boolean;
+  // wall tab
+  wallWidthPriority: number[];        // wall panel width priority
+  wallPanelWidth: number;
+  clampMinGap: number;                // min gap of square-tube clamp
+  wallKHeight: number; wallKMin: number; wallKLens: number[];
+  ribHeights: number[];               // back-rib centre heights, mm
+  tubeHeights: number[];              // square-tube centre heights, mm
+  tubeStagger: boolean;               // stagger tubes floor to floor
+  ribWidth: number; rib45Width: number; tubeWidth: number;
+  ribMax: number; tubeMax: number; ribGap: number;
+  ribEndExt: number; angleExt: number; diagExt: number; uClip: number;
+  bottomAngle: number; sunkAngle: number; insideFromFloor: number; sunkC: number; cornerFloorGap: number;
+  wallAutoTie: boolean; wallAutoRib: boolean; wallAutoBrace: boolean; wallPanelWithAngle: boolean; wallTiePlate: boolean; extWallUpturn50: boolean;
+};
+
+export const DEFAULT_PK: PkRules = {
+  enabled: false,
+  beamTallVertMm: 550, beamSideWidths: [400, 300, 200], beamSideLens: [1100, 1000, 900], beamMinSplit: 100, beamSplitWidths: [400, 250, 200],
+  beamKWidth: 0, beamKLens: [1100, 1000, 900], beamKUpturn50: true,
+  beamRibLens: [2500, 2000, 1200], beamRibWidth: 50, beamRibFromBeam: 250, beamRib2Height: 750, beamRib2From: 150, beamRibTie: 1000,
+  beamCornerWidth: 0, beamCornerOut: 50, beamBottomMode: "auto", beamBottomLens: [1000, 900, 700], beamBottomMin: 100,
+  propGroups: [{ maxBeamW: 150, extend: 15, width: 200 }, { maxBeamW: 200, extend: 15, width: 150 }, { maxBeamW: 99999, extend: 10, width: 150 }],
+  propSpread: "even", beamAutoRib: true, beamAutoProps: false, beamTiePlate: false, beamUseSupport: false, beam200250Support: true,
+  wallWidthPriority: [400, 300, 200], wallPanelWidth: 500, clampMinGap: 1000, wallKHeight: 300, wallKMin: 500, wallKLens: [1500, 1200, 1000],
+  ribHeights: [250, 800, 1600, 2500], tubeHeights: [275, 1075, 1975], tubeStagger: true,
+  ribWidth: 60, rib45Width: 60, tubeWidth: 50, ribMax: 3000, tubeMax: 3500, ribGap: 20, ribEndExt: 180, angleExt: 22, diagExt: 30, uClip: 400,
+  bottomAngle: 40, sunkAngle: 65, insideFromFloor: 50, sunkC: 50, cornerFloorGap: 5,
+  wallAutoTie: false, wallAutoRib: true, wallAutoBrace: false, wallPanelWithAngle: true, wallTiePlate: false, extWallUpturn50: true,
+};
+
+const pnum = (v: unknown, d: number, lo: number, hi: number) => { const n = Number(v); return v === null || v === undefined || v === "" || !Number.isFinite(n) ? d : Math.min(hi, Math.max(lo, n)); };
+const pbool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
+/** Priority list: keeps the order given (first = tried first). */
+const plist = (v: unknown, d: number[], lo: number, hi: number) => {
+  const a = Array.isArray(v) ? v : typeof v === "string" ? v.split(/[\s,;\-]+/) : null;
+  if (!a) return d;
+  const o = a.map(Number).filter((x) => Number.isFinite(x) && x >= lo && x <= hi);
+  return o.length ? o : d;
+};
+
+export function normalisePk(raw: unknown): PkRules {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_PK;
+  const pg = Array.isArray(r.propGroups) && r.propGroups.length ? (r.propGroups as Record<string, unknown>[]).slice(0, 5).map((g, i) => ({
+    maxBeamW: pnum(g?.maxBeamW, d.propGroups[Math.min(i, 2)].maxBeamW, 50, 99999), extend: pnum(g?.extend, d.propGroups[Math.min(i, 2)].extend, 0, 200), width: pnum(g?.width, d.propGroups[Math.min(i, 2)].width, 50, 400),
+  })) : d.propGroups;
+  return {
+    enabled: pbool(r.enabled, d.enabled),
+    beamTallVertMm: pnum(r.beamTallVertMm, d.beamTallVertMm, 200, 2000),
+    beamSideWidths: plist(r.beamSideWidths, d.beamSideWidths, 50, 1200), beamSideLens: plist(r.beamSideLens, d.beamSideLens, 200, 2400),
+    beamMinSplit: pnum(r.beamMinSplit, d.beamMinSplit, 0, 400), beamSplitWidths: plist(r.beamSplitWidths, d.beamSplitWidths, 50, 1200),
+    beamKWidth: pnum(r.beamKWidth, d.beamKWidth, 0, 600), beamKLens: plist(r.beamKLens, d.beamKLens, 200, 2400), beamKUpturn50: pbool(r.beamKUpturn50, d.beamKUpturn50),
+    beamRibLens: plist(r.beamRibLens, d.beamRibLens, 300, 6000), beamRibWidth: pnum(r.beamRibWidth, d.beamRibWidth, 20, 200),
+    beamRibFromBeam: pnum(r.beamRibFromBeam, d.beamRibFromBeam, 0, 1000), beamRib2Height: pnum(r.beamRib2Height, d.beamRib2Height, 0, 2000),
+    beamRib2From: pnum(r.beamRib2From, d.beamRib2From, 0, 1000), beamRibTie: pnum(r.beamRibTie, d.beamRibTie, 200, 2500),
+    beamCornerWidth: pnum(r.beamCornerWidth, d.beamCornerWidth, 0, 300), beamCornerOut: pnum(r.beamCornerOut, d.beamCornerOut, 0, 200),
+    beamBottomMode: r.beamBottomMode === "slab" || r.beamBottomMode === "wall" ? r.beamBottomMode : "auto",
+    beamBottomLens: plist(r.beamBottomLens, d.beamBottomLens, 200, 2400), beamBottomMin: pnum(r.beamBottomMin, d.beamBottomMin, 0, 600),
+    propGroups: pg,
+    propSpread: r.propSpread === "multiple100" || r.propSpread === "maxlen" ? r.propSpread : "even",
+    beamAutoRib: pbool(r.beamAutoRib, d.beamAutoRib), beamAutoProps: pbool(r.beamAutoProps, d.beamAutoProps), beamTiePlate: pbool(r.beamTiePlate, d.beamTiePlate),
+    beamUseSupport: pbool(r.beamUseSupport, d.beamUseSupport), beam200250Support: pbool(r.beam200250Support, d.beam200250Support),
+    wallWidthPriority: plist(r.wallWidthPriority, d.wallWidthPriority, 50, 1200), wallPanelWidth: pnum(r.wallPanelWidth, d.wallPanelWidth, 100, 1200),
+    clampMinGap: pnum(r.clampMinGap, d.clampMinGap, 200, 2500),
+    wallKHeight: pnum(r.wallKHeight, d.wallKHeight, 100, 800), wallKMin: pnum(r.wallKMin, d.wallKMin, 100, 1500), wallKLens: plist(r.wallKLens, d.wallKLens, 200, 2400),
+    ribHeights: plist(r.ribHeights, d.ribHeights, 50, 4000), tubeHeights: plist(r.tubeHeights, d.tubeHeights, 50, 4000), tubeStagger: pbool(r.tubeStagger, d.tubeStagger),
+    ribWidth: pnum(r.ribWidth, d.ribWidth, 20, 200), rib45Width: pnum(r.rib45Width, d.rib45Width, 20, 200), tubeWidth: pnum(r.tubeWidth, d.tubeWidth, 20, 200),
+    ribMax: pnum(r.ribMax, d.ribMax, 500, 8000), tubeMax: pnum(r.tubeMax, d.tubeMax, 500, 8000), ribGap: pnum(r.ribGap, d.ribGap, 0, 100),
+    ribEndExt: pnum(r.ribEndExt, d.ribEndExt, 0, 500), angleExt: pnum(r.angleExt, d.angleExt, 0, 200), diagExt: pnum(r.diagExt, d.diagExt, 0, 200), uClip: pnum(r.uClip, d.uClip, 100, 1000),
+    bottomAngle: pnum(r.bottomAngle, d.bottomAngle, 0, 200), sunkAngle: pnum(r.sunkAngle, d.sunkAngle, 0, 200), insideFromFloor: pnum(r.insideFromFloor, d.insideFromFloor, 0, 200),
+    sunkC: pnum(r.sunkC, d.sunkC, 0, 200), cornerFloorGap: pnum(r.cornerFloorGap, d.cornerFloorGap, 0, 50),
+    wallAutoTie: pbool(r.wallAutoTie, d.wallAutoTie), wallAutoRib: pbool(r.wallAutoRib, d.wallAutoRib), wallAutoBrace: pbool(r.wallAutoBrace, d.wallAutoBrace),
+    wallPanelWithAngle: pbool(r.wallPanelWithAngle, d.wallPanelWithAngle), wallTiePlate: pbool(r.wallTiePlate, d.wallTiePlate), extWallUpturn50: pbool(r.extWallUpturn50, d.extWallUpturn50),
+  };
+}
 
 const range = (a: number, b: number, s: number) => { const o: number[] = []; for (let v = b; v >= a; v -= s) o.push(v); return o; };
 
@@ -147,6 +242,7 @@ export function normaliseLayoutRules(raw: unknown): LayoutRules {
     stairStyle: r.stairStyle === "china" || r.stairStyle === "india" ? r.stairStyle : d.stairStyle,
     lossPct: num(r.lossPct, d.lossPct, 0, 50),
     sparePct: (() => { const o: Record<string, number> = {}; const sp = r.sparePct && typeof r.sparePct === "object" ? (r.sparePct as Record<string, unknown>) : {}; for (const [k, v] of Object.entries(sp)) { const n = Number(v); if (/^[a-z-]{2,12}$/.test(k) && Number.isFinite(n) && n > 0) o[k] = Math.min(25, n); } return o; })(),
+    pk: normalisePk(r.pk),
   };
 }
 
@@ -162,6 +258,7 @@ export function describeLayoutRules(r: LayoutRules): string[] {
   if (r.lossPct) out.push(`${r.lossPct} % added on small parts (pins, wedges, ties).`);
   const sp = Object.entries(r.sparePct ?? {}).filter(([, v]) => v > 0);
   if (sp.length) out.push(`Site spares (learned from site reports): ${sp.map(([k, v]) => `${k} ${v} %`).join(", ")}.`);
+  if (r.pk?.enabled) out.push(`Detailed rules on: wall widths ${r.pk.wallWidthPriority.join(" → ")}, back-ribs at ${r.pk.ribHeights.join(" / ")} mm, tubes at ${r.pk.tubeHeights.join(" / ")} mm, beam sides vertical above ${r.pk.beamTallVertMm} mm.`);
   return out;
 }
 

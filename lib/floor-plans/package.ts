@@ -99,12 +99,14 @@ export function walersCsv(faces: FaceLayout[], rules: LayoutRules | null, title:
   for (const f of faces) {
     if (!f.geo || f.length < 300) continue;
     if (!flat && /B$/.test(f.code)) continue;                    // tie-rod system: walers on one face of the wall
-    const rows = Math.max(2, Math.floor(f.height / tieV));
+    const pk = rules?.pk?.enabled ? rules.pk : null;               // detailed rules: back-rib heights decide the rows, max back-rib length the stock length
+    const rows = pk ? Math.max(1, pk.ribHeights.filter((h) => h < f.height).length) : Math.max(2, Math.floor(f.height / tieV));
+    const stock = pk ? pk.ribMax : 6000;
     let left = f.length;
-    while (left > 0) {                                            // stock length 6 m
-      const L = Math.ceil(Math.min(left, 6000) / 100) * 100;
+    while (left > 0) {                                            // stock length (6 m, or the back-rib maximum)
+      const L = Math.ceil(Math.min(left, stock) / 100) * 100;
       const e = lens.get(L) ?? { n: 0, faces: [] }; e.n += rows; if (e.faces.length < 12) e.faces.push(f.code); lens.set(L, e);
-      pieces += rows; metres += (rows * L) / 1000; left -= 6000;
+      pieces += rows; metres += (rows * L) / 1000; left -= stock;
     }
   }
   const rows = [csvRow([`WALERS / BACK STIFFENERS LIST — ${title}`]), csvRow([`${flat ? "Flat-tie system: walers on both wall faces" : "Tie-rod system: alignment walers on one face"} · one waler per tie row (tie rows @ ${tieV} mm) · cut to the wall face, max 6 m`]), ""];

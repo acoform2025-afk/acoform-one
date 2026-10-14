@@ -2,7 +2,8 @@
 
 import { useActionState, useState } from "react";
 import { saveLayoutRules } from "./layout-rules-actions";
-import { PRESETS, describeLayoutRules, type FormworkSystem, type LayoutRules } from "@/lib/design-engine/layout-rules";
+import { PRESETS, DEFAULT_PK, describeLayoutRules, type FormworkSystem, type LayoutRules } from "@/lib/design-engine/layout-rules";
+import { PkRulesPanel } from "./pk-rules-panel";
 
 const input = "rounded-md border border-graphite-700 bg-graphite-900 px-3 py-2 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none disabled:opacity-60";
 const lbl = "text-xs font-medium uppercase tracking-wide text-graphite-400";
@@ -16,7 +17,7 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
   const [decks, setDecks] = useState(listTxt(r.deckWidths));
   const [lens, setLens] = useState(listTxt(r.deckLengths));
   const set = <K extends keyof LayoutRules>(k: K, val: LayoutRules[K]) => setV((o) => ({ ...o, [k]: val }));
-  const pick = (s: FormworkSystem) => { const p = PRESETS[s].rules; setV(p); setWalls(listTxt(p.wallWidths)); setDecks(listTxt(p.deckWidths)); setLens(listTxt(p.deckLengths)); };
+  const pick = (s: FormworkSystem) => { const p = { ...PRESETS[s].rules, pk: v.pk ?? DEFAULT_PK }; setV(p); setWalls(listTxt(p.wallWidths)); setDecks(listTxt(p.deckWidths)); setLens(listTxt(p.deckLengths)); };
   const out: LayoutRules = { ...v, wallWidths: parseList(walls), deckWidths: parseList(decks), deckLengths: parseList(lens) };
   const n = (k: keyof LayoutRules, label: string, hint: string, step = 1) => (
     <label className="flex flex-col gap-1.5"><span className={lbl}>{label} <span className="normal-case text-graphite-600">{hint}</span></span>
@@ -104,6 +105,8 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
       <div className="mt-2">{chk("coresWithColumns", "Lift cores and L-shaped shear walls (drawn on the column layer): outer faces cast first with the column set", "Shaft faces inside a lift core always stay with the walls (Cosmos / Royce One practice).")}</div>
       <div className="mt-2">{chk("wallEcAngles", "External corner angles on outside wall corners", "Off: outside corners are formed by external wall panels (WE), as Cosmos does.")}</div>
       <div className="mt-2">{chk("bothLegs", "Count corner and soffit-corner area on both legs", "Indian BOM practice (e.g. 100 × 125 soffit corner = 0.225 m² per metre). Off = one leg only.")}</div>
+
+      <PkRulesPanel pk={v.pk ?? DEFAULT_PK} onChange={(p) => set("pk", p)} canEdit={canEdit} />
 
       <ul className="mt-4 space-y-0.5 rounded-md border border-graphite-800 bg-graphite-950 px-3 py-2 text-[11px] text-graphite-400">
         {describeLayoutRules(out).map((l) => <li key={l}>• {l}</li>)}
