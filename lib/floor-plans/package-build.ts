@@ -1,5 +1,6 @@
 import { buildZones, type runPanels } from "./run-panels";
 import { wallPanelNumbers } from "./zones";
+import { parseFloorsLabel } from "./floors-label";
 import { packingByZone } from "./packing";
 import { accessoriesCsv, csvRow, csvText, faceZones, mainListCsv, walersCsv, zoneAreas } from "./package";
 import { fabSpec, specialsFromBom } from "@/lib/design-engine/fabrication";
@@ -23,11 +24,33 @@ export function buildPackage(r: Ran, areasK: number): PackageFile[] | null {
   const files: PackageFile[] = [];
   files.push({ key: "main", name: "03_Main panel list by area", title: "Main panel list by area", csv: mainListCsv({ bom: r.result.bom, zones, areaOf, wallPanels, zoneOfFace, title, rules }) });
 
-  // numbering list (installation drawing)
-  const num = [csvRow(["Panel No.", "Area", "Zone / face", "Type", "Code", "Width mm", "Length / height mm", "Special"])];
-  for (const z of zones) for (const p of z.panels) num.push(csvRow([p.no, areaOf.get(z.code) ?? "", z.code, "Deck", p.code, p.w, p.L, p.custom ? "yes" : ""]));
-  for (const w of wallPanels) { const z = zoneOfFace(w.face); num.push(csvRow([w.no, (z && areaOf.get(z)) || "", w.face, "Wall", w.code, w.w, w.h, /^WF|^WT/.test(w.code) ? "yes" : ""])); }
+  // numbering list (installation drawing): every panel with its number, area, floors it is used on and status
+  const floorsTxt = parseFloorsLabel(String(r.t.params.floorsLabel ?? ""))?.text ?? (Number(r.t.params.floors) > 1 ? `${r.t.params.floors} floors` : "");
+  type NumRow = { no: string; area: string; zone: string; type: string; code: string; w: number; l: number; special: boolean };
+  const rows: NumRow[] = [];
+  for (const z of zones) for (const p of z.panels) rows.push({ no: p.no, area: areaOf.get(z.code) ?? "", zone: z.code, type: "Deck", code: p.code, w: p.w, l: p.L, special: p.custom });
+  for (const w of wallPanels) { const z = zoneOfFace(w.face); rows.push({ no: w.no, area: (z && areaOf.get(z)) || "", zone: w.face, type: "Wall", code: w.code, w: w.w, l: w.h, special: /^WF|^WT|^SE/.test(w.code) }); }
+  const seenNo = new Map<string, number>();
+  for (const x of rows) seenNo.set(x.no, (seenNo.get(x.no) ?? 0) + 1);
+  const status = (x: NumRow) => !x.no ? "NOT NUMBERED" : (seenNo.get(x.no) ?? 0) > 1 ? "DUPLICATE NUMBER" : !x.area ? "NOT LINKED TO AN AREA" : x.special ? "SPECIAL (unclassified)" : "OK";
+  const num = [csvRow(["Panel No.", "Area", "Zone / face", "Type", "Code", "Width mm", "Length / height mm", "Special", "Floors", "Status"])];
+  for (const x of rows) num.push(csvRow([x.no, x.area, x.zone, x.type, x.code, x.w, x.l, x.special ? "yes" : "", floorsTxt, status(x)]));
   files.push({ key: "numbering", name: "02_Panel numbering list", title: "Panel numbering list", csv: csvText(num) });
+
+  // numbering report: the three checks before drawings are issued (everything numbered, linked to an area, classified)
+  const bad = (st: string) => rows.filter((x) => status(x) === st);
+  const rep = [csvRow([`NUMBERING REPORT — ${title}`]), csvRow([floorsTxt ? `Floors: ${floorsTxt}` : ""]), "", csvRow(["Check", "Panels", "Result", "Panel numbers (first 30)"])];
+  const line = (name: string, list: NumRow[]) => rep.push(csvRow([name, list.length, list.length ? "ATTENTION" : "OK", list.slice(0, 30).map((x) => x.no || `${x.type} ${x.code}`).join(" ")]));
+  line("1  Not numbered", bad("NOT NUMBERED"));
+  line("2  Duplicate numbers", bad("DUPLICATE NUMBER"));
+  line("3  Not linked to an area", bad("NOT LINKED TO AN AREA"));
+  line("4  Special / unclassified panels (made to order)", bad("SPECIAL (unclassified)"));
+  const per = new Map<string, { deck: number; wall: number }>();
+  for (const x of rows) { const e = per.get(x.area || "(none)") ?? { deck: 0, wall: 0 }; if (x.type === "Deck") e.deck++; else e.wall++; per.set(x.area || "(none)", e); }
+  rep.push("", csvRow(["Area", "Deck panels", "Wall panels", "Total"]));
+  for (const [a, e] of [...per.entries()].sort()) rep.push(csvRow([a, e.deck, e.wall, e.deck + e.wall]));
+  rep.push(csvRow(["TOTAL", rows.filter((x) => x.type === "Deck").length, rows.filter((x) => x.type === "Wall").length, rows.length]));
+  files.push({ key: "numbering-report", name: "02b_Numbering report", title: "Numbering report", csv: csvText(rep) });
 
   // special panels production order
   const specs = specialsFromBom(r.result.bom);
