@@ -14,7 +14,7 @@ type BoolKey = { [K in keyof PkRules]: PkRules[K] extends boolean ? K : never }[
 
 /** Detailed beam + wall rules (as in the "one-key panel layout" window of PKPM-LMB): priority lists, back-ribs, K-plates, props. */
 export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange: (p: PkRules) => void; canEdit: boolean }) {
-  const [tab, setTab] = useState<"beam" | "wall">("beam");
+  const [tab, setTab] = useState<"beam" | "slab" | "wall">("beam");
   const [msg, setMsg] = useState("");
   const set = <K extends keyof PkRules>(k: K, val: PkRules[K]) => onChange({ ...pk, [k]: val });
   const n = (k: NumKey, label: string, hint = "") => (
@@ -58,8 +58,8 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
       <div className="mt-3">{c("enabled", "Use these detailed rules in layouts and lists (off = simple rules above only)")}</div>
 
       <div className="mt-4 flex gap-1 border-b border-graphite-800">
-        {(["beam", "wall"] as const).map((t) => (
-          <button key={t} type="button" onClick={() => setTab(t)} className={`px-4 py-2 text-sm ${tab === t ? "border-b-2 border-signal-amber text-graphite-100" : "text-graphite-400"}`}>{t === "beam" ? "Beam" : "Wall"}</button>
+        {(["beam", "slab", "wall"] as const).map((t) => (
+          <button key={t} type="button" onClick={() => setTab(t)} className={`px-4 py-2 text-sm ${tab === t ? "border-b-2 border-signal-amber text-graphite-100" : "text-graphite-400"}`}>{t === "beam" ? "Beam" : t === "slab" ? "Slab" : "Wall"}</button>
         ))}
       </div>
 
@@ -117,6 +117,51 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
               {c("beamTiePlate", "Beam tie-plate panels")}
               {c("beamUseSupport", "Use beam-bottom support")}
               {c("beam200250Support", "Beam-bottom support when beam is 200 / 250 wide")}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {tab === "slab" && (
+        <div className="mt-4 space-y-5">
+          <section>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-orange">Slab corner (soffit corner)</h4>
+            <div className="mt-2 grid gap-4 md:grid-cols-3">
+              {n("slabCornerWidth", "Corner width", "(mm)")}
+              {l("slabCornerLens", "Corner length priority")}
+              {n("slabInnerCornerLen", "Inside turning corner length", "(mm)")}
+              {n("slabCornerMin", "Corner min length", "(mm)")}
+            </div>
+          </section>
+          <section>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-orange">Deck panels</h4>
+            <div className="mt-2 grid gap-4 md:grid-cols-3">
+              {l("slabPanelWidths", "Panel width priority")}
+              {l("slabPanelLens", "Panel length priority")}
+              {n("slabPanelMinW", "Panel min width", "(mm)")}
+              {n("slabPanelMinL", "Panel min length", "(mm)")}
+              {n("slabFirstLen", "First panel length", "(mm)")}
+              {n("slabRemainEvenAt", "Remainder of", "(mm or more: split evenly)")}
+              {n("slabRemainCrossAt", "Remainder of", "(mm or more: lay panels across)")}
+            </div>
+            <div className="mt-3">{c("slabFirstEqLast", "First panel as long as the last one")}</div>
+          </section>
+          <section>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-orange">Joists (keels)</h4>
+            <div className="mt-2 grid gap-4 md:grid-cols-3">
+              {l("joistMidLens", "Middle joist length priority")}
+              {n("joistEdgeMin", "Edge joist min length", "(mm)")}
+              {n("joistEdgeMax", "Edge joist max length", "(mm)")}
+              {l("joistEdgeLens", "Edge joist length priority", "(used when ticked below)")}
+              {n("joistMaxDiff", "Max difference between the two edge joists", "(mm)")}
+              <label className="flex flex-col gap-1.5"><span className={lbl}>Slab panel direction</span>
+                <select value={pk.slabDirection} disabled={!canEdit} onChange={(e) => set("slabDirection", e.target.value as PkRules["slabDirection"])} className={input}>
+                  <option value="auto">Automatic</option><option value="across">Across (横向)</option><option value="along">Along (纵向)</option></select></label>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {c("joistEdgeLensOn", "Use the edge joist length priority")}
+              {c("joistUneven", "Joists not evenly spaced (default) — off: evenly spaced")}
+              {c("autoSlabProps", "Auto-generate slab-bottom props")}
             </div>
           </section>
         </div>

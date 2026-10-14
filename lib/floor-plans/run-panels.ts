@@ -86,9 +86,10 @@ type Computed = { t: Takeoff; opt: ReturnType<typeof readOptions>; totals: Retur
 /** Numbered deck zones (M1, M2 …) with every deck panel placed — for the installation drawing and numbering list. */
 export function buildZones(inp: ReturnType<typeof panelInputs>, catalog: CatPanel[], rules?: LayoutRules): Zone[] {
   const sys = rules && rules.system !== "acoform" ? rules : null;
-  const lens = sys?.deckLengths.length ? sys.deckLengths : [1200];
+  const pk = rules?.pk?.enabled ? rules.pk : null;               // detailed slab rules (priority lists), when switched on
+  const lens = pk ? pk.slabPanelLens : sys?.deckLengths.length ? sys.deckLengths : [1200];
   const deck = catalog.filter((c) => c.panel_category === "deck_panel");
-  const deckW = sys?.deckWidths.length ? sys.deckWidths : deck.filter((c) => Number(c.height_mm) === 1200).map((c) => Number(c.width_mm));
+  const deckW = pk ? [...new Set(pk.slabPanelWidths)].sort((a, b) => b - a) : sys?.deckWidths.length ? sys.deckWidths : deck.filter((c) => Number(c.height_mm) === 1200).map((c) => Number(c.width_mm));
   const codeFor = (w: number, L: number) => deck.find((c) => Number(c.width_mm) === w && Number(c.height_mm) === L)?.panel_code ?? `DP-${w}-${L}`;
-  return deckZones(inp.decks, inp.zoneWalls, inp.zoneGaps, 0.25, inp.zoneBeams).map((z, i) => layoutZone(`M${i + 1}`, z, deckW.length ? deckW : [600, 500, 450, 400, 300], lens, codeFor, sys?.midBeam ?? 100, 25, sys?.soffitCornerW ?? 0));
+  return deckZones(inp.decks, inp.zoneWalls, inp.zoneGaps, 0.25, inp.zoneBeams).map((z, i) => layoutZone(`M${i + 1}`, z, deckW.length ? deckW : [600, 500, 450, 400, 300], lens, codeFor, sys?.midBeam ?? 100, 25, pk ? pk.slabCornerWidth : (sys?.soffitCornerW ?? 0)));
 }

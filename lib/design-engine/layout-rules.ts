@@ -86,6 +86,12 @@ export type PkRules = {
   ribMax: number; tubeMax: number; ribGap: number;
   ribEndExt: number; angleExt: number; diagExt: number; uClip: number;
   bottomAngle: number; sunkAngle: number; insideFromFloor: number; sunkC: number; cornerFloorGap: number;
+  // slab tab (楼面)
+  slabCornerWidth: number; slabCornerLens: number[]; slabInnerCornerLen: number; slabCornerMin: number;
+  slabPanelWidths: number[]; slabPanelLens: number[]; slabPanelMinW: number; slabPanelMinL: number; slabFirstLen: number; slabFirstEqLast: boolean;
+  slabRemainEvenAt: number; slabRemainCrossAt: number;
+  joistMidLens: number[]; joistEdgeMin: number; joistEdgeMax: number; joistEdgeLensOn: boolean; joistEdgeLens: number[]; joistUneven: boolean; joistMaxDiff: number;
+  autoSlabProps: boolean; slabDirection: "auto" | "across" | "along";
   wallAutoTie: boolean; wallAutoRib: boolean; wallAutoBrace: boolean; wallPanelWithAngle: boolean; wallTiePlate: boolean; extWallUpturn50: boolean;
 };
 
@@ -101,6 +107,11 @@ export const DEFAULT_PK: PkRules = {
   ribHeights: [250, 800, 1600, 2500], tubeHeights: [275, 1075, 1975], tubeStagger: true,
   ribWidth: 60, rib45Width: 60, tubeWidth: 50, ribMax: 3000, tubeMax: 3500, ribGap: 20, ribEndExt: 180, angleExt: 22, diagExt: 30, uClip: 400,
   bottomAngle: 40, sunkAngle: 65, insideFromFloor: 50, sunkC: 50, cornerFloorGap: 5,
+  slabCornerWidth: 100, slabCornerLens: [1600, 1400, 700], slabInnerCornerLen: 400, slabCornerMin: 300,
+  slabPanelWidths: [400, 300, 300], slabPanelLens: [1200, 1100, 1000], slabPanelMinW: 100, slabPanelMinL: 500, slabFirstLen: 1000, slabFirstEqLast: false,
+  slabRemainEvenAt: 500, slabRemainCrossAt: 400,
+  joistMidLens: [1000, 600], joistEdgeMin: 350, joistEdgeMax: 750, joistEdgeLensOn: false, joistEdgeLens: [600, 400], joistUneven: true, joistMaxDiff: 100,
+  autoSlabProps: false, slabDirection: "auto",
   wallAutoTie: false, wallAutoRib: true, wallAutoBrace: false, wallPanelWithAngle: true, wallTiePlate: false, extWallUpturn50: true,
 };
 
@@ -145,6 +156,16 @@ export function normalisePk(raw: unknown): PkRules {
     ribEndExt: pnum(r.ribEndExt, d.ribEndExt, 0, 500), angleExt: pnum(r.angleExt, d.angleExt, 0, 200), diagExt: pnum(r.diagExt, d.diagExt, 0, 200), uClip: pnum(r.uClip, d.uClip, 100, 1000),
     bottomAngle: pnum(r.bottomAngle, d.bottomAngle, 0, 200), sunkAngle: pnum(r.sunkAngle, d.sunkAngle, 0, 200), insideFromFloor: pnum(r.insideFromFloor, d.insideFromFloor, 0, 200),
     sunkC: pnum(r.sunkC, d.sunkC, 0, 200), cornerFloorGap: pnum(r.cornerFloorGap, d.cornerFloorGap, 0, 50),
+    slabCornerWidth: pnum(r.slabCornerWidth, d.slabCornerWidth, 0, 300), slabCornerLens: plist(r.slabCornerLens, d.slabCornerLens, 200, 3000),
+    slabInnerCornerLen: pnum(r.slabInnerCornerLen, d.slabInnerCornerLen, 100, 1500), slabCornerMin: pnum(r.slabCornerMin, d.slabCornerMin, 50, 1000),
+    slabPanelWidths: plist(r.slabPanelWidths, d.slabPanelWidths, 50, 1200), slabPanelLens: plist(r.slabPanelLens, d.slabPanelLens, 300, 2400),
+    slabPanelMinW: pnum(r.slabPanelMinW, d.slabPanelMinW, 0, 400), slabPanelMinL: pnum(r.slabPanelMinL, d.slabPanelMinL, 0, 1500),
+    slabFirstLen: pnum(r.slabFirstLen, d.slabFirstLen, 300, 2400), slabFirstEqLast: pbool(r.slabFirstEqLast, d.slabFirstEqLast),
+    slabRemainEvenAt: pnum(r.slabRemainEvenAt, d.slabRemainEvenAt, 0, 1500), slabRemainCrossAt: pnum(r.slabRemainCrossAt, d.slabRemainCrossAt, 0, 1500),
+    joistMidLens: plist(r.joistMidLens, d.joistMidLens, 200, 3000), joistEdgeMin: pnum(r.joistEdgeMin, d.joistEdgeMin, 100, 2000), joistEdgeMax: pnum(r.joistEdgeMax, d.joistEdgeMax, 100, 3000),
+    joistEdgeLensOn: pbool(r.joistEdgeLensOn, d.joistEdgeLensOn), joistEdgeLens: plist(r.joistEdgeLens, d.joistEdgeLens, 200, 3000),
+    joistUneven: pbool(r.joistUneven, d.joistUneven), joistMaxDiff: pnum(r.joistMaxDiff, d.joistMaxDiff, 0, 1000),
+    autoSlabProps: pbool(r.autoSlabProps, d.autoSlabProps), slabDirection: r.slabDirection === "across" || r.slabDirection === "along" ? r.slabDirection : "auto",
     wallAutoTie: pbool(r.wallAutoTie, d.wallAutoTie), wallAutoRib: pbool(r.wallAutoRib, d.wallAutoRib), wallAutoBrace: pbool(r.wallAutoBrace, d.wallAutoBrace),
     wallPanelWithAngle: pbool(r.wallPanelWithAngle, d.wallPanelWithAngle), wallTiePlate: pbool(r.wallTiePlate, d.wallTiePlate), extWallUpturn50: pbool(r.extWallUpturn50, d.extWallUpturn50),
   };
@@ -262,7 +283,7 @@ export function describeLayoutRules(r: LayoutRules): string[] {
   if (r.lossPct) out.push(`${r.lossPct} % added on small parts (pins, wedges, ties).`);
   const sp = Object.entries(r.sparePct ?? {}).filter(([, v]) => v > 0);
   if (sp.length) out.push(`Site spares (learned from site reports): ${sp.map(([k, v]) => `${k} ${v} %`).join(", ")}.`);
-  if (r.pk?.enabled) out.push(`Detailed rules on: wall widths ${r.pk.wallWidthPriority.join(" → ")}, back-ribs at ${r.pk.ribHeights.join(" / ")} mm, tubes at ${r.pk.tubeHeights.join(" / ")} mm, beam sides vertical above ${r.pk.beamTallVertMm} mm.`);
+  if (r.pk?.enabled) out.push(`Detailed rules on: wall widths ${r.pk.wallWidthPriority.join(" → ")}, back-ribs at ${r.pk.ribHeights.join(" / ")} mm, tubes at ${r.pk.tubeHeights.join(" / ")} mm, beam sides vertical above ${r.pk.beamTallVertMm} mm, deck panels ${r.pk.slabPanelWidths.join(" → ")} wide × ${r.pk.slabPanelLens.join(" → ")} long.`);
   return out;
 }
 
