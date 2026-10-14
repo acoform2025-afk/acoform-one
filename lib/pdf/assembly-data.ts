@@ -67,6 +67,7 @@ export function assemblyModel(scene: Scene3, o: { codes?: Partial<CodeFor>; stdH
   const rect = (p: Panel3): [Pt, Pt] => { const xs = p.p.map((q) => q[0]), zs = p.p.map((q) => q[2]); return [[Math.min(...xs), Math.min(...zs)], [Math.max(...xs), Math.max(...zs)]]; };
   for (const p of scene.panels) {
     const fam = FAM[p.k]; if (!fam) continue;
+    if (p.c.includes("· fillet web") || p.c.includes("· tube")) continue;   // profile detail of a corner, not a separate piece
     if (p.k === "tread" || p.k === "trec") continue;                       // step covers: on the stair sheet's note, not drawn in plan
     const code = codeOf(p, cf, o.stdH);
     if (horiz(p)) {
