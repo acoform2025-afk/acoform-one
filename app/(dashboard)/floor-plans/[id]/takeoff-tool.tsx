@@ -20,7 +20,7 @@ import {
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
 import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, floorsFromTitle, isLayoutTitle, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
-import { createAllLevelPlans, createLevelPlan, saveTakeoff } from "../actions";
+import { createAllLevelPlans, createLevelPlan, saveTakeoff, setPlanLock } from "../actions";
 import { parseFloorsLabel } from "@/lib/floor-plans/floors-label";
 import { designStair, type StairType } from "@/lib/floor-plans/stair-calc";
 import { takeoffChecks } from "@/lib/floor-plans/takeoff-checks";
@@ -85,7 +85,7 @@ function normalise(t: Partial<Takeoff> | null): Takeoff {
   };
 }
 
-export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = DEFAULT_RULES, siblings = [], dict = EMPTY_DICT, project = null, projectPending = false }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[]; dict?: Dictionary; project?: ProjectFacts | null; projectPending?: boolean }) {
+export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, designs, rules = DEFAULT_RULES, siblings = [], dict = EMPTY_DICT, project = null, projectPending = false }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[]; dict?: Dictionary; project?: ProjectFacts | null; projectPending?: boolean }) {
   const router = useRouter();
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -97,6 +97,7 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
   const snapRef = useRef<Pt[]>([]);
 
   const [t, setT] = useState<Takeoff>(() => normalise(plan.takeoff));
+  const canEdit = canEditProp && !t.locked;   // a locked model cannot be changed
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [pdfPages, setPdfPages] = useState(1);
@@ -899,6 +900,13 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
 
       {/* side panel */}
       <aside className="w-full shrink-0 space-y-4 xl:w-[360px]">
+        {canEditProp && !dirty ? (
+          <div className="flex items-center gap-2 rounded-lg border border-graphite-800 bg-graphite-900 p-3 text-xs">
+            <span className={t.locked ? "font-medium text-signal-amber" : "text-graphite-400"}>{t.locked ? "Model locked — measurements cannot be changed." : "Lock the model when the measurements are final."}</span>
+            <button type="button" onClick={async () => { const r = await setPlanLock(plan.id, !t.locked); if (r.error) setMsg({ error: r.error }); else { setT((p) => { const n = { ...p }; if (t.locked) delete n.locked; else n.locked = { at: new Date().toISOString() }; return n; }); setMsg({ ok: t.locked ? "Unlocked." : "Locked." }); } }}
+              className="ml-auto rounded-md border border-graphite-600 px-3 py-1 text-graphite-100 hover:border-brand-orange">{t.locked ? "Unlock" : "Lock model"}</button>
+          </div>
+        ) : null}
         {canEdit ? (
           <div className="flex items-center gap-2 rounded-lg border border-graphite-800 bg-graphite-900 p-3">
             <button type="button" onClick={save} disabled={saving || !size} className="inline-flex items-center gap-2 rounded-md bg-brand-orange px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">

@@ -143,6 +143,10 @@ export async function saveTakeoff(id: string, takeoff: unknown, totals: unknown,
   if (previewPath !== null && previewPath !== `${profile.tenant_id}/${id}/preview.jpg`) return { error: "Invalid preview." };
 
   const supabase = await createClient();
+  // a locked model is not changed by a save (unlock it first)
+  { const { data: cur } = await supabase.from("floor_plans").select("takeoff").eq("id", id).maybeSingle();
+    const was = (cur?.takeoff as { locked?: unknown } | null)?.locked, now = (takeoff as { locked?: unknown }).locked;
+    if (was && now) return { error: "This plan is locked. Unlock it to change the measurements." }; }
   const patch: { takeoff: never; totals: never; preview_path?: string } = { takeoff: takeoff as never, totals: t.data as never };
   if (previewPath) patch.preview_path = previewPath;
   const { data, error } = await supabase.from("floor_plans").update(patch).eq("id", id).select("id, lead_id");
@@ -505,4 +509,20 @@ export async function readProjectDrawings(id: string): Promise<Result<{ read: nu
     if (n) revalidatePath(`/floor-plans/${id}`);
     return { ok: true, data: { read: n } };
   } catch (e) { return { error: e instanceof Error ? e.message : "Could not read the project drawings." }; }
+}
+
+
+/** Lock or unlock the measured model of a plan: a locked plan keeps its measurements (and so its layout and quotation) as they are. */
+export async function setPlanLock(id: string, lock: boolean): Promise<Result> {
+  const denied = await guard(); if (denied) return { error: denied };
+  if (!uuid.safeParse(id).success) return { error: "Invalid floor plan." };
+  const supabase = await createClient();
+  const { data: plan } = await supabase.from("floor_plans").select("takeoff").eq("id", id).maybeSingle();
+  if (!plan?.takeoff || typeof plan.takeoff !== "object") return { error: "Measure and save this plan first." };
+  const t = { ...(plan.takeoff as Record<string, unknown>) };
+  if (lock) t.locked = { at: new Date().toISOString() }; else delete t.locked;
+  const { error } = await supabase.from("floor_plans").update({ takeoff: t as never }).eq("id", id);
+  if (error) return { error: dbError(error.message) };
+  revalidatePath(`/floor-plans/${id}`, "layout");
+  return { ok: true };
 }
