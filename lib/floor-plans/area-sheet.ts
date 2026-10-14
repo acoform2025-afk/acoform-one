@@ -122,7 +122,8 @@ export function sheetGeoFromShapes(t: Takeoff): SheetGeo | null {
   const strip = (a: Pt, b: Pt, thkMm: number): Pt[] => {
     const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (!L) return [];
     const h = (thkMm / 1000 / mpp) / 2, nx = (-dy / L) * h, ny = (dx / L) * h;
-    return [[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]].map(fl);
+    const q: Pt[] = [[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]];
+    return q.map(fl);
   };
   const walls: Pt[][] = [], parapets: Pt[][] = [], slab: Pt[][] = [], ducts: Pt[][] = [], columns: Pt[][] = [], gaps: [Pt, Pt][] = [];
   const stairs: [number, number, number, number][] = [];
