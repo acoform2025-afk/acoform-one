@@ -130,18 +130,20 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
 
   const supabase = await createClient();
 
-  // one project = one quotation number: when this plan (or one of its blocks) already has a quotation, work on that one
-  // (draft / pending → edit it; approved / sent → next revision R1, R2 …) instead of numbering a new quotation
+  // one lead / project = one quotation number: when this lead (or one of its plans) already has a quick quotation, work on
+  // that one (draft / pending → edit it; approved / sent → next revision R1, R2 …) instead of numbering a new quotation
   const planIds: string[] = [];
   const planIn = String(formData.get("floorPlanId") ?? "");
   if (/^[0-9a-f-]{36}$/i.test(planIn)) planIds.push(planIn);
   try { for (const b of JSON.parse(String(formData.get("blocks") ?? "[]")) as { id?: string }[]) if (b?.id && /^[0-9a-f-]{36}$/i.test(b.id)) planIds.push(b.id); } catch { /* ignore */ }
+  const leadKey = parsed.data.leadId && /^[0-9a-f-]{36}$/i.test(parsed.data.leadId) ? parsed.data.leadId : null;
   let reuseId: string | null = null;
-  if (planIds.length) {
-    const { data: ex } = await supabase.from("quotations").select("id,status,quotation_code").in("floor_plan_id", planIds).neq("status", "superseded").order("created_at", { ascending: false }).limit(1);
+  if (planIds.length || leadKey) {
+    const conds = [...(leadKey ? [`lead_id.eq.${leadKey}`] : []), ...(planIds.length ? [`floor_plan_id.in.(${planIds.join(",")})`] : [])].join(",");
+    const { data: ex } = await supabase.from("quotations").select("id,status,quotation_code").or(conds).eq("quotation_type", "quick").neq("status", "superseded").order("created_at", { ascending: false }).limit(1);
     const head = ex?.[0];
     if (head) {
-      if (head.status === "accepted") return { success: false, error: `${head.quotation_code} for this project is already accepted and converted to a project, so it cannot be changed.` };
+      if (head.status === "accepted") return { success: false, error: `${head.quotation_code} for this lead is already accepted and converted to a project, so it cannot be changed.` };
       if (head.status === "draft" || head.status === "pending_approval") {
         const up = await supabase.rpc("update_quick_quote_area", { p_quotation_id: head.id, p_area_sqm: parsed.data.areaSqm });
         if (up.error) return { success: false, error: up.error.message.replace(/^.*ERROR:\s*/i, "") };
