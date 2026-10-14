@@ -55,7 +55,7 @@ export function LayoutRulesForm({ r, canEdit }: { r: LayoutRules; canEdit: boole
           <input value={walls} disabled={!canEdit} onChange={(e) => setWalls(e.target.value)} className={input} placeholder="600, 575, 550 …" /></label>
         {n("stdHeight", "Standard panel height", "(mm)")}
         {n("minFiller", "Smallest framed filler", "(mm)")}
-        {n("deckPlywoodMax", "Deck special: plywood up to", "(m², larger = factory-cut panel)", 0.05)}
+        {n("deckPlywoodMax", "Deck special: plywood filler only up to", "(m², default 0.05 — everything larger is a factory-cut panel)", 0.05)}
         {n("bottomStrip", "Bottom strip", "(mm, full-height panels)")}
         {n("internalCorner", "Internal corner leg", "(mm)")}
         {n("externalCorner", "External corner leg", "(mm)", 0.5)}

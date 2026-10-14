@@ -29,7 +29,7 @@ export function deckSpecialsCsv(zones: { code: string; specials?: Special[] }[],
       const holes = sp.rings.length - 1;
       const small = sp.area <= plywoodMaxM2;
       rows.push(csvRow([`${z.code}-DS-${String(++k).padStart(2, "0")}`, areaOf.get(z.code) ?? "", z.code, shapeOf(ring), r5((Math.max(...xs) - x0) * 1000), r5((Math.max(...ys) - y0) * 1000), sp.area.toFixed(2), small ? "Plywood on battens (cut on site)" : "Factory-cut deck panel (cut to this outline)", 1, outline,
-        [small ? "Rest the plywood on the mid beams / soffit corner" : "Every edge must sit on a mid beam, prop head or soffit corner", holes ? `${holes} hole(s) inside — see drawing` : ""].filter(Boolean).join(". ")]));
+        [small ? "Small filler: plywood on the mid beams / soffit corner" : "Every edge must sit on a mid beam, prop head or soffit corner", holes ? `${holes} hole(s) inside — see drawing` : ""].filter(Boolean).join(". ")]));
     }
   }
   return rows;
