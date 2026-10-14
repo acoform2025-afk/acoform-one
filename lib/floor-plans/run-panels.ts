@@ -47,7 +47,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
   const rules = await loadRules(supabase);
   // what the project's other drawings state (sections, level list, beam schedule) — used where this drawing says nothing
   const project = await loadProjectFacts(supabase, plan).catch(() => null);
-  const key = JSON.stringify([id, plan.updated_at, plan.file_path, project ? [project.sectionFrom, project.levelsFrom, Object.keys(project.beams).length] : null, q.h ?? "", q.kg ?? "", q.prop ?? "", layoutRules, rules, eng, (catalog ?? []).map((c) => `${c.panel_code}:${c.width_mm}:${c.height_mm}:${c.weight_kg}`).join("|")]);
+  const key = JSON.stringify([id, plan.updated_at, t.panelEdits ?? null, plan.file_path, project ? [project.sectionFrom, project.levelsFrom, Object.keys(project.beams).length] : null, q.h ?? "", q.kg ?? "", q.prop ?? "", layoutRules, rules, eng, (catalog ?? []).map((c) => `${c.panel_code}:${c.width_mm}:${c.height_mm}:${c.weight_kg}`).join("|")]);
   const hit = runCache.get(key);
   if (hit) return { ...(hit as Computed), plan, lead: Array.isArray(plan.leads) ? plan.leads[0] : plan.leads };
   const model = await loadModel(supabase, plan);
@@ -61,7 +61,7 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
     } catch { /* no levels */ }
   }
   const inp = panelInputs(t, model, rules, { projectBeams: project?.beams });
-  const o: PanelOptions = { ...opt, extCorners: inp.extCorners, upstands: inp.upstands, sunk: inp.sunk, rules: layoutRules, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns, stairSets: inp.stairSets, stairs: inp.stairs };
+  const o: PanelOptions = { ...opt, faceEdits: t.panelEdits, extCorners: inp.extCorners, upstands: inp.upstands, sunk: inp.sunk, rules: layoutRules, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns, stairSets: inp.stairSets, stairs: inp.stairs };
   const zones = buildZones(inp, (catalog ?? []) as unknown as CatPanel[], layoutRules);
   o.zoneDeck = zones.length ? { panels: zones.flatMap((z) => z.panels.map((p) => ({ code: p.code, w: p.w, L: p.L, custom: p.custom }))), specialArea: zones.reduce((a, z) => a + z.specialArea, 0), area: zones.reduce((a, z) => a + z.area, 0), zones: zones.length } : undefined;
   const result = layoutFloor(inp.faces, inp.decks, inp.beams, inp.corners, (catalog ?? []).map((c) => ({ ...c, width_mm: Number(c.width_mm), height_mm: Number(c.height_mm), weight_kg: Number(c.weight_kg), area_sqm: Number(c.area_sqm) })) as CatPanel[], o);

@@ -90,6 +90,7 @@ export type Takeoff = {
   system?: "tierod" | "flattie" | "acoform";   // formwork system for this plan only (unset = company setting)
   building?: Building;                  // every level of the building (read from the drawing) + open questions — on the typical plan
   parentPlan?: string;                  // this plan is one level's own plan, made from that typical plan
+  panelEdits?: Record<string, number[]>;   // wall faces laid out by hand: face code → panel widths (replace the automatic layout)
   ruleOverrides?: { columnSetPct?: number };   // layout-rule values for this plan only
   dxf?: { units: DxfUnits; layerRoles: Record<string, LayerRole>; wallsDrawn: "faces" | "centre"; region?: [number, number, number, number] | null;
     excludeM?: [number, number, number, number][];   // boxes (plan metres) the user marked "not part of this floor"

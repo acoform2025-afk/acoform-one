@@ -30,7 +30,7 @@ export type BeamLayout = { code: string; length: number; b: number; d: number; s
 export type StairRow = { k: "D" | "CPP"; w: number };          // a row of the stair soffit along the slope (mm)
 export type StairPart = { code: string; desc: string; size: string; qty: number };   // per staircase (all its flights)
 export type StairLayout = StairGeo & { slope: number; angle: number; across: Fit; along: number[]; cheekH: number; landing: { l: number; w: number; across: Fit; along: number[] } | null; props: number; closed?: boolean; style?: "india" | "china"; rows?: StairRow[]; parts?: StairPart[] };
-export type PanelOptions = { extCorners?: number; upstands?: { h: number; length: number; label: string }[]; sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
+export type PanelOptions = { faceEdits?: Record<string, number[]>; extCorners?: number; upstands?: { h: number; length: number; label: string }[]; sunk?: { depth: number; perimeter: number; area: number }[]; rules?: LayoutRules; zoneDeck?: { panels: { code: string; w: number; L: number; custom: boolean }[]; specialArea: number; area: number; zones: number }; stairs?: StairGeo[]; stairSets?: { code: string; label: string; area: number }[]; tieH?: number; tieV?: number; columns?: ColumnRun[]; stdHeight: number; kgPerM2: number; propSpacing: number; deckLen: number; soffitArea: number; slabMm: number; endMax?: number; tolerance?: number; openings?: OpeningCut[] };
 
 export type BomRow = { code: string; description: string; group: "wall" | "wall-top" | "column" | "end" | "corner" | "deck" | "beam" | "upstand" | "stair" | "drop" | "filler" | "accessory"; w: number; h: number; qty: number; area: number; weight: number; custom: boolean; unit?: string; sub?: string; basis?: string };
 export type FaceLayout = { code: string; length: number; height: number; panels: number[]; filler: number; top: number; geo?: FaceGeo; geo3?: FaceGeo & { z0: number }; set?: "column"; end?: boolean };   // end: a wall end closed by a stop-end panel (filler = its width)
@@ -140,7 +140,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       layouts.push({ code: f.code, length: Math.round(f.length), height: Math.round(f.height), panels: [], filler: w, top: 0, geo: f.geo, geo3: f.geo3, set: f.set, end: true });
       continue;
     }
-    const fit = wallW.length ? fillRun(f.length, wallW) : { panels: [], left: Math.round(f.length) };
+    const hand = o.faceEdits?.[f.code];                 // a face laid out by hand replaces the automatic fit
+    const fit = hand?.length ? { panels: hand, left: Math.max(0, Math.round(f.length - hand.reduce((a, w) => a + w, 0))) } : wallW.length ? fillRun(f.length, wallW) : { panels: [], left: Math.round(f.length) };
     const panels = fit.panels;
     // lift cores / shear walls drawn on column layers, cast first with the columns: column set to the first pour,
     // the rest formed with the slab
