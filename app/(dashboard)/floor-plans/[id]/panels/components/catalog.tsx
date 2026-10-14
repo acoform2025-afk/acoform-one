@@ -5,7 +5,7 @@ import { PARTS, PART_GROUPS, typicalAssembly } from "@/lib/design-engine/parts3d
 import { PartCanvas } from "./part-canvas";
 
 const ASM_VIEW: [number, number, number] = [1.3, 0.75, 1.7];
-const LEGEND: [string, string][] = [["#7aa7e0", "Wall panels"], ["#f2c76b", "Wall-top panels"], ["#a78bfa", "Soffit corner"], ["#9fd3c7", "Deck panels"], ["#94a3b8", "Mid beam"], ["#e0782f", "Props"], ["#b4bac2", "Walers, ties, pins"]];
+const LEGEND: [string, string][] = [["#7aa7e0", "Wall panels"], ["#f2c76b", "Wall-top panels"], ["#a78bfa", "Soffit length (SL)"], ["#9fd3c7", "Deck panels"], ["#94a3b8", "Mid beam"], ["#e0782f", "Props"], ["#b4bac2", "Walers, ties, pins"]];
 
 /** Components & accessories: the typical assembly and every piece as a 3D model, with how many this project needs. */
 export function ComponentsCatalog({ qty, tieSystem }: { qty: Record<string, number>; tieSystem: string }) {

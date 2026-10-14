@@ -181,7 +181,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const isStrip = strip > 0 && top > 0 && top <= strip + 10;   // full-height system: the rest is the bottom strip
     for (const w of panels) {
       const p = wallPanel(w);
-      if (rk) { add(`${rk}-${w}`, { code: `${rk}-${w}`, description: `Wall panel ${o.stdHeight + top} (${o.stdHeight} W + RK ${top}, ${rk})`, group: "wall", w, h: o.stdHeight + top, custom: false }, 1, Number(wallCat.find((x) => x.panel_code === `${rk}-${w}`)?.weight_kg) || fabSpec(`${rk}-${w}`, "", w, o.stdHeight + top, 1).kgEach); continue; }
+      if (rk) { add(`${rk}-${w}`, { code: `${rk}-${w}`, description: `Wall panel ${o.stdHeight + top} (${o.stdHeight} W + rocker RK ${top}, ${rk})`, group: "wall", w, h: o.stdHeight + top, custom: false }, 1, Number(wallCat.find((x) => x.panel_code === `${rk}-${w}`)?.weight_kg) || fabSpec(`${rk}-${w}`, "", w, o.stdHeight + top, 1).kgEach); continue; }
       add(p.panel_code, { code: p.panel_code, description: R?.fullHeight ? "Wall panel (full height)" : "Wall panel", group: "wall", w, h: o.stdHeight, custom: false }, 1, Number(p.weight_kg));
       if (isStrip) add(`WS-${w}-${top}`, { code: `WS-${w}-${top}`, description: `Bottom strip under full-height panel (${top} mm)`, group: "wall", w, h: top, custom: false }, 1);
       else if (top > 0) add(`WT-${w}-${top}`, { code: `WT-${w}-${top}`, description: "Wall top panel (custom height)", group: "wall-top", w, h: top, custom: !sysStd }, 1);
@@ -253,11 +253,11 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const topPiece = !R?.fullHeight && cornerTop > 0;
   if (sysStd && (corners > 0 || (o.extCorners ?? 0) > 0)) {
     const ia = R!.internalCorner, ib = R!.internalCornerLeg || ia, ea = Math.round(R!.externalCorner * 10) / 10;
-    if (corners > 0) add("CORNER", { code: `IC-${ia}x${ib}-${o.stdHeight}`, description: `Internal corner ${ia} × ${ib}${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ia, ib), h: o.stdHeight, custom: false }, corners);
-    if ((o.extCorners ?? 0) > 0 && R!.wallEcAngles) add("ECW", { code: `EC-${ea}x${ea}-${o.stdHeight}`, description: `External corner angle ${ea} × ${ea} (outside corners of walls)${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ea, ea), h: o.stdHeight, custom: false }, o.extCorners!);
+    if (corners > 0) add("CORNER", { code: `IC-${ia}x${ib}-${o.stdHeight}`, description: `Internal corner (IC) ${ia} × ${ib}${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ia, ib), h: o.stdHeight, custom: false }, corners);
+    if ((o.extCorners ?? 0) > 0 && R!.wallEcAngles) add("ECW", { code: `EC-${ea}x${ea}-${o.stdHeight}`, description: `External corner (EC) ${ea} × ${ea} (outside corners of walls)${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ea, ea), h: o.stdHeight, custom: false }, o.extCorners!);
     if (topPiece) {
-      if (corners > 0) add("CORNERT", { code: `ICT-${ia}x${ib}-${cornerTop}`, description: `Internal corner top piece ${ia} × ${ib} × ${cornerTop} (on the standard corner, up to the wall height)`, group: "corner", w: legs(ia, ib), h: cornerTop, custom: true }, corners);
-      if ((o.extCorners ?? 0) > 0 && R!.wallEcAngles) add("ECWT", { code: `ECT-${ea}x${ea}-${cornerTop}`, description: `External corner top piece ${ea} × ${ea} × ${cornerTop}`, group: "corner", w: legs(ea, ea), h: cornerTop, custom: true }, o.extCorners!);
+      if (corners > 0) add("CORNERT", { code: `ICT-${ia}x${ib}-${cornerTop}`, description: `Internal corner (IC) top piece ${ia} × ${ib} × ${cornerTop} (on the standard corner, up to the wall height)`, group: "corner", w: legs(ia, ib), h: cornerTop, custom: true }, corners);
+      if ((o.extCorners ?? 0) > 0 && R!.wallEcAngles) add("ECWT", { code: `ECT-${ea}x${ea}-${cornerTop}`, description: `External corner (EC) top piece ${ea} × ${ea} × ${cornerTop}`, group: "corner", w: legs(ea, ea), h: cornerTop, custom: true }, o.extCorners!);
     }
   } else if (corners > 0) {
     const c = ic ?? ec;
@@ -268,8 +268,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   // corners of every wall end: an external corner angle at both sides of the stop-end
   if (R?.endCorners && ends > 0) {
     const ea = Math.round((R.externalCorner || 65) * 10) / 10;
-    add("ECW", { code: `EC-${ea}x${ea}-${o.stdHeight}`, description: `External corner angle ${ea} × ${ea} at wall ends (both corners of each stop-end)`, group: "corner", w: legs(ea, ea), h: o.stdHeight, custom: false }, ends * 2);
-    if (topPiece) add("ECWT", { code: `ECT-${ea}x${ea}-${cornerTop}`, description: `External corner top piece ${ea} × ${ea} × ${cornerTop} at wall ends`, group: "corner", w: legs(ea, ea), h: cornerTop, custom: true }, ends * 2);
+    add("ECW", { code: `EC-${ea}x${ea}-${o.stdHeight}`, description: `External corner (EC) ${ea} × ${ea} at wall ends (both corners of each stop-end)`, group: "corner", w: legs(ea, ea), h: o.stdHeight, custom: false }, ends * 2);
+    if (topPiece) add("ECWT", { code: `ECT-${ea}x${ea}-${cornerTop}`, description: `External corner (EC) top piece ${ea} × ${ea} × ${cornerTop} at wall ends`, group: "corner", w: legs(ea, ea), h: cornerTop, custom: true }, ends * 2);
   }
 
   // ---- deck: strips across each slab, scaled to the net soffit area
@@ -331,10 +331,10 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   if (lineSp > 1.3 + 1e-6 || alongSp > 1.3 + 1e-6) warnings.push(`Prop grid ${lineSp.toFixed(2)} × ${alongSp.toFixed(2)} m is wider than 1.3 m (JGJ 386 practice) — check deflection.`);
   const props = deckArea > 0 ? Math.ceil(deckArea / (lineSp * alongSp)) : 0;
   if (props) {
-    byCode.set("PH", { code: ph?.panel_code ?? (sysStd ? `PH-${R!.propHead[0]}x${R!.propHead[1]}` : "PH"), description: `Prop head${sysStd ? ` ${R!.propHead[0]} × ${R!.propHead[1]}` : ""} (grid ${lineSp.toFixed(2)} × ${alongSp.toFixed(2)} m)`, group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (ph ? Number(ph.weight_kg) : 4.5), custom: false, unit: "nos" });
+    byCode.set("PH", { code: ph?.panel_code ?? (sysStd ? `PH-${R!.propHead[0]}x${R!.propHead[1]}` : "PH"), description: `Prop head (PH)${sysStd ? ` ${R!.propHead[0]} × ${R!.propHead[1]}` : ""} (grid ${lineSp.toFixed(2)} × ${alongSp.toFixed(2)} m)`, group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (ph ? Number(ph.weight_kg) : 4.5), custom: false, unit: "nos" });
     byCode.set("MB", { code: mb?.panel_code ?? (sysStd ? `MB-${R!.midBeam}-${Math.round(alongSp * 1000 - phW)}` : "MB"), description: `Mid beam${sysStd ? ` ${R!.midBeam} wide` : ""} (deck support between prop heads)`, group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (mb ? Number(mb.weight_kg) : 8), custom: false, unit: "nos" });
     const pr = item("accessory", /^PROP/);
-    byCode.set("PROP", { code: pr?.panel_code ?? "PROP", description: "Adjustable steel prop", group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (pr ? Number(pr.weight_kg) : 14), custom: false, unit: "nos" });
+    byCode.set("PROP", { code: pr?.panel_code ?? "PROP", description: "Adjustable steel prop — deck prop (DP)", group: "accessory", w: 0, h: 0, qty: props, area: 0, weight: props * (pr ? Number(pr.weight_kg) : 14), custom: false, unit: "nos" });
   }
   const faceLen = layouts.reduce((s, f) => s + f.length, 0);
   // the deck meets the top of every wall face, every inner beam side and every column face: a soffit corner runs along each
@@ -349,12 +349,12 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       const sl = R!.soffitCornerLeg || 100, bl = R!.beamCapLeg || sl, ww = R!.soffitCornerW || 100;
       const nW = (faceLen > 50 ? Math.ceil(faceLen / L) : 0) + (colScLen > 50 ? Math.ceil(colScLen / L) : 0);
       const where = [faceLen > 50 ? `wall tops ${(faceLen / 1000).toFixed(1)} m` : "", colScLen > 50 ? `column faces ${(colScLen / 1000).toFixed(1)} m` : ""].filter(Boolean).join(", ");
-      if (nW) add("SC", { code: `SC-${ww}x${sl}-${L}`, description: `Soffit corner ${ww} × ${sl} (${where})${R!.bothLegs ? " — area on both legs" : ""}`, group: "corner", w: legs(ww, sl), h: L, custom: false }, nW);
+      if (nW) add("SC", { code: `SC-${ww}x${sl}-${L}`, description: `Soffit length (SL) ${ww} × ${sl} (${where})${R!.bothLegs ? " — area on both legs" : ""}`, group: "corner", w: legs(ww, sl), h: L, custom: false }, nW);
       if (beamScLen > 50) add("SCB", { code: `SCB-${ww}x${bl}-${L}`, description: `Beam cap (soffit corner on beam sides) ${ww} × ${bl} (${(beamScLen / 1000).toFixed(1)} m)${R!.bothLegs ? " — area on both legs" : ""}`, group: "corner", w: legs(ww, bl), h: L, custom: false }, Math.ceil(beamScLen / L));
     } else {
     const n = [faceLen, beamScLen, colScLen].reduce((s2, len) => s2 + (len > 50 ? Math.ceil(len / L) : 0), 0);
     const where = [faceLen > 50 ? `wall tops ${(faceLen / 1000).toFixed(1)} m` : "", beamScLen > 50 ? `beam sides ${(beamScLen / 1000).toFixed(1)} m` : "", colScLen > 50 ? `column faces ${(colScLen / 1000).toFixed(1)} m` : ""].filter(Boolean).join(", ");
-    if (n) add("SC", { code: scp?.panel_code ?? `SC-${w}-${L}`, description: `Soffit corner (${where})`, group: "corner", w, h: L, custom: !scp }, n, scp ? Number(scp.weight_kg) : undefined);
+    if (n) add("SC", { code: scp?.panel_code ?? `SC-${w}-${L}`, description: `Soffit length (SL) (${where})`, group: "corner", w, h: L, custom: !scp }, n, scp ? Number(scp.weight_kg) : undefined);
     }
   }
   // external kicker along the outer slab edge (next lift's wall panels sit on it)
@@ -410,12 +410,12 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const bpieces = PK && b.bottom && bw > 0 ? (() => { const f = fillRun(b.length, PK.beamBottomLens); const l = f.left < tol ? 0 : Math.ceil(f.left / bStep) * bStep; return [...f.panels, ...(l && l >= PK.beamBottomMin ? [l] : l ? [PK.beamBottomMin] : [])]; })() : pieces;
     for (const Lp of pieces) {
       const cust = !BL.includes(Lp);
-      if (side > 0 && !faces) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: side, h: Lp, custom: true }, b.sides);
-      if (b.bottom && bw > 0 && !PK) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+      if (side > 0 && !faces) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side (B) panel ${side} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: side, h: Lp, custom: true }, b.sides);
+      if (b.bottom && bw > 0 && !PK) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bar (BB) bottom panel ${bw} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
     }
     if (PK && b.bottom && bw > 0) for (const Lp of bpieces) {
       const bb = PK.beamWingless ? "LDD" : "BB";
-      add(`${bb}-${bw}-${Lp}`, { code: `${bb}-${bw}-${Lp}`, description: `${PK.beamWingless ? "Wingless beam bottom plate" : "Beam bottom panel"} ${bw} × ${Lp}${PK.beamBottomLens.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+      add(`${bb}-${bw}-${Lp}`, { code: `${bb}-${bw}-${Lp}`, description: `${PK.beamWingless ? "Wingless beam bottom plate" : "Beam bar (BB) bottom panel"} ${bw} × ${Lp}${PK.beamBottomLens.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
       // beam support block: one support head (length = beam width − side allowance) under every bottom plate, and a cover plate with its head
       const hl = Math.max(50, bw - PK.beamHeadSide);
       if (PK.beamHeads) { lcHeads++; add(`LC${PK.beamHeadW}X${hl}`, { code: `LC${PK.beamHeadW}X${hl}`, description: `Beam-bottom support head LC ${PK.beamHeadW} × ${hl} (under every beam bottom plate; beam ${bw} − ${PK.beamHeadSide})`, group: "accessory", w: PK.beamHeadW, h: hl, custom: false }, 1, 0.45 + hl * 0.0006); }
@@ -426,7 +426,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     }
     if (faces) {
       // side faces measured on the drawing: inner faces (slab beyond) depth − slab, outer faces (slab edge / opening) full depth
-      if (side > 0 && (b.inner ?? 0) > 50) for (const Lp of faceRun(b.inner!)) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${BEAM_LEN.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: side, h: Lp, custom: true }, 1);
+      if (side > 0 && (b.inner ?? 0) > 50) for (const Lp of faceRun(b.inner!)) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side (B) panel ${side} × ${Lp}${BEAM_LEN.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: side, h: Lp, custom: true }, 1);
       const full = Math.round(b.d);
       if ((b.outer ?? 0) > 50) for (const Lp of faceRun(b.outer!)) add(`BSE-${full}-${Lp}`, { code: `BSE-${full}-${Lp}`, description: `Beam outer side panel (slab edge / opening, full depth) ${full} × ${Lp}`, group: "beam", w: full, h: Lp, custom: true }, 1);
       // lintels in a wall line: both faces are the wall's top panels over the opening
@@ -457,7 +457,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const bph = beamProps - lcHeads;
     if (bph > 0) byCode.set("BPH", { code: "BPH", description: "Beam prop head (under beam bottoms @ 1.2 m)", group: "accessory", w: 0, h: 0, qty: bph, area: 0, weight: bph * (ph ? Number(ph.weight_kg) : 4.5), custom: false, unit: "nos" });
     const pr = byCode.get("PROP");
-    if (pr) { pr.weight += (pr.weight / Math.max(1, pr.qty)) * beamProps; pr.qty += beamProps; pr.description = "Adjustable steel prop (deck + beams)"; }
+    if (pr) { pr.weight += (pr.weight / Math.max(1, pr.qty)) * beamProps; pr.qty += beamProps; pr.description = "Adjustable steel prop — deck prop (DP) (deck + beams)"; }
     else byCode.set("PROP", { code: "PROP", description: "Adjustable steel prop (beams)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: 0, custom: false, unit: "nos" });
   }
 

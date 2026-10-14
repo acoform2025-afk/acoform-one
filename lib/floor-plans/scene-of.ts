@@ -11,7 +11,7 @@ export function partsIssues(r: Ran, scene: Scene3): Issue[] {
   if (r.error || !r.inp || !r.shell) return [];
   const rules = r.layoutRules;
   const rowPitch = ((rules?.deckLengths?.[0] ?? 1200) + (rules?.midBeam ?? 100)) / 1000;
-  return partsChecks(scene, { propSpacing: r.opt.propSpacing, rowPitch, slabMm: Number(r.t.params.slabMm) || 150, propKn: rules?.propKn ?? 20 }).map((i, n) => ({ id: `P${String(n + 1).padStart(3, "0")}`, ...i }));
+  return partsChecks(scene, { propSpacing: r.opt.propSpacing, rowPitch, slabMm: Number(r.t.params.slabMm) || 150, propKn: rules?.propKn ?? 20, bulkheads: rules?.pk?.beamBulkheads ?? 0 }).map((i, n) => ({ id: `P${String(n + 1).padStart(3, "0")}`, ...i }));
 }
 
 /** The design check with the corner, beam-panel and prop checks added (check page, check list). */

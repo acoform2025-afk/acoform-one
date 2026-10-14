@@ -28,7 +28,7 @@ const LEGEND: { k: Panel3Kind[]; label: string }[] = [
   { k: ["top"], label: "Wall-top pieces" },
   { k: ["fill"], label: "Wall fillers (non-standard width)" },
   { k: ["ic", "ec"], label: "Internal / external corners" },
-  { k: ["sc"], label: "Soffit corners" },
+  { k: ["sc"], label: "Soffit length (SL)" },
   { k: ["kick"], label: "Kickers" },
   { k: ["deck"], label: "Deck panels" },
   { k: ["dspec"], label: "Deck fillers / specials" },

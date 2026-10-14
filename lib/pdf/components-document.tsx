@@ -16,7 +16,7 @@ const ORANGE = "#ef9d2f", GRAY = "#6b6d68", INK = "#1f2937";
 const M = 20, FOOT = 46;
 
 export type CompInfo = { company: string; project: string; client: string; planName: string; drawingNo: string; rev: string; date: string; system: string };
-const LEGEND: [string, string][] = [["#7aa7e0", "Wall panels"], ["#f2c76b", "Wall-top panels"], ["#a78bfa", "Soffit corner"], ["#9fd3c7", "Deck panels"], ["#94a3b8", "Mid beam"], ["#e0782f", "Props"], ["#b4bac2", "Walers, ties, pins & wedges"]];
+const LEGEND: [string, string][] = [["#7aa7e0", "Wall panels"], ["#f2c76b", "Wall-top panels"], ["#a78bfa", "Soffit length (SL)"], ["#9fd3c7", "Deck panels"], ["#94a3b8", "Mid beam"], ["#e0782f", "Props"], ["#b4bac2", "Walers, ties, pins & wedges"]];
 
 function Footer({ info }: { info: CompInfo }) {
   return (

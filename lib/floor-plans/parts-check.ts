@@ -2,12 +2,12 @@
  * Checks of the parts the wall / deck check does not see: wall corners (internal / external), beam soffit and side
  * panels, deck props and beam props. They run on the finished 3D scene, so they see exactly what is drawn.
  */
-import type { Issue } from "@/lib/design-engine/design-check";
+import { inRings, type Issue } from "@/lib/design-engine/design-check";
 import type { Scene3 } from "./scene3d";
 
 type Pt = [number, number];
 
-export type PartsOpts = { propSpacing: number; rowPitch: number; slabMm: number; propKn: number };
+export type PartsOpts = { propSpacing: number; rowPitch: number; slabMm: number; propKn: number; bulkheads?: number };
 
 /** Load a deck prop carries (kN): slab weight 25 kN/m³ + 1.5 construction + 0.5 formwork, over the area one prop holds. A screening estimate, not a design. */
 export const deckPropLoad = (slabMm: number, spacingM: number, rowPitchM: number) => (25 * (slabMm / 1000) + 2) * spacingM * rowPitchM;
@@ -55,6 +55,35 @@ export function partsChecks(sc: Scene3, o: PartsOpts): Omit<Issue, "id">[] {
       if (!iv.length) continue;
       const cov = union(iv as [number, number][]);
       if (L - cov > 0.1) out.push({ sev: "warn", kind: "beam-parts", where: `Beam ${bi + 1}`, detail: `Beam ${name} cover ${Math.round(cov * 1000)} mm of the ${Math.round(L * 1000)} mm beam — ${Math.round((L - cov) * 1000)} mm is open, concrete will run out. Add a made-to-size panel.`, at: [Math.round(mid[0] * 1000) / 1000, Math.round(mid[1] * 1000) / 1000], z: Hm - b.d / 2 });
+    }
+  }
+
+  // ── beam ends: a beam end that meets neither a wall nor another beam is open — the soffit bulkhead (SB) closes it
+  {
+    const hasBot = new Set<number>();
+    for (const p of sc.panels) if (p.k === "bbot") for (const [bi, b] of sc.beams.entries()) {
+      const dx = b.b[0] - b.a[0], dy = b.b[1] - b.a[1], L = Math.hypot(dx, dy); if (L < 0.3) continue;
+      const cx = p.p.reduce((a, v) => a + v[0], 0) / p.p.length, cz = p.p.reduce((a, v) => a + v[2], 0) / p.p.length;
+      const t = ((cx - b.a[0]) * dx + (cz - b.a[1]) * dy) / L, sd = Math.abs(-(cx - b.a[0]) * dy / L + (cz - b.a[1]) * dx / L);
+      if (t > -0.05 && t < L + 0.05 && sd < b.w / 2 + 0.06) hasBot.add(bi);
+    }
+    const inWall = (q: Pt) => sc.walls.some((poly) => inRings(q, poly));
+    const inBeam = (q: Pt, skip: number) => sc.beams.some((o2, k) => {
+      if (k === skip) return false;
+      const dx = o2.b[0] - o2.a[0], dy = o2.b[1] - o2.a[1], L = Math.hypot(dx, dy); if (L < 0.3) return false;
+      const t = ((q[0] - o2.a[0]) * dx + (q[1] - o2.a[1]) * dy) / L, sd = Math.abs(-(q[0] - o2.a[0]) * dy / L + (q[1] - o2.a[1]) * dx / L);
+      return t > -0.05 && t < L + 0.05 && sd < o2.w / 2 + 0.05;
+    });
+    for (const [bi, b] of sc.beams.entries()) {
+      if (!hasBot.has(bi)) continue;
+      const dx = b.b[0] - b.a[0], dy = b.b[1] - b.a[1], L = Math.hypot(dx, dy); if (L < 0.3) continue;
+      const ux = dx / L, uy = dy / L;
+      const open: Pt[] = [];
+      for (const [e, sgn] of [[b.a, -1], [b.b, 1]] as const) {
+        const q: Pt = [e[0] + ux * sgn * 0.12, e[1] + uy * sgn * 0.12];
+        if (!inWall(q) && !inBeam(q, bi)) open.push([Math.round(e[0] * 1000) / 1000, Math.round(e[1] * 1000) / 1000]);
+      }
+      if (open.length && open.length > (o.bulkheads ?? 0)) out.push({ sev: "warn", kind: "beam-parts", where: `Beam ${bi + 1}`, detail: `${open.length} open beam end${open.length > 1 ? "s" : ""} (not against a wall or another beam) and ${o.bulkheads ?? 0} soffit bulkhead${(o.bulkheads ?? 0) === 1 ? "" : "s"} (SB) in the rules — concrete will run out of the end. Set “Soffit bulkheads (SB) per beam” in Settings, or close the end with a made-to-size plate.`, at: open[0], z: Hm - b.d / 2 });
     }
   }
 
