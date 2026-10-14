@@ -609,6 +609,20 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const walers = oneFace > 0 ? Math.ceil(oneFace / 2400) * 2 : 0;
   acc("WALER", "Wall alignment", accW(/^WAL/, 9).code ?? "WALER-2400", "Alignment waler 2.4 m (rectangular hollow section)", walers, accW(/^WAL/, 9).kg, `one wall face ${(oneFace / 1000).toFixed(0)} m ÷ 2.4 m × 2 rows`);
   acc("WCLIP", "Wall alignment", accW(/^WCL|^CLIP/, 0.6).code ?? "WCLIP", "Waler clip / waler pin", walers * 4, accW(/^WCL|^CLIP/, 0.6).kg, "4 per waler (@ 600 mm)");
+  // detailed wall rules: back-ribs at the set heights and square tubes (one face of each wall; tubes staggered floor to floor are counted as laid)
+  if (PK) {
+    let ribPcs = 0, ribM = 0, tubePcs = 0, tubeM = 0;
+    for (const f of layouts) {
+      if (f.set === "column" || f.end || f.length < 300) continue;
+      if (R?.tie !== "flat" && /B$/.test(f.code)) continue;
+      const rows = PK.ribHeights.filter((h) => h < f.height).length, tRows = PK.tubeHeights.filter((h) => h < f.height).length;
+      ribPcs += rows * Math.ceil(f.length / PK.ribMax); ribM += (rows * f.length) / 1000;
+      tubePcs += tRows * Math.ceil(f.length / PK.tubeMax); tubeM += (tRows * f.length) / 1000;
+    }
+    if (ribPcs) acc("BRIB", "Wall alignment", "BACKRIB", `Back-rib ${PK.ribWidth} mm (cut to the wall face, max ${PK.ribMax} mm), rows at ${PK.ribHeights.join(" / ")} mm`, ribPcs, 4.5 * (ribM / ribPcs), `rows below the wall height × pieces of max ${PK.ribMax} mm = ${ribM.toFixed(0)} m`);
+    if (tubePcs) acc("SQTUBE", "Wall alignment", "SQTUBE", `Square tube ${PK.tubeWidth} mm (max ${PK.tubeMax} mm), rows at ${PK.tubeHeights.join(" / ")} mm`, tubePcs, 3.5 * (tubeM / tubePcs), `rows below the wall height × pieces of max ${PK.tubeMax} mm = ${tubeM.toFixed(0)} m`);
+    if (ribPcs) acc("UCLIP", "Wall alignment", "UCLIP", `U-clip ${PK.uClip} mm (back-rib to panel)`, ribPcs * 2, 0.4, "two per back-rib piece");
+  }
   const pp = oneFace > 0 ? Math.ceil(oneFace / 3000) : 0;
   acc("PPP", "Wall alignment", accW(/^PPP|^PUSH/, 12).code ?? "PPP", "Push-pull prop (wall plumbing)", pp, accW(/^PPP|^PUSH/, 12).kg, "one wall face ÷ 3.0 m");
   acc("ANCH", "Wall alignment", "ANCH", "Anchor bolt / base plate for push-pull prop", pp, 0.4, "one per push-pull prop");
