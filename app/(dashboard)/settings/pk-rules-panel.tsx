@@ -98,6 +98,13 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
                 <select value={pk.propSpread} disabled={!canEdit} onChange={(e) => set("propSpread", e.target.value as PkRules["propSpread"])} className={input}>
                   <option value="even">Spread evenly</option><option value="multiple100">100-multiple, remainder at the end</option><option value="maxlen">Longest bottom panel</option></select></label>
             </div>
+            <p className="mt-3 text-xs text-graphite-400">Beam support block (support head under every beam bottom plate, wingless plates, cover plates)</p>
+            <div className="mt-1 grid gap-3 md:grid-cols-3">
+              <div className="flex flex-col gap-2">{c("beamHeads", "Support head (LC) under every beam bottom plate")}{c("beamWingless", "Beam bottom plates wingless (LDD)")}{c("beamCover", "Cover plate (GBB) and cover head (GC) with each plate")}</div>
+              {n("beamHeadW", "Head width along the beam", "(mm)")}
+              {n("beamHeadSide", "Head length = beam width minus", "(mm)")}
+              {n("beamCoverHeadW", "Cover head width", "(mm)")}
+            </div>
             <p className="mt-3 text-xs text-graphite-400">Beam-bottom props, by beam width</p>
             <div className="mt-1 grid gap-3 md:grid-cols-3">
               {pk.propGroups.map((g, i) => (

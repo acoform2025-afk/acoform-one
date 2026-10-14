@@ -378,7 +378,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
 
   // ---- beams: length made up of 1200/900/600/300 panels (+ filler); 2 sides and a bottom for drawn beams; beam props
   const BEAM_LEN = [1200, 900, 600, 300];
-  let beamProps = 0;
+  let beamProps = 0, lcHeads = 0;
   const beamLayouts: BeamLayout[] = [];
   const beamAgg = new Map<string, { code: string; size: string; n: number; len: number; area: number; pieces: Map<number, number>; sides: number; bottom: boolean; props: number }>();
   for (const b of beams) {
@@ -396,7 +396,17 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       if (side > 0 && !faces) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: side, h: Lp, custom: true }, b.sides);
       if (b.bottom && bw > 0 && !PK) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
     }
-    if (PK && b.bottom && bw > 0) for (const Lp of bpieces) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${PK.beamBottomLens.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+    if (PK && b.bottom && bw > 0) for (const Lp of bpieces) {
+      const bb = PK.beamWingless ? "LDD" : "BB";
+      add(`${bb}-${bw}-${Lp}`, { code: `${bb}-${bw}-${Lp}`, description: `${PK.beamWingless ? "Wingless beam bottom plate" : "Beam bottom panel"} ${bw} × ${Lp}${PK.beamBottomLens.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+      // beam support block: one support head (length = beam width − side allowance) under every bottom plate, and a cover plate with its head
+      const hl = Math.max(50, bw - PK.beamHeadSide);
+      if (PK.beamHeads) { lcHeads++; add(`LC${PK.beamHeadW}X${hl}`, { code: `LC${PK.beamHeadW}X${hl}`, description: `Beam-bottom support head LC ${PK.beamHeadW} × ${hl} (under every beam bottom plate; beam ${bw} − ${PK.beamHeadSide})`, group: "accessory", w: PK.beamHeadW, h: hl, custom: false }, 1, 0.45 + hl * 0.0006); }
+      if (PK.beamCover) {
+        add(`GBB-${bw}-${Lp}`, { code: `GBB-${bw}-${Lp}`, description: `Beam cover plate (wingless) ${bw} × ${Lp} — one with each bottom plate, confirm from the Motian drawing`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+        add(`GC${PK.beamCoverHeadW}X${hl}`, { code: `GC${PK.beamCoverHeadW}X${hl}`, description: `Cover-plate support head GC ${PK.beamCoverHeadW} × ${hl}`, group: "accessory", w: PK.beamCoverHeadW, h: hl, custom: false }, 1, 0.4 + hl * 0.0006);
+      }
+    }
     if (faces) {
       // side faces measured on the drawing: inner faces (slab beyond) depth − slab, outer faces (slab edge / opening) full depth
       if (side > 0 && (b.inner ?? 0) > 50) for (const Lp of faceRun(b.inner!)) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${BEAM_LEN.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: side, h: Lp, custom: true }, 1);
@@ -422,8 +432,11 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     elements.push({ kind: "beam", code: g.n > 1 ? `${g.code} (${g.n} runs)` : g.code, size: g.size, qty: g.n, area: g.area,
       detail: `${(g.len / 1000).toFixed(2)} m: ${[...std, ...(fill ? [`${fill} fillers`] : [])].join(" + ") || "—"} per side · ${g.sides} side${g.sides > 1 ? "s" : ""}${g.bottom ? " + bottom" : ""}${g.props ? ` · ${g.props} beam props` : ""}` });
   }
+  if (lcHeads > beamProps) beamProps = lcHeads;                    // a prop under every support head
   if (beamProps) {
-    byCode.set("BPH", { code: "BPH", description: "Beam prop head (under beam bottoms @ 1.2 m)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: beamProps * (ph ? Number(ph.weight_kg) : 4.5), custom: false, unit: "nos" });
+    // the support heads LC are listed on their own; a plain prop head is only added where the props outnumber them
+    const bph = beamProps - lcHeads;
+    if (bph > 0) byCode.set("BPH", { code: "BPH", description: "Beam prop head (under beam bottoms @ 1.2 m)", group: "accessory", w: 0, h: 0, qty: bph, area: 0, weight: bph * (ph ? Number(ph.weight_kg) : 4.5), custom: false, unit: "nos" });
     const pr = byCode.get("PROP");
     if (pr) { pr.weight += (pr.weight / Math.max(1, pr.qty)) * beamProps; pr.qty += beamProps; pr.description = "Adjustable steel prop (deck + beams)"; }
     else byCode.set("PROP", { code: "PROP", description: "Adjustable steel prop (beams)", group: "accessory", w: 0, h: 0, qty: beamProps, area: 0, weight: 0, custom: false, unit: "nos" });
