@@ -129,7 +129,32 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
   if (!contact.success) return { success: false, error: Object.values(contact.error.flatten().fieldErrors)[0]?.[0] ?? "Check the customer details." };
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("create_quick_quote", {
+
+  // one project = one quotation number: when this plan (or one of its blocks) already has a quotation, work on that one
+  // (draft / pending → edit it; approved / sent → next revision R1, R2 …) instead of numbering a new quotation
+  const planIds: string[] = [];
+  const planIn = String(formData.get("floorPlanId") ?? "");
+  if (/^[0-9a-f-]{36}$/i.test(planIn)) planIds.push(planIn);
+  try { for (const b of JSON.parse(String(formData.get("blocks") ?? "[]")) as { id?: string }[]) if (b?.id && /^[0-9a-f-]{36}$/i.test(b.id)) planIds.push(b.id); } catch { /* ignore */ }
+  let reuseId: string | null = null;
+  if (planIds.length) {
+    const { data: ex } = await supabase.from("quotations").select("id,status,quotation_code").in("floor_plan_id", planIds).neq("status", "superseded").order("created_at", { ascending: false }).limit(1);
+    const head = ex?.[0];
+    if (head) {
+      if (head.status === "accepted") return { success: false, error: `${head.quotation_code} for this project is already accepted and converted to a project, so it cannot be changed.` };
+      if (head.status === "draft" || head.status === "pending_approval") {
+        const up = await supabase.rpc("update_quick_quote_area", { p_quotation_id: head.id, p_area_sqm: parsed.data.areaSqm });
+        if (up.error) return { success: false, error: up.error.message.replace(/^.*ERROR:\s*/i, "") };
+        await supabase.from("quotations").update({ customer_name: parsed.data.customerName, ...(parsed.data.validUntil ? { valid_until: parsed.data.validUntil } : {}) }).eq("id", head.id);
+        reuseId = head.id;
+      } else {
+        const rv = await supabase.rpc("create_quotation_revision", { p_quotation_id: head.id, p_reprice: false, p_area_sqm: parsed.data.areaSqm });
+        if (rv.error) return { success: false, error: rv.error.message.replace(/^.*ERROR:\s*/i, "") };
+        reuseId = rv.data as string;
+      }
+    }
+  }
+  const { data, error } = reuseId ? { data: reuseId, error: null } : await supabase.rpc("create_quick_quote", {
     p_quotation_code: parsed.data.quotationCode,
     p_customer_name: parsed.data.customerName,
     p_formwork_type: parsed.data.formworkType,
