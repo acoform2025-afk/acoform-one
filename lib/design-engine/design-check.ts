@@ -12,7 +12,7 @@ import type { Zone } from "@/lib/floor-plans/zones";
 import type { FaceLayout } from "./floor-panels";
 import { pinHoleCheck, type FabSpec } from "./fabrication";
 
-export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height";
+export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height" | "leak";
 export type Issue = { id: string; sev: "error" | "warn"; kind: IssueKind; where: string; detail: string; at?: Pt; z?: number };
 export const ISSUE_LABEL: Record<IssueKind, string> = {
   model: "Model check",
@@ -25,6 +25,7 @@ export const ISSUE_LABEL: Record<IssueKind, string> = {
   uncovered: "Slab not covered by panels",
   "pin-hole": "Pin holes of special panels",
   "face-height": "Wall panel height against clear height",
+  leak: "Open gap — concrete can leak",
 };
 
 const RAIL = 0.065, OFF = 0.005;
@@ -108,6 +109,9 @@ export function designCheck(o: CheckInput) {
     if (f.length < 100) continue;
     const sum = f.panels.reduce((a, b) => a + b, 0) + f.filler;
     if (Math.abs(sum - f.length) > 30) add({ sev: "error", kind: "face-fit", where: f.code, detail: `Panels ${sum} mm do not match the face length ${Math.round(f.length)} mm (more than the 25 mm site tolerance).` });
+    // formwork must be closed: whatever is not covered by a panel or a filler is a slot the concrete runs out of
+    const open = Math.round(f.length - sum);
+    if (open >= 5 && open <= 30 && !f.end && !/-O\d+[HS]$/.test(f.code)) add({ sev: "warn", kind: "leak", where: f.code, detail: `${open} mm of the face is not covered by any panel — a slot over the full wall height where concrete will leak. Close it with a made-to-size filler or a closing strip, do not leave it to the joints.` });
     if (f.filler > 0 && f.filler < 100) add({ sev: "warn", kind: "face-fit", where: f.code, detail: `Filler only ${f.filler} mm wide — make it a solid aluminium / plywood strip bolted to the next panel.` });
     if (!f.panels.length && f.length >= 100 && f.filler > 0 && !/-O\d+[HS]$/.test(f.code)) add({ sev: "warn", kind: "face-fit", where: f.code, detail: `Face ${Math.round(f.length)} mm is filled only with a special piece — no standard panel fits.` });
   }
