@@ -41,6 +41,27 @@ export type Acc3 = {
 const ring = (r: Pt[]): [number, number][] => { const o = r.map((p) => [p[0], p[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
 const strip = (m: MultiPolygon): Poly2[] => m.map((poly) => poly.map((r) => r.slice(0, -1) as Pt[]));
 
+/** A simple polygon (no holes) cut into triangles by ear clipping. */
+function earClip(ring: Pt[]): Pt[][] {
+  let v = ring.slice(); if (v.length > 1 && v[0][0] === v[v.length - 1][0] && v[0][1] === v[v.length - 1][1]) v = v.slice(0, -1);
+  const area2 = v.reduce((a, p, i) => { const q = v[(i + 1) % v.length]; return a + (p[0] * q[1] - q[0] * p[1]); }, 0);
+  if (area2 < 0) v.reverse();
+  const cross = (a: Pt, b: Pt, c: Pt) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const out: Pt[][] = []; let guard = v.length * v.length + 10;
+  while (v.length > 3 && guard-- > 0) {
+    let cut = false;
+    for (let i = 0; i < v.length; i++) {
+      const a = v[(i + v.length - 1) % v.length], b = v[i], c = v[(i + 1) % v.length];
+      if (cross(a, b, c) <= 1e-9) continue;
+      if (v.some((q) => q !== a && q !== b && q !== c && cross(a, b, q) >= 0 && cross(b, c, q) >= 0 && cross(c, a, q) >= 0)) continue;
+      out.push([a, b, c]); v.splice(i, 1); cut = true; break;
+    }
+    if (!cut) break;
+  }
+  if (v.length === 3 && cross(v[0], v[1], v[2]) > 1e-9) out.push([v[0], v[1], v[2]]);
+  return out;
+}
+
 export function buildScene3(o: {
   zoneWalls: Pt[][]; zoneGaps: { a: Pt; b: Pt; thk: number }[]; decks: { pts: Pt[]; holes: Pt[][] }[];
   zones: Zone[]; faces: FaceLayout[]; mpp: number; floorHeight: number; slabMm: number; stdHeight: number; beamDepthMm: number;
@@ -252,6 +273,16 @@ export function buildScene3(o: {
   for (const z of o.zones) for (const sp of (z as { specials?: { rings: Pt[][]; area: number }[] }).specials ?? []) {
     const r = sp.rings[0]; if (!r || r.length < 3) continue;
     const holesIn = sp.rings.slice(1);
+    // a piece with a slanted edge is drawn as its true shape (triangles), not as steps
+    const slanted = r.some((q, i) => { const n = r[(i + 1) % r.length]; return Math.abs(q[0] - n[0]) > 0.003 && Math.abs(q[1] - n[1]) > 0.003; });
+    if (slanted && !holesIn.length) {
+      const tris = earClip(r);
+      if (tris.length) {
+        const y = H - 0.005, area = Math.round(sp.area * 100) / 100;
+        for (const [ta, tb, tc] of tris) panels.push({ p: [[ta[0], y, ta[1]], [tb[0], y, tb[1]], [tc[0], y, tc[1]], [tc[0], y, tc[1]]], k: "dspec", c: `${z.code} · deck special (made to size, cut to shape) ${area} m²`, z: z.code, n: [0, -1, 0] });
+        continue;
+      }
+    }
     const inRing = (q: Pt, ring: Pt[]) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j]; if (yi > q[1] !== yj > q[1] && q[0] < ((xj - xi) * (q[1] - yi)) / (yj - yi) + xi) c = !c; } return c; };
     const xs = [...new Set(r.map((q) => Math.round(q[0] * 1000) / 1000))].sort((a2, b2) => a2 - b2);
     for (let i = 0; i + 1 < xs.length; i++) {
