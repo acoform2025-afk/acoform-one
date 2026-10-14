@@ -38,6 +38,7 @@ export type StairRow = { label?: string; width_mm: number; risers: number; riser
 export type ExtraRow = { label: string; area_m2: number };
 export type Params = {
   floorHeight: number; slabMm: number; floors: number;
+  floorsLabel?: string;     // floors this plan stands for, as written on the drawing ("4 to 7"); floors = how many
   wallTopM2?: number;       // slab deduction for wall tops (m²)
   // figures typed in from the estimator's own measurement — replace what was read from the drawing
   slabM2?: number; ductM2?: number; wallLenM?: number; beamLenM?: number;

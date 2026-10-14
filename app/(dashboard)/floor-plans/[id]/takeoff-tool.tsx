@@ -21,6 +21,7 @@ import {
 } from "@/lib/floor-plans/calc";
 import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, floorsFromTitle, isLayoutTitle, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { createAllLevelPlans, createLevelPlan, saveTakeoff } from "../actions";
+import { parseFloorsLabel } from "@/lib/floor-plans/floors-label";
 import { takeoffChecks } from "@/lib/floor-plans/takeoff-checks";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
@@ -1010,6 +1011,8 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
             <Field label="Floor height (mm)"><NumInput value={Math.round(t.params.floorHeight * 1000)} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floorHeight: v / 1000 } }))} /></Field>
             <Field label="Slab (mm)"><NumInput value={t.params.slabMm} step={5} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, slabMm: v } }))} /></Field>
             <Field label="No. of floors (info)"><NumInput value={t.params.floors} step={1} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, floors: Math.max(1, Math.round(v)) } }))} /></Field>
+            <Field label="Floors covered (e.g. 4 to 7, or 2, 6, 10)"><MetaInput value={t.params.floorsLabel} placeholder="4 to 7" disabled={!canEdit} onChange={(v) => { const r = parseFloorsLabel(v); update((p) => ({ ...p, params: { ...p.params, floorsLabel: v, ...(r ? { floors: r.count } : {}) } })); }} /></Field>
+            {t.params.floorsLabel && parseFloorsLabel(t.params.floorsLabel) ? <p className="col-span-2 text-[11px] text-signal-green">= {parseFloorsLabel(t.params.floorsLabel)!.count} floor{parseFloorsLabel(t.params.floorsLabel)!.count > 1 ? "s" : ""} ({parseFloorsLabel(t.params.floorsLabel)!.text}) — this one plan is counted for all of them.</p> : t.params.floorsLabel ? <p className="col-span-2 text-[11px] text-signal-amber">Could not read floor numbers from that.</p> : null}
           </div>
           <p className="mt-1.5 text-[11px] text-graphite-500">Walls and columns are shuttered to the slab bottom: clear height {Math.round(totals.clear_height * 1000)} mm (floor height − slab).</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
