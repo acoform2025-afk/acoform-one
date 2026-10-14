@@ -22,6 +22,7 @@ import {
 import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, floorsFromTitle, isLayoutTitle, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { createAllLevelPlans, createLevelPlan, saveTakeoff } from "../actions";
 import { parseFloorsLabel } from "@/lib/floor-plans/floors-label";
+import { designStair, type StairType } from "@/lib/floor-plans/stair-calc";
 import { takeoffChecks } from "@/lib/floor-plans/takeoff-checks";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
@@ -1166,6 +1167,12 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
 
         <Panel title="Staircase" hint="Per flight: waist slab soffit (width × sloped length) + riser faces + open side cheeks + landing soffit, × number of flights. Sizes in mm, landing in m².">
           <StairsEditor rows={t.stairs ?? []} disabled={!canEdit} onChange={(rows) => update((p) => ({ ...p, stairs: rows }))} />
+          {canEdit ? (() => {
+            const st = t.shapes.find((x) => x.kind === "opening" && /stair/i.test(x.label ?? "") && x.pts.length >= 3);
+            let well: { l: number; w: number } | null = null;
+            if (st && mpp) { const xs = st.pts.map((q) => q[0]), ys = st.pts.map((q) => q[1]); const a1 = (Math.max(...xs) - Math.min(...xs)) * mpp * 1000, b1 = (Math.max(...ys) - Math.min(...ys)) * mpp * 1000; well = { l: Math.round(Math.max(a1, b1)), w: Math.round(Math.min(a1, b1)) }; }
+            return <StairBuilder floorHeightMm={Math.round(t.params.floorHeight * 1000)} well={well} onAdd={(row) => update((p) => ({ ...p, stairs: [...(p.stairs ?? []), { ...row, label: `ST${(p.stairs ?? []).length + 1}` }] }))} />;
+          })() : null}
         </Panel>
 
         <Panel title="Other items (lump sum)" hint="Lump-sum areas added to the floor total, e.g. ST1 = 100 m² if you don't use the staircase calculator.">
@@ -1394,6 +1401,29 @@ function Cell({ value, text, disabled, onChange }: { value: number | string | un
     ? <input type="text" maxLength={60} disabled={disabled} value={s} className={numIn} onChange={(e) => { setS(e.target.value); onChange(e.target.value); }} />
     : <input type="number" min={0} step="any" disabled={disabled} value={s} className={numIn} onChange={(e) => { setS(e.target.value); const n = Number(e.target.value); onChange(Number.isFinite(n) && n >= 0 ? n : 0); }} />;
 }
+function StairBuilder({ floorHeightMm, well, onAdd }: { floorHeightMm: number; well: { l: number; w: number } | null; onAdd: (r: StairRow) => void }) {
+  const [type, setType] = useState<StairType>("dogleg");
+  const [len, setLen] = useState<string>(well ? String(well.l) : "4800");
+  const [wid, setWid] = useState<string>(well ? String(well.w) : "2600");
+  const d = designStair({ type, floorHeightMm, wellLenMm: Number(len) || 0, wellWidMm: Number(wid) || 0 });
+  const inp = "w-full rounded border border-graphite-700 bg-graphite-900 px-2 py-1 text-xs text-graphite-100";
+  return (
+    <div className="mt-3 rounded-md border border-graphite-800 bg-graphite-950 p-2 text-xs">
+      <p className="font-medium text-graphite-200">Stair builder</p>
+      <p className="mb-2 text-[11px] text-graphite-500">Give the stairwell size and the floor height; the flights are worked out. {well ? "Sizes below come from the stair opening you drew." : "Draw an opening labelled “Stair” to fill the sizes from the plan."}</p>
+      <div className="grid grid-cols-3 gap-1.5">
+        <label className="text-[10px] uppercase text-graphite-500">Type
+          <select value={type} onChange={(e) => setType(e.target.value as StairType)} className={inp}><option value="dogleg">Dog-leg</option><option value="straight">Straight</option><option value="scissor">Scissor</option></select></label>
+        <label className="text-[10px] uppercase text-graphite-500">Well length mm<input type="number" value={len} onChange={(e) => setLen(e.target.value)} className={inp} /></label>
+        <label className="text-[10px] uppercase text-graphite-500">Well width mm<input type="number" value={wid} onChange={(e) => setWid(e.target.value)} className={inp} /></label>
+      </div>
+      <p className="mt-2 text-graphite-300">{d.risersTotal} risers of {d.row.riser_mm} mm · {d.row.flights} flight{d.row.flights > 1 ? "s" : ""} × {d.row.risers} · tread {d.row.tread_mm} mm · flight {d.row.width_mm} mm wide{d.landingDepthMm ? ` · landing ${d.landingDepthMm} mm deep` : ""}</p>
+      {d.notes.map((n) => <p key={n} className="mt-1 text-signal-amber">{n}</p>)}
+      <button type="button" onClick={() => onAdd(d.row)} className="mt-2 rounded-md border border-graphite-600 px-2 py-1 text-graphite-100 hover:border-brand-orange">Add to stair table</button>
+    </div>
+  );
+}
+
 function StairsEditor({ rows, onChange, disabled }: { rows: StairRow[]; onChange: (r: StairRow[]) => void; disabled?: boolean }) {
   const F: { k: keyof StairRow; label: string; text?: boolean }[] = [
     { k: "label", label: "Mark", text: true }, { k: "flights", label: "Flights" }, { k: "width_mm", label: "Width mm" },
