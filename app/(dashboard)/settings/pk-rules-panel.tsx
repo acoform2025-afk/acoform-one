@@ -103,7 +103,7 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
               <div className="flex flex-col gap-2">{c("beamHeads", "Support head (LC) under every beam bottom plate")}{c("beamWingless", "Beam bottom plates wingless (LDD)")}{c("beamCover", "Cover plate (GBB) and cover head (GC) with each plate")}</div>
               {n("beamHeadW", "Head width along the beam", "(mm)")}
               {n("beamHeadSide", "Head length = beam width minus", "(mm)")}
-              {n("beamCoverHeadW", "Cover head width", "(mm)")}
+              {n("beamCoverHeadW", "Cover head width", "(mm)")}{n("beamBulkheads", "Soffit bulkheads (SB) per beam — open ends", "(0–2)")}
             </div>
             <p className="mt-3 text-xs text-graphite-400">Beam-bottom props, by beam width</p>
             <div className="mt-1 grid gap-3 md:grid-cols-3">

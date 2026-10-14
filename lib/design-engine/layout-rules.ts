@@ -78,7 +78,7 @@ export type PkRules = {
   propSpread: "even" | "multiple100" | "maxlen";
   beamAutoRib: boolean; beamAutoProps: boolean; beamTiePlate: boolean; beamUseSupport: boolean; beam200250Support: boolean;
   // beam support block (Motian practice): LC head under every beam bottom plate, LDD wingless bottom plates, GBB cover plates + GC cover heads
-  beamHeads: boolean; beamHeadW: number; beamHeadSide: number; beamWingless: boolean; beamCover: boolean; beamCoverHeadW: number;
+  beamHeads: boolean; beamHeadW: number; beamHeadSide: number; beamWingless: boolean; beamCover: boolean; beamCoverHeadW: number; beamBulkheads: number;
   // wall tab
   wallWidthPriority: number[];        // wall panel width priority
   wallPanelWidth: number;
@@ -107,7 +107,7 @@ export const DEFAULT_PK: PkRules = {
   beamRibLens: [2500, 2000, 1200], beamRibWidth: 50, beamRibFromBeam: 250, beamRib2Height: 750, beamRib2From: 150, beamRibTie: 1000,
   beamCornerWidth: 0, beamCornerOut: 50, beamBottomMode: "auto", beamBottomLens: [1000, 900, 700], beamBottomMin: 100,
   propGroups: [{ maxBeamW: 150, extend: 15, width: 200 }, { maxBeamW: 200, extend: 15, width: 150 }, { maxBeamW: 99999, extend: 10, width: 150 }],
-  beamHeads: false, beamHeadW: 150, beamHeadSide: 80, beamWingless: false, beamCover: false, beamCoverHeadW: 150,
+  beamHeads: false, beamHeadW: 150, beamHeadSide: 80, beamWingless: false, beamCover: false, beamCoverHeadW: 150, beamBulkheads: 0,
   propSpread: "even", beamAutoRib: true, beamAutoProps: false, beamTiePlate: false, beamUseSupport: false, beam200250Support: true,
   wallWidthPriority: [400, 300, 200], wallPanelWidth: 500, clampMinGap: 1000, wallKHeight: 300, wallKMin: 500, wallKLens: [1500, 1200, 1000],
   ribHeights: [250, 800, 1600, 2500], tubeHeights: [275, 1075, 1975], tubeStagger: true,
@@ -154,7 +154,7 @@ export function normalisePk(raw: unknown): PkRules {
     beamAutoRib: pbool(r.beamAutoRib, d.beamAutoRib), beamAutoProps: pbool(r.beamAutoProps, d.beamAutoProps), beamTiePlate: pbool(r.beamTiePlate, d.beamTiePlate),
     beamUseSupport: pbool(r.beamUseSupport, d.beamUseSupport), beam200250Support: pbool(r.beam200250Support, d.beam200250Support),
     beamHeads: pbool(r.beamHeads, d.beamHeads), beamHeadW: pnum(r.beamHeadW, d.beamHeadW, 50, 400), beamHeadSide: pnum(r.beamHeadSide, d.beamHeadSide, 0, 300),
-    beamWingless: pbool(r.beamWingless, d.beamWingless), beamCover: pbool(r.beamCover, d.beamCover), beamCoverHeadW: pnum(r.beamCoverHeadW, d.beamCoverHeadW, 50, 400),
+    beamWingless: pbool(r.beamWingless, d.beamWingless), beamCover: pbool(r.beamCover, d.beamCover), beamCoverHeadW: pnum(r.beamCoverHeadW, d.beamCoverHeadW, 50, 400), beamBulkheads: Math.round(pnum(r.beamBulkheads, d.beamBulkheads, 0, 2)),
     wallWidthPriority: plist(r.wallWidthPriority, d.wallWidthPriority, 50, 1200), wallPanelWidth: pnum(r.wallPanelWidth, d.wallPanelWidth, 100, 1200),
     clampMinGap: pnum(r.clampMinGap, d.clampMinGap, 200, 2500),
     wallKHeight: pnum(r.wallKHeight, d.wallKHeight, 100, 800), wallKMin: pnum(r.wallKMin, d.wallKMin, 100, 1500), wallKLens: plist(r.wallKLens, d.wallKLens, 200, 2400),

@@ -432,6 +432,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       // lintels in a wall line: both faces are the wall's top panels over the opening
       if (side > 0 && (b.lintel ?? 0) > 50) for (const Lp of faceRun(b.lintel!)) add(`T-${side}-${Lp}`, { code: `T-${side}-${Lp}`, description: `Wall top panel over opening (lintel ${bw} × ${Math.round(b.d)}) ${side} × ${Lp}`, group: "wall-top", w: side, h: Lp, custom: true }, 2);
     }
+    // beam soffit bulkhead (SB): closes the beam bottom at an open beam end so concrete cannot run out (ends against walls are closed by the wall panel)
+    if (PK && PK.beamBulkheads > 0 && b.bottom && bw > 0 && side > 0) add(`SB-${bw}-${side}`, { code: `SB-${bw}-${side}`, description: `Beam soffit bulkhead (SB) ${bw} × ${side} — closes the beam end`, group: "beam", w: bw, h: side, custom: true }, PK.beamBulkheads);
     const props = b.bottom && bw > 0 ? Math.ceil(b.length / 1200) + 1 : 0;
     beamProps += props;
     beamLayouts.push({ code: b.code, length: Math.round(b.length), b: bw, d: Math.round(b.d), side, sides: b.sides, bottom: b.bottom && bw > 0, pieces, props });
