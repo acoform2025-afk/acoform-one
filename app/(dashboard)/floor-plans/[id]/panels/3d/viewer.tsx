@@ -140,7 +140,10 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
             blocks(A.props.map((p) => [p[0], 0.005, p[1]]), [0.15, 0.01, 0.15], 0x52525b);                      // base plates
             rod(A.ties.map((t) => [[t[0], t[1], t[2]], [t[0] + t[3] * 0.12, t[1], t[2] + t[4] * 0.12]]), 0.008, 0x111827);   // tie ends
             blocks(A.ties.map((t) => [t[0] + t[3] * 0.07, t[1], t[2] + t[4] * 0.07]), [0.05, 0.05, 0.05], 0x374151);      // wing nut / wedge
-            rod(A.walers.map((w) => [[w[0], w[1], w[2]], [w[3], w[1], w[4]]]), 0.035, 0x1f2937);                 // alignment walers
+            if (A.ribs) {
+              rod(A.ribs.map((w) => [[w[0], w[1], w[2]], [w[3], w[1], w[4]]]), 0.03, 0x7c2d12);                // back-ribs (detailed wall rules)
+              rod((A.tubes ?? []).map((w) => [[w[0], w[1], w[2]], [w[3], w[1], w[4]]]), 0.025, 0x0f766e);       // square tubes
+            } else rod(A.walers.map((w) => [[w[0], w[1], w[2]], [w[3], w[1], w[4]]]), 0.035, 0x1f2937);        // alignment walers
             rod(A.pushPull.map((p) => [[p[0], p[1], p[2]], [p[3], 0.02, p[4]]]), 0.022, 0xfacc15);              // push-pull props
             blocks(A.brackets, [0.06, 0.08, 0.06], 0x9a3412);                                                      // riser brackets
           }
@@ -365,7 +368,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           // how many pieces each layer has — a layer with nothing on this floor (e.g. no columns in a shear-wall building) is shown greyed with "0"
           const pcs = scene.panels.filter((p) => KIND_LAYER[p.k] === l).length;
           const n = l === "walls" ? scene.walls.length : l === "columns" ? (scene.cols?.length ?? 0) + pcs : l === "slab" ? scene.slabPoly.length : l === "beams" ? (scene.beamSolids?.length ?? 0) + scene.beams.length + pcs
-            : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "arch" ? (scene.arch?.length ?? 0) : l === "acc" ? (scene.acc ? scene.acc.props.length + scene.acc.ties.length + scene.acc.walers.length : 0) : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
+            : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "arch" ? (scene.arch?.length ?? 0) : l === "acc" ? (scene.acc ? scene.acc.props.length + scene.acc.ties.length + (scene.acc.ribs?.length ?? scene.acc.walers.length) : 0) : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
           return (
             <button key={l} type="button" onClick={() => toggle(l)} onDoubleClick={() => only(l)} title={`${n ? `${n} on this floor` : "nothing of this kind on this floor"} · double-click to see only this`}
               className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : n ? "border border-graphite-700 text-graphite-300 hover:bg-graphite-800" : "border border-dashed border-graphite-800 text-graphite-600"}`}>{LABEL[l]}{n ? "" : " (0)"}</button>

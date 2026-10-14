@@ -34,6 +34,8 @@ export type Acc3 = {
   pushPull: [number, number, number, number, number, number][];   // wall point x, y, z → floor point x, 0, z
   brackets: [number, number, number][];                 // riser brackets
   heads: [number, number, number, number, number?][];   // prop heads / drop heads: x, y, z, kind, direction of the keel it sits in (radians)
+  ribs?: [number, number, number, number, number][];    // back-ribs (detailed wall rules): x0, y, z0, x1, z1
+  tubes?: [number, number, number, number, number][];   // square tubes (detailed wall rules): x0, y, z0, x1, z1
 };
 
 const ring = (r: Pt[]): [number, number][] => { const o = r.map((p) => [p[0], p[1]] as [number, number]); if (o.length && (o[0][0] !== o[o.length - 1][0] || o[0][1] !== o[o.length - 1][1])) o.push(o[0]); return o; };
@@ -50,6 +52,7 @@ export function buildScene3(o: {
   propSpacing?: number; tieH?: number; tieV?: number;   // m, mm, mm
   midBeamMm?: number;                       // keel (mid beam) width; it carries the deck panels and the prop heads sit in it
   beamSideWidths?: number[];                // panel widths used for the beam side panels (the wall panel widths)
+  pkWall?: { ribHeights: number[]; ribMax: number; tubeHeights: number[]; tubeMax: number; ribGap: number };   // detailed wall rules: rows of back-ribs and square tubes
 }): Scene3 {
   const H = Math.max(0.5, o.floorHeight - o.slabMm / 1000), slab = o.slabMm / 1000;
   // walls: even-odd combination of the merged wall rings → proper polygons with holes
@@ -481,6 +484,18 @@ export function buildScene3(o: {
     if (L >= 0.6) {
       const o2 = 0.09;
       for (const y of [0.6, Math.max(1.2, hF - 0.7)]) acc.walers.push([a[0] + nx * o2, y, a[1] + ny * o2, a[0] + ux * L + nx * o2, a[1] + uy * L + ny * o2]);
+      if (o.pkWall) {
+        // back-ribs and square tubes in rows at the heights of the rules, cut into pieces no longer than the stock length
+        const cut = (hs: number[], max: number, off: number, out: Acc3["ribs"] & object) => {
+          for (const hmm of hs) {
+            const y = hmm / 1000; if (y >= hF) continue;
+            const n = Math.max(1, Math.ceil(L / (max / 1000))), seg = L / n, gap = Math.min(o.pkWall!.ribGap / 1000, seg / 4);
+            for (let i = 0; i < n; i++) { const t0 = i * seg + (i ? gap / 2 : 0), t1 = (i + 1) * seg - (i < n - 1 ? gap / 2 : 0); out.push([a[0] + ux * t0 + nx * off, y, a[1] + uy * t0 + ny * off, a[0] + ux * t1 + nx * off, a[1] + uy * t1 + ny * off]); }
+          }
+        };
+        (acc.ribs ??= []); (acc.tubes ??= []);
+        cut(o.pkWall.ribHeights, o.pkWall.ribMax, o2, acc.ribs); cut(o.pkWall.tubeHeights, o.pkWall.tubeMax, o2 + 0.05, acc.tubes);
+      }
       if (pick) {
         const nP = Math.floor(L / 3);
         for (let i = 1; i <= nP; i++) { const t = (i * L) / (nP + 1), wx = a[0] + ux * t + nx * o2, wz = a[1] + uy * t + ny * o2; acc.pushPull.push([wx, Math.min(2.1, hF - 0.4), wz, wx + nx * 1.6, wz + ny * 1.6, 0]); }
@@ -499,7 +514,7 @@ export function buildScene3(o: {
     cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps, stairSolids,
     panels, mb: o.zones.flatMap((z) => z.mb), keel: { w: (o.midBeamMm ?? 150) / 1000, d: 0.1 }, zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
     stats: { wall: wallN, deck: deckN, special },
-    acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map((x) => (x === undefined ? x : r3(x))) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map((x) => r3(x ?? 0)) as Acc3["heads"][number]) },
+    acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map((x) => (x === undefined ? x : r3(x))) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map((x) => r3(x ?? 0)) as Acc3["heads"][number]), ...(acc.ribs ? { ribs: acc.ribs.map((v) => v.map(r3) as NonNullable<Acc3["ribs"]>[number]), tubes: (acc.tubes ?? []).map((v) => v.map(r3) as NonNullable<Acc3["tubes"]>[number]) } : {}) },
     arch: (o.arch ?? []).map((x) => ({ k: x.k, ...(x.a ? { a: [r3(x.a[0]), r3(x.a[1])] as Pt } : {}), ...(x.b ? { b: [r3(x.b[0]), r3(x.b[1])] as Pt } : {}), ...(x.ring ? { ring: x.ring.map((q) => [r3(q[0]), r3(q[1])] as Pt) } : {}) })),
     wallBits, glass: glass.map((g) => ({ ...g, p: g.p.map((v) => [r3(v[0]), r3(v[1]), r3(v[2])]) as [number, number, number][] })),
   };
