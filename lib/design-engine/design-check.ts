@@ -12,7 +12,7 @@ import type { Zone } from "@/lib/floor-plans/zones";
 import type { FaceLayout } from "./floor-panels";
 import { pinHoleCheck, type FabSpec } from "./fabrication";
 
-export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole";
+export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height";
 export type Issue = { id: string; sev: "error" | "warn"; kind: IssueKind; where: string; detail: string; at?: Pt; z?: number };
 export const ISSUE_LABEL: Record<IssueKind, string> = {
   model: "Model check",
@@ -24,6 +24,7 @@ export const ISSUE_LABEL: Record<IssueKind, string> = {
   "deck-overlap": "Deck panels overlapping",
   uncovered: "Slab not covered by panels",
   "pin-hole": "Pin holes of special panels",
+  "face-height": "Wall panel height against clear height",
 };
 
 const RAIL = 0.065, OFF = 0.005;
@@ -180,6 +181,13 @@ export function designCheck(o: CheckInput) {
     const big = [...z.specials].sort((a, b) => b.area - a.area)[0];
     const xs = big.rings[0].map((p) => p[0]), ys = big.rings[0].map((p) => p[1]);
     add({ sev: "warn", kind: "uncovered", where: z.code, detail: `${z.specialArea.toFixed(2)} m² of zone ${z.code} (${z.area.toFixed(1)} m²) is not covered by standard deck panels — ${z.specials.length} piece(s) need special deck panels or plywood.`, at: [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2], z: Hm });
+  }
+  // ── wall panel height: every normal wall face should reach the underside of the slab (clear height), not stop short or poke through
+  if (o.H > 0) for (const f of o.faces) {
+    if (f.set === "column" || /-O\d+[HS]$/.test(f.code) || f.length < 300 || !(f.height > 0.6 * o.H)) continue;   // parapets / upstands are lower on purpose
+    const d = f.height - o.H;
+    if (d < -60) add({ sev: "warn", kind: "face-height", where: f.code, detail: `Panels of ${f.code} are ${Math.round(f.height)} mm high but the clear height is ${Math.round(o.H)} mm — ${Math.round(-d)} mm of wall is left open at the top.` });
+    else if (d > 150) add({ sev: "warn", kind: "face-height", where: f.code, detail: `Panels of ${f.code} are ${Math.round(f.height)} mm high, ${Math.round(d)} mm above the clear height ${Math.round(o.H)} mm — they will run into the slab above.` });
   }
   // ── pin holes of special panels
   for (const p of pinHoleCheck(o.specs)) add({ sev: "warn", kind: "pin-hole", where: p.code, detail: p.issue });
