@@ -45,7 +45,7 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
     <div className="mt-6 rounded-lg border border-graphite-800 bg-graphite-950 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-medium text-graphite-100">Detailed rules — beam and wall</h3>
+          <h3 className="text-sm font-medium text-graphite-100">Detailed rules — beam, slab and wall</h3>
           <p className="text-xs text-graphite-500">Panel sizes are tried in the order shown (first one that fits is used). Values are the starting point from the PKPM video; change them to ACOFORM's own sizes.</p>
         </div>
         <div className="flex gap-2">
