@@ -246,13 +246,30 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   // ---- corners
   const ic = widest("internal_corner"), ec = widest("external_corner");
   const legs = (a: number, b: number) => (R?.bothLegs ? a + b : a);    // corner area on both legs (Indian BOM practice) or one leg
+  // wall taller than the standard panel: every corner needs a top piece to the same height, or the corner stays open above it
+  const topCount = new Map<number, number>();
+  for (const l of layouts) if (!l.end && l.top > 0 && !l.set) topCount.set(l.top, (topCount.get(l.top) ?? 0) + 1);
+  const cornerTop = [...topCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+  const topPiece = !R?.fullHeight && cornerTop > 0;
   if (sysStd && (corners > 0 || (o.extCorners ?? 0) > 0)) {
     const ia = R!.internalCorner, ib = R!.internalCornerLeg || ia, ea = Math.round(R!.externalCorner * 10) / 10;
     if (corners > 0) add("CORNER", { code: `IC-${ia}x${ib}-${o.stdHeight}`, description: `Internal corner ${ia} × ${ib}${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ia, ib), h: o.stdHeight, custom: false }, corners);
     if ((o.extCorners ?? 0) > 0 && R!.wallEcAngles) add("ECW", { code: `EC-${ea}x${ea}-${o.stdHeight}`, description: `External corner angle ${ea} × ${ea} (outside corners of walls)${R!.bothLegs ? " (area on both legs)" : ""}`, group: "corner", w: legs(ea, ea), h: o.stdHeight, custom: false }, o.extCorners!);
+    if (topPiece) {
+      if (corners > 0) add("CORNERT", { code: `ICT-${ia}x${ib}-${cornerTop}`, description: `Internal corner top piece ${ia} × ${ib} × ${cornerTop} (on the standard corner, up to the wall height)`, group: "corner", w: legs(ia, ib), h: cornerTop, custom: true }, corners);
+      if ((o.extCorners ?? 0) > 0 && R!.wallEcAngles) add("ECWT", { code: `ECT-${ea}x${ea}-${cornerTop}`, description: `External corner top piece ${ea} × ${ea} × ${cornerTop}`, group: "corner", w: legs(ea, ea), h: cornerTop, custom: true }, o.extCorners!);
+    }
   } else if (corners > 0) {
     const c = ic ?? ec;
     add("CORNER", { code: c ? `${ic?.panel_code ?? ""}${ic && ec ? " / " : ""}${ec?.panel_code ?? ""}` : "IC/EC", description: "Corner piece 65 mm (IC/EC — confirm type)", group: "corner", w: c?.width_mm ?? 65, h: o.stdHeight, custom: false }, corners, c ? Number(c.weight_kg) : undefined);
+    if (topPiece) add("CORNERT", { code: `CT-${c?.width_mm ?? 65}-${cornerTop}`, description: `Corner top piece ${c?.width_mm ?? 65} × ${cornerTop} (on the standard corner, up to the wall height)`, group: "corner", w: c?.width_mm ?? 65, h: cornerTop, custom: true }, corners);
+  }
+
+  // corners of every wall end: an external corner angle at both sides of the stop-end
+  if (R?.endCorners && ends > 0) {
+    const ea = Math.round((R.externalCorner || 65) * 10) / 10;
+    add("ECW", { code: `EC-${ea}x${ea}-${o.stdHeight}`, description: `External corner angle ${ea} × ${ea} at wall ends (both corners of each stop-end)`, group: "corner", w: legs(ea, ea), h: o.stdHeight, custom: false }, ends * 2);
+    if (topPiece) add("ECWT", { code: `ECT-${ea}x${ea}-${cornerTop}`, description: `External corner top piece ${ea} × ${ea} × ${cornerTop} at wall ends`, group: "corner", w: legs(ea, ea), h: cornerTop, custom: true }, ends * 2);
   }
 
   // ---- deck: strips across each slab, scaled to the net soffit area
