@@ -20,6 +20,7 @@ export type LayoutRules = {
   fullHeight: boolean;           // one full-height wall panel per face (flat-tie) instead of standard + top panel
   bottomStrip: number;           // mm strip under full-height panels (flat-tie R40 / R50), 0 = none
   minFiller: number;             // fillers narrower than this are solid strips
+  propKn: number;                // kN — safe load of one prop (the design check warns above it; 0 = off)
   deckPlywoodMax: number;        // m² — a deck special up to this size is plywood on battens; a larger one is cut to shape at the factory
   internalCorner: number;        // mm leg of the internal corner (IC 100 × 100)
   internalCornerLeg: number;     // second leg of the internal corner, mm (Cosmos IC 100 × 125)
@@ -179,7 +180,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
     label: "Tie-rod system · 2400 panel + top panel",
     note: "Indian practice (e.g. Royce One / Cosmos): 2400 wall panels with a top panel, widths in 25 mm steps, tie rods, 150 mm mid beam and prop heads, deck lengths sized to each room.",
     rules: {
-      system: "tierod", wallWidths: range(125, 600, 25), stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100, deckPlywoodMax: 0.05,
+      system: "tierod", wallWidths: range(125, 600, 25), stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100, deckPlywoodMax: 0.05, propKn: 20,
       internalCorner: 100, internalCornerLeg: 125, wallEcAngles: false, columnSetPct: 100, externalCorner: 63.5, kickerMm: 150, tie: "rod", tieH: 800, tieV: 600,
       deckWidths: range(200, 600, 25), deckLengths: [1200, 1050, 900, 850, 800], midBeam: 150, propHead: [150, 300],
       soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 125, beamCapLeg: 175, bothLegs: true, kickerCornerLen: 330, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 25, columnsSeparate: true, columnFirstCast: 2400, coresWithColumns: true, stairClosed: true, stairStyle: "india", lossPct: 5, sparePct: {},
@@ -189,7 +190,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
     label: "Flat-tie system · full-height panel",
     note: "Chinese practice (Guangzhou Motian, Poly Linyu 3# package): full-height wall panels Q (2700 outside, 2600 + 40/50 foot board R inside), widths in 50 mm steps up to 500, flat ties, keel ZL 100 × 1000 + end keels DL, prop heads PH 100 × 200, slab corner C 100 × 150, internal corner QZ 150 × 150, external K-board 200, beam side L / bottom LD / corner E, walers FT in 4 rows, props kept for 3 floors, 10 % loss on small parts.",
     rules: {
-      system: "flattie", wallWidths: range(100, 500, 50), stdHeight: 2700, fullHeight: true, bottomStrip: 40, minFiller: 100, deckPlywoodMax: 0.05,
+      system: "flattie", wallWidths: range(100, 500, 50), stdHeight: 2700, fullHeight: true, bottomStrip: 40, minFiller: 100, deckPlywoodMax: 0.05, propKn: 20,
       internalCorner: 150, internalCornerLeg: 150, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 200, tie: "flat", tieH: 450, tieV: 600,
       deckWidths: range(100, 600, 50), deckLengths: [1200, 1100, 900, 800, 600], midBeam: 100, propHead: [100, 200],
       soffitCornerLen: 1800, soffitCornerW: 100, soffitCornerLeg: 150, beamCapLeg: 150, bothLegs: true, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 3, beamLenStep: 50, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, stairStyle: "china", lossPct: 10, sparePct: {},
@@ -199,7 +200,7 @@ export const PRESETS: Record<FormworkSystem, { label: string; note: string; rule
     label: "ACOFORM standard",
     note: "ACOFORM STD FAB drawings: catalogue wall panels (600 … 100) at 2400 with top panels / RK panels, 1200 deck panels, 100 mm mid beam and prop heads, tie rods.",
     rules: {
-      system: "acoform", wallWidths: [], stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100, deckPlywoodMax: 0.05,
+      system: "acoform", wallWidths: [], stdHeight: 2400, fullHeight: false, bottomStrip: 0, minFiller: 100, deckPlywoodMax: 0.05, propKn: 20,
       internalCorner: 100, internalCornerLeg: 100, wallEcAngles: true, columnSetPct: 100, externalCorner: 65, kickerMm: 100, tie: "rod", tieH: 800, tieV: 800,
       deckWidths: [], deckLengths: [1200], midBeam: 100, propHead: [100, 230],
       soffitCornerLen: 1200, soffitCornerW: 0, soffitCornerLeg: 0, beamCapLeg: 0, bothLegs: false, kickerCornerLen: 0, upstandMm: 250, propSpacing: 1.2, supportSets: 1, beamLenStep: 5, columnsSeparate: false, columnFirstCast: 0, coresWithColumns: false, stairClosed: true, stairStyle: "india", lossPct: 5, sparePct: {},
@@ -239,6 +240,7 @@ export function normaliseLayoutRules(raw: unknown): LayoutRules {
     bottomStrip: num(r.bottomStrip, d.bottomStrip, 0, 150),
     minFiller: num(r.minFiller, d.minFiller, 0, 300),
     deckPlywoodMax: num(r.deckPlywoodMax, d.deckPlywoodMax, 0, 5),
+    propKn: num(r.propKn, d.propKn, 0, 200),
     internalCorner: num(r.internalCorner, d.internalCorner, 50, 300),
     internalCornerLeg: num(r.internalCornerLeg, d.internalCornerLeg, 50, 300),
     wallEcAngles: typeof r.wallEcAngles === "boolean" ? r.wallEcAngles : d.wallEcAngles,

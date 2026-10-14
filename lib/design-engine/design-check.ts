@@ -12,7 +12,7 @@ import type { Zone } from "@/lib/floor-plans/zones";
 import type { FaceLayout } from "./floor-panels";
 import { pinHoleCheck, type FabSpec } from "./fabrication";
 
-export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height" | "leak";
+export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height" | "leak" | "corner" | "beam-parts" | "props";
 export type Issue = { id: string; sev: "error" | "warn"; kind: IssueKind; where: string; detail: string; at?: Pt; z?: number };
 export const ISSUE_LABEL: Record<IssueKind, string> = {
   model: "Model check",
@@ -26,6 +26,9 @@ export const ISSUE_LABEL: Record<IssueKind, string> = {
   "pin-hole": "Pin holes of special panels",
   "face-height": "Wall panel height against clear height",
   leak: "Open gap — concrete can leak",
+  corner: "Wall corners (internal / external)",
+  "beam-parts": "Beam soffit and side panels",
+  props: "Deck props and beam props (load)",
 };
 
 const RAIL = 0.065, OFF = 0.005;
@@ -88,6 +91,12 @@ export type CheckInput = {
   faces: FaceLayout[]; mpp: number; walls: Pt[][]; gaps: { a: Pt; b: Pt; thk: number }[]; zones: Zone[];
   specs: FabSpec[]; H: number; stdHeight: number; deckCount: number; slabCount: number;
 };
+
+/** Count of errors and warnings per kind of check. */
+export function summarise(issues: Issue[]) {
+  const kinds = Object.keys(ISSUE_LABEL) as IssueKind[];
+  return kinds.map((k) => ({ kind: k, label: ISSUE_LABEL[k], errors: issues.filter((i) => i.kind === k && i.sev === "error").length, warnings: issues.filter((i) => i.kind === k && i.sev === "warn").length }));
+}
 
 export function designCheck(o: CheckInput) {
   const issues: Issue[] = [];
@@ -196,8 +205,7 @@ export function designCheck(o: CheckInput) {
   // ── pin holes of special panels
   for (const p of pinHoleCheck(o.specs)) add({ sev: "warn", kind: "pin-hole", where: p.code, detail: p.issue });
 
-  const kinds = Object.keys(ISSUE_LABEL) as IssueKind[];
-  const summary = kinds.map((k) => ({ kind: k, label: ISSUE_LABEL[k], errors: issues.filter((i) => i.kind === k && i.sev === "error").length, warnings: issues.filter((i) => i.kind === k && i.sev === "warn").length }));
+  const summary = summarise(issues);
   return {
     issues, summary,
     checked: { faces: o.faces.length, strips: strips.length, deck: deck.length, zones: o.zones.length, specials: o.specs.length },

@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { runPanels } from "@/lib/floor-plans/run-panels";
-import { checkLayout } from "@/lib/floor-plans/check-run";
+import { checkAll as checkLayout } from "@/lib/floor-plans/scene-of";
 import { ISSUE_LABEL } from "@/lib/design-engine/design-check";
 
 export const runtime = "nodejs";

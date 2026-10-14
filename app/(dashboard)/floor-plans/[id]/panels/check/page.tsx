@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { runPanels, type PanelQuery } from "@/lib/floor-plans/run-panels";
-import { checkLayout } from "@/lib/floor-plans/check-run";
+import { checkAll as checkLayout } from "@/lib/floor-plans/scene-of";
 
 export const metadata = { title: "Design check" };
 export const dynamic = "force-dynamic";
@@ -17,6 +17,10 @@ const HOW: Record<string, string> = {
   "deck-on-beam": "Does any deck panel run across a beam over a door / window?",
   "deck-overlap": "Do any two deck panels overlap?",
   uncovered: "How much slab in each zone is left for special deck panels / plywood?",
+  leak: "Is any part of a wall face left open, so concrete can run out?",
+  corner: "Are there wall corners at odd angles that the standard corner pieces do not fit?",
+  "beam-parts": "Do the beam soffit and side panels cover the whole beam?",
+  props: "Is the load on a deck prop or beam prop inside its safe load (screening estimate)?",
   "pin-hole": "Can the special panels be pinned to the standard panels (hole grid, narrow pieces)?",
 };
 
