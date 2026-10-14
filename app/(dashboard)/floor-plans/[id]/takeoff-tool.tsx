@@ -21,6 +21,7 @@ import {
 } from "@/lib/floor-plans/calc";
 import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, floorsFromTitle, isLayoutTitle, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { createAllLevelPlans, createLevelPlan, saveTakeoff } from "../actions";
+import { takeoffChecks } from "@/lib/floor-plans/takeoff-checks";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
@@ -906,6 +907,28 @@ export function TakeoffTool({ plan, tenantId, canEdit, quotes, designs, rules = 
             </span>
           </div>
         ) : null}
+
+        {!isDxf && size ? (() => {
+          const checks = takeoffChecks(t, mpp);
+          const bad = checks.filter((c) => c.sev === "error").length, warn = checks.filter((c) => c.sev === "warn").length;
+          const col = { error: "text-signal-red", warn: "text-signal-amber", info: "text-graphite-400" } as const;
+          return (
+            <Panel title={`Drawing check${checks.length ? ` (${bad ? bad + " error" + (bad > 1 ? "s" : "") + ", " : ""}${warn} to look at)` : ""}`} hint="Problems found in what is drawn. Click one to jump to it.">
+              {checks.length === 0 ? <p className="text-xs text-signal-green">No problems found.</p> : (
+                <ul className="max-h-72 space-y-1 overflow-y-auto pr-1 text-xs">
+                  {checks.map((c) => (
+                    <li key={c.id}>
+                      <button type="button" onClick={() => { setSelected(c.shapeId ?? null); fitBox(c.box); }} className="w-full rounded px-1.5 py-1 text-left hover:bg-graphite-800">
+                        <span className={cls("block font-medium", col[c.sev])}>{c.sev === "error" ? "● " : c.sev === "warn" ? "▲ " : "○ "}{c.title}</span>
+                        <span className="block text-[11px] leading-snug text-graphite-500">{c.detail}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          );
+        })() : null}
 
         {isDxf && parts.length > 1 ? (
           <Panel title={`Drawings in this file (${parts.length})`} hint="The file is split into its separate drawings. Click one to see it close up; “Count this” measures only that drawing (e.g. one block / wing).">
