@@ -93,7 +93,8 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const R = o.rules;
   const sysStd = !!R && R.system !== "acoform";                 // a chosen system's own sizes count as standard panels
   const wallCat = cat("wall_panel").filter((p) => Math.abs(p.height_mm - o.stdHeight) < 1);
-  const wallW = R?.wallWidths.length ? R.wallWidths : wallCat.map((p) => p.width_mm);
+  const PK = R?.pk?.enabled ? R.pk : null;                       // detailed beam / wall rules (priority lists), when switched on
+  const wallW = PK ? [...new Set(PK.wallWidthPriority)] : R?.wallWidths.length ? R.wallWidths : wallCat.map((p) => p.width_mm);
   // the catalogue panel of this width, or the system's own panel (code WP-w-h, weight from the standard sections)
   const wallPanel = (w: number): CatPanel => wallCat.find((x) => x.width_mm === w)
     ?? { id: "", panel_code: `WP-${w}-${o.stdHeight}`, panel_category: "wall_panel", width_mm: w, height_mm: o.stdHeight, weight_kg: fabSpec(`WP-${w}-${o.stdHeight}`, "", w, o.stdHeight, 1).kgEach, area_sqm: (w * o.stdHeight) / 1e6 };
@@ -369,17 +370,20 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const beamAgg = new Map<string, { code: string; size: string; n: number; len: number; area: number; pieces: Map<number, number>; sides: number; bottom: boolean; props: number }>();
   for (const b of beams) {
     const side = Math.max(0, Math.round(b.d - o.slabMm)), bw = Math.round(b.b);
-    const fit = fillRun(b.length, BEAM_LEN);
+    const BL = PK ? PK.beamSideLens : BEAM_LEN;                  // beam side panel lengths, in order of priority
+    const fit = fillRun(b.length, BL);
     const bStep = R?.beamLenStep && R.beamLenStep > 5 ? R.beamLenStep : 5;
     const left = fit.left < tol ? 0 : Math.ceil(fit.left / bStep) * bStep;  // beam filler made to the system's length step
     const pieces = [...fit.panels, ...(left ? [left] : [])];
-    const faceRun = (run: number) => { const f = fillRun(run, BEAM_LEN); const l = f.left < tol ? 0 : Math.ceil(f.left / bStep) * bStep; return [...f.panels, ...(l ? [l] : [])]; };
+    const faceRun = (run: number) => { const f = fillRun(run, BL); const l = f.left < tol ? 0 : Math.ceil(f.left / bStep) * bStep; return [...f.panels, ...(l ? [l] : [])]; };
     const faces = b.inner != null || b.outer != null;
+    const bpieces = PK && b.bottom && bw > 0 ? (() => { const f = fillRun(b.length, PK.beamBottomLens); const l = f.left < tol ? 0 : Math.ceil(f.left / bStep) * bStep; return [...f.panels, ...(l && l >= PK.beamBottomMin ? [l] : l ? [PK.beamBottomMin] : [])]; })() : pieces;
     for (const Lp of pieces) {
-      const cust = !BEAM_LEN.includes(Lp);
+      const cust = !BL.includes(Lp);
       if (side > 0 && !faces) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: side, h: Lp, custom: true }, b.sides);
-      if (b.bottom && bw > 0) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
+      if (b.bottom && bw > 0 && !PK) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${cust ? " (filler)" : ""}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
     }
+    if (PK && b.bottom && bw > 0) for (const Lp of bpieces) add(`BB-${bw}-${Lp}`, { code: `BB-${bw}-${Lp}`, description: `Beam bottom panel ${bw} × ${Lp}${PK.beamBottomLens.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: bw, h: Lp, custom: true }, 1);
     if (faces) {
       // side faces measured on the drawing: inner faces (slab beyond) depth − slab, outer faces (slab edge / opening) full depth
       if (side > 0 && (b.inner ?? 0) > 50) for (const Lp of faceRun(b.inner!)) add(`BS-${side}-${Lp}`, { code: `BS-${side}-${Lp}`, description: `Beam side panel ${side} × ${Lp}${BEAM_LEN.includes(Lp) ? "" : " (filler)"}`, group: "beam", w: side, h: Lp, custom: true }, 1);
