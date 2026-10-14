@@ -1,6 +1,7 @@
 import { buildZones, type runPanels } from "./run-panels";
 import { wallPanelNumbers } from "./zones";
 import { parseFloorsLabel } from "./floors-label";
+import { applyTableStyle, LIST_COLUMNS } from "./table-styles";
 import { packingByZone } from "./packing";
 import { accessoriesCsv, csvRow, csvText, faceZones, mainListCsv, walersCsv, zoneAreas } from "./package";
 import { fabSpec, specialsFromBom } from "@/lib/design-engine/fabrication";
@@ -78,5 +79,8 @@ export function buildPackage(r: Ran, areasK: number): PackageFile[] | null {
   const cl = [csvRow(["No.", "Severity", "Check", "Where", "Problem"])];
   for (const i of ck.issues) cl.push(csvRow([i.id, i.sev === "error" ? "ERROR" : "WARNING", ISSUE_LABEL[i.kind], i.where, i.detail]));
   files.push({ key: "check", name: "10_Design check", title: "Design check", csv: csvText(cl) });
+  // table styles of the layout rules: chosen columns, order and headings
+  const styles = rules?.tableStyles ?? {};
+  for (const f of files) if (styles[f.key] && LIST_COLUMNS[f.key]) f.csv = applyTableStyle(f.csv, styles[f.key], LIST_COLUMNS[f.key].cols);
   return files;
 }

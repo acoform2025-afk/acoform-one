@@ -8,6 +8,8 @@
  *  • "flattie" — one full-height panel + 40/50 mm bottom strip, flat ties (Chinese practice, e.g. Guangzhou Motian)
  *  • "acoform" — ACOFORM standard (ACOFORM STD FAB drawings, panel catalogue widths)
  */
+import { normaliseTableStyles, type TableStyles } from "@/lib/floor-plans/table-styles";
+
 export type FormworkSystem = "tierod" | "flattie" | "acoform";
 
 export type LayoutRules = {
@@ -50,6 +52,7 @@ export type LayoutRules = {
   // accessories
   lossPct: number;               // extra % on small parts (pins, wedges, ties, sleeves)
   sparePct: Record<string, number>;   // site spare % per panel family (learned from site reports), e.g. { deck: 2 }
+  tableStyles?: TableStyles;     // columns / order / headings of the Excel lists
   pk?: PkRules;                  // detailed beam / wall rules (priority lists, back-ribs, K-plates, props)
 };
 
@@ -243,6 +246,7 @@ export function normaliseLayoutRules(raw: unknown): LayoutRules {
     lossPct: num(r.lossPct, d.lossPct, 0, 50),
     sparePct: (() => { const o: Record<string, number> = {}; const sp = r.sparePct && typeof r.sparePct === "object" ? (r.sparePct as Record<string, unknown>) : {}; for (const [k, v] of Object.entries(sp)) { const n = Number(v); if (/^[a-z-]{2,12}$/.test(k) && Number.isFinite(n) && n > 0) o[k] = Math.min(25, n); } return o; })(),
     pk: normalisePk(r.pk),
+    tableStyles: normaliseTableStyles(r.tableStyles),
   };
 }
 
