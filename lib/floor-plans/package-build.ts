@@ -3,6 +3,7 @@ import { wallPanelNumbers } from "./zones";
 import { parseFloorsLabel } from "./floors-label";
 import { applyTableStyle, LIST_COLUMNS } from "./table-styles";
 import { packingByZone } from "./packing";
+import { deckSpecialsCsv } from "./deck-specials";
 import { accessoriesCsv, csvRow, csvText, faceZones, mainListCsv, walersCsv, zoneAreas } from "./package";
 import { fabSpec, specialsFromBom } from "@/lib/design-engine/fabrication";
 import { designCheck, ISSUE_LABEL } from "@/lib/design-engine/design-check";
@@ -58,6 +59,8 @@ export function buildPackage(r: Ran, areasK: number): PackageFile[] | null {
   const prod = [csvRow(["Mark", "Code", "Description", "Width mm", "Height / length mm", "Nos", "Panel kg", "Total kg", "Holes (height edge)", "Holes (width edge)", "Notes"])];
   specs.forEach((s, i) => prod.push(csvRow([`SP-${String(i + 1).padStart(2, "0")}`, s.code, s.description, s.w, s.h, s.qty, s.kgEach, (s.kgEach * s.qty).toFixed(1), s.holesH.join(" "), s.holesW.join(" "), s.warnings.join(" ")])));
   files.push({ key: "production", name: "04_Special panels production order", title: "Special panels production order", csv: csvText(prod) });
+
+  files.push({ key: "deck-specials", name: "04b_Deck specials (cut to shape)", title: "Deck specials — pieces cut to the slab outline", csv: csvText(deckSpecialsCsv(zones as never, areaOf, rules?.deckPlywoodMax ?? 0.25)) });
 
   files.push({ key: "walers", name: "05_Walers list", title: "Walers / back stiffeners list", csv: walersCsv(r.result.faces, rules, title) });
 
