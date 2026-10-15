@@ -43,7 +43,7 @@ const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
 
 /** Fewest panels covering as much of `run` as possible (exact DP, in steps of the widths' common divisor, at least 5 mm).
  *  minFiller: a left-over strip of 25 mm … minFiller is too small to frame, so one panel less is used and the filler made wider. */
-export function fillRun(run: number, widths: number[], minFiller = 0): { panels: number[]; left: number } {
+export function fillRun(run: number, widths: number[], minFiller = 0, ordered = false): { panels: number[]; left: number } {
   const ws = [...new Set(widths.map((w) => Math.round(w)).filter((x) => x > 0))];
   const step = Math.max(5, ws.reduce(gcd, 0));
   const fit = (r: number) => {
@@ -58,6 +58,23 @@ export function fillRun(run: number, widths: number[], minFiller = 0): { panels:
     let i = units; while (i > 0 && best[i] == null) i--;
     const panels: number[] = []; let covered = 0;
     while (i > 0) { panels.push(pick[i] * step); covered += pick[i] * step; i -= pick[i]; }
+    if (ordered) {
+      // widths are in priority order: use as many of the first width as possible, then the next, … for the same covered length
+      const pw = ws.map((w) => Math.round(w / step));
+      const reach = (k: number, t: number): boolean => {
+        if (t === 0) return true;
+        const r: boolean[] = Array(t + 1).fill(false); r[0] = true;
+        for (let x = 1; x <= t; x++) for (let j = k; j < pw.length; j++) if (x >= pw[j] && r[x - pw[j]]) { r[x] = true; break; }
+        return r[t];
+      };
+      const out: number[] = []; let t = Math.round(covered / step);
+      for (let k = 0; k < pw.length && t > 0; k++) {
+        for (let n = Math.floor(t / pw[k]); n >= 0; n--) {
+          if (reach(k + 1, t - n * pw[k])) { for (let q = 0; q < n; q++) out.push(pw[k] * step); t -= n * pw[k]; break; }
+        }
+      }
+      if (t === 0) return { panels: out, covered };
+    }
     return { panels: panels.sort((a, b) => b - a), covered };
   };
   let f = fit(run);
@@ -155,7 +172,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       continue;
     }
     const hand = o.faceEdits?.[f.code];                 // a face laid out by hand replaces the automatic fit
-    const fit = hand?.length ? { panels: hand, left: Math.max(0, Math.round(f.length - hand.reduce((a, w) => a + w, 0))) } : wallW.length ? fillRun(f.length, wallW, R?.minFiller ?? 0) : { panels: [], left: Math.round(f.length) };
+    const fit = hand?.length ? { panels: hand, left: Math.max(0, Math.round(f.length - hand.reduce((a, w) => a + w, 0))) } : wallW.length ? fillRun(f.length, wallW, R?.minFiller ?? 0, !!PK) : { panels: [], left: Math.round(f.length) };
     const panels = fit.panels;
     // lift cores / shear walls drawn on column layers, cast first with the columns: column set to the first pour,
     // the rest formed with the slab
@@ -224,7 +241,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     const parts: string[] = [];
     const fits: Fit[] = [];
     for (const [X, n] of [[Math.round(c.w), 2], [Math.round(c.d), 2]] as [number, number][]) {
-      const fit = wallW.length ? fillRun(X, wallW) : { panels: [], left: X };
+      const fit = wallW.length ? fillRun(X, wallW, 0, !!PK) : { panels: [], left: X };
       const left = fit.left < tol ? 0 : r5(fit.left);
       fits.push({ panels: fit.panels, filler: left });
       for (const w of fit.panels) {

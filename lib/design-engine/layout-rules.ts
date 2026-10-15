@@ -109,7 +109,7 @@ export const DEFAULT_PK: PkRules = {
   propGroups: [{ maxBeamW: 150, extend: 15, width: 200 }, { maxBeamW: 200, extend: 15, width: 150 }, { maxBeamW: 99999, extend: 10, width: 150 }],
   beamHeads: false, beamHeadW: 150, beamHeadSide: 80, beamWingless: false, beamCover: false, beamCoverHeadW: 150, beamBulkheads: 0,
   propSpread: "even", beamAutoRib: true, beamAutoProps: false, beamTiePlate: false, beamUseSupport: false, beam200250Support: true,
-  wallWidthPriority: [400, 300, 200], wallPanelWidth: 500, clampMinGap: 1000, wallKHeight: 300, wallKMin: 500, wallKLens: [1500, 1200, 1000],
+  wallWidthPriority: [600, 500, 400, 300, 200], wallPanelWidth: 500, clampMinGap: 1000, wallKHeight: 300, wallKMin: 500, wallKLens: [1500, 1200, 1000],
   ribHeights: [250, 800, 1600, 2500], tubeHeights: [275, 1075, 1975], tubeStagger: true,
   ribWidth: 60, rib45Width: 60, tubeWidth: 50, ribMax: 3000, tubeMax: 3500, ribGap: 20, ribEndExt: 180, angleExt: 22, diagExt: 30, uClip: 400,
   bottomAngle: 40, sunkAngle: 65, insideFromFloor: 50, sunkC: 50, cornerFloorGap: 5,
