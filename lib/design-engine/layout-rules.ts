@@ -80,7 +80,9 @@ export type PkRules = {
   // beam support block (Motian practice): LC head under every beam bottom plate, LDD wingless bottom plates, GBB cover plates + GC cover heads
   beamHeads: boolean; beamHeadW: number; beamHeadSide: number; beamWingless: boolean; beamCover: boolean; beamCoverHeadW: number; beamBulkheads: number;
   // wall tab
-  wallWidthPriority: number[];        // wall panel width priority
+  wallWidthPriority: number[];        // wall panel width priority (inside faces)
+  wallOutSame: boolean;               // outside faces use the same list
+  wallWidthPriorityOut: number[];     // wall panel width priority for outside faces (used when wallOutSame is off)
   wallPanelWidth: number;
   clampMinGap: number;                // min gap of square-tube clamp
   wallKHeight: number; wallKMin: number; wallKLens: number[];
@@ -109,7 +111,7 @@ export const DEFAULT_PK: PkRules = {
   propGroups: [{ maxBeamW: 150, extend: 15, width: 200 }, { maxBeamW: 200, extend: 15, width: 150 }, { maxBeamW: 99999, extend: 10, width: 150 }],
   beamHeads: false, beamHeadW: 150, beamHeadSide: 80, beamWingless: false, beamCover: false, beamCoverHeadW: 150, beamBulkheads: 0,
   propSpread: "even", beamAutoRib: true, beamAutoProps: false, beamTiePlate: false, beamUseSupport: false, beam200250Support: true,
-  wallWidthPriority: [600, 500, 400, 300, 200], wallPanelWidth: 500, clampMinGap: 1000, wallKHeight: 300, wallKMin: 500, wallKLens: [1500, 1200, 1000],
+  wallWidthPriority: [600, 500, 400, 300, 200], wallOutSame: true, wallWidthPriorityOut: [600, 500, 400, 300, 200], wallPanelWidth: 500, clampMinGap: 1000, wallKHeight: 300, wallKMin: 500, wallKLens: [1500, 1200, 1000],
   ribHeights: [250, 800, 1600, 2500], tubeHeights: [275, 1075, 1975], tubeStagger: true,
   ribWidth: 60, rib45Width: 60, tubeWidth: 50, ribMax: 3000, tubeMax: 3500, ribGap: 20, ribEndExt: 180, angleExt: 22, diagExt: 30, uClip: 400,
   bottomAngle: 40, sunkAngle: 65, insideFromFloor: 50, sunkC: 50, cornerFloorGap: 5,
@@ -155,7 +157,7 @@ export function normalisePk(raw: unknown): PkRules {
     beamUseSupport: pbool(r.beamUseSupport, d.beamUseSupport), beam200250Support: pbool(r.beam200250Support, d.beam200250Support),
     beamHeads: pbool(r.beamHeads, d.beamHeads), beamHeadW: pnum(r.beamHeadW, d.beamHeadW, 50, 400), beamHeadSide: pnum(r.beamHeadSide, d.beamHeadSide, 0, 300),
     beamWingless: pbool(r.beamWingless, d.beamWingless), beamCover: pbool(r.beamCover, d.beamCover), beamCoverHeadW: pnum(r.beamCoverHeadW, d.beamCoverHeadW, 50, 400), beamBulkheads: Math.round(pnum(r.beamBulkheads, d.beamBulkheads, 0, 2)),
-    wallWidthPriority: plist(r.wallWidthPriority, d.wallWidthPriority, 50, 1200), wallPanelWidth: pnum(r.wallPanelWidth, d.wallPanelWidth, 100, 1200),
+    wallWidthPriority: plist(r.wallWidthPriority, d.wallWidthPriority, 50, 1200), wallOutSame: pbool(r.wallOutSame, d.wallOutSame), wallWidthPriorityOut: plist(r.wallWidthPriorityOut, d.wallWidthPriorityOut, 50, 1200), wallPanelWidth: pnum(r.wallPanelWidth, d.wallPanelWidth, 100, 1200),
     clampMinGap: pnum(r.clampMinGap, d.clampMinGap, 200, 2500),
     wallKHeight: pnum(r.wallKHeight, d.wallKHeight, 100, 800), wallKMin: pnum(r.wallKMin, d.wallKMin, 100, 1500), wallKLens: plist(r.wallKLens, d.wallKLens, 200, 2400),
     ribHeights: plist(r.ribHeights, d.ribHeights, 50, 4000), tubeHeights: plist(r.tubeHeights, d.tubeHeights, 50, 4000), tubeStagger: pbool(r.tubeStagger, d.tubeStagger),
@@ -294,7 +296,7 @@ export function describeLayoutRules(r: LayoutRules): string[] {
   if (r.lossPct) out.push(`${r.lossPct} % added on small parts (pins, wedges, ties).`);
   const sp = Object.entries(r.sparePct ?? {}).filter(([, v]) => v > 0);
   if (sp.length) out.push(`Site spares (learned from site reports): ${sp.map(([k, v]) => `${k} ${v} %`).join(", ")}.`);
-  if (r.pk?.enabled) out.push(`Detailed rules on: wall widths ${r.pk.wallWidthPriority.join(" → ")}, back-ribs at ${r.pk.ribHeights.join(" / ")} mm, tubes at ${r.pk.tubeHeights.join(" / ")} mm, beam sides vertical above ${r.pk.beamTallVertMm} mm, deck panels ${r.pk.slabPanelWidths.join(" → ")} wide × ${r.pk.slabPanelLens.join(" → ")} long.`);
+  if (r.pk?.enabled) out.push(`Detailed rules on: wall widths ${r.pk.wallWidthPriority.join(" → ")}${r.pk.wallOutSame ? "" : ` (outside ${r.pk.wallWidthPriorityOut.join(" → ")})`}, back-ribs at ${r.pk.ribHeights.join(" / ")} mm, tubes at ${r.pk.tubeHeights.join(" / ")} mm, beam sides vertical above ${r.pk.beamTallVertMm} mm, deck panels ${r.pk.slabPanelWidths.join(" → ")} wide × ${r.pk.slabPanelLens.join(" → ")} long.`);
   return out;
 }
 

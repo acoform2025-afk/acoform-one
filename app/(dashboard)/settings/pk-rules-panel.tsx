@@ -192,7 +192,9 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
             <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-orange">Sizes</h4>
             <div className="mt-2 grid gap-4 md:grid-cols-3">
               {n("wallPanelWidth", "Standard panel width", "(mm)")}
-              {l("wallWidthPriority", "Wall panel width priority")}
+              {l("wallWidthPriority", "Wall panel width priority — inside faces")}
+              {c("wallOutSame", "Outside faces use the same widths")}
+              {!pk.wallOutSame && l("wallWidthPriorityOut", "Wall panel width priority — outside faces")}
               {n("clampMinGap", "Min gap of square-tube clamp", "(mm)")}
               {n("bottomAngle", "Bottom angle height", "(mm)")}
               {n("sunkAngle", "Sunk-slab bottom angle height", "(mm)")}

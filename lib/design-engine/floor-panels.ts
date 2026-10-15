@@ -16,7 +16,7 @@ import type { LayoutRules } from "./layout-rules";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
 export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
-export type Face = { code: string; length: number; height: number; geo?: FaceGeo; geo3?: FaceGeo & { z0: number }; part?: "above" | "below"; set?: "column" };   // geo3: where a piece over / under an opening sits (3D only; z0 mm above the floor)   // part: short piece over a door/window or below a window sill
+export type Face = { code: string; length: number; height: number; geo?: FaceGeo; geo3?: FaceGeo & { z0: number }; part?: "above" | "below"; set?: "column"; outer?: boolean };   // outer: the open (formwork) side faces outside the building   // geo3: where a piece over / under an opening sits (3D only; z0 mm above the floor)   // part: short piece over a door/window or below a window sill
 export type OpeningCut = { kind: "door" | "window"; w: number; h: number; t: number };                        // mm, one per opening (for reveals)                 // mm
 export type DeckPoly = { code: string; pts: Pt[]; holes: Pt[][] };                     // metres
 export type BeamRun = { code: string; length: number; b: number; d: number; sides: 1 | 2; bottom: boolean; inner?: number; outer?: number; lintel?: number }; // mm; inner / outer = side-face lengths with / without slab beyond (outer faces are full depth), lintel = length formed by the wall's top panels
@@ -124,6 +124,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
   const sysStd = !!R && R.system !== "acoform";                 // a chosen system's own sizes count as standard panels
   const wallCat = cat("wall_panel").filter((p) => Math.abs(p.height_mm - o.stdHeight) < 1);
   const PK = R?.pk?.enabled ? R.pk : null;                       // detailed beam / wall rules (priority lists), when switched on
+  const wallOut = PK && !PK.wallOutSame && PK.wallWidthPriorityOut.length ? [...new Set(PK.wallWidthPriorityOut)] : null;   // separate list for outside faces
   const wallW = PK ? [...new Set(PK.wallWidthPriority)] : R?.wallWidths.length ? R.wallWidths : wallCat.map((p) => p.width_mm);
   // the catalogue panel of this width, or the system's own panel (code WP-w-h, weight from the standard sections)
   const wallPanel = (w: number): CatPanel => wallCat.find((x) => x.width_mm === w)
@@ -172,7 +173,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
       continue;
     }
     const hand = o.faceEdits?.[f.code];                 // a face laid out by hand replaces the automatic fit
-    const fit = hand?.length ? { panels: hand, left: Math.max(0, Math.round(f.length - hand.reduce((a, w) => a + w, 0))) } : wallW.length ? fillRun(f.length, wallW, R?.minFiller ?? 0, !!PK) : { panels: [], left: Math.round(f.length) };
+    const fit = hand?.length ? { panels: hand, left: Math.max(0, Math.round(f.length - hand.reduce((a, w) => a + w, 0))) } : wallW.length ? fillRun(f.length, f.outer && wallOut ? wallOut : wallW, R?.minFiller ?? 0, !!PK) : { panels: [], left: Math.round(f.length) };
     const panels = fit.panels;
     // lift cores / shear walls drawn on column layers, cast first with the columns: column set to the first pour,
     // the rest formed with the slab

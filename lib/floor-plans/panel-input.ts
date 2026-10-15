@@ -8,6 +8,7 @@ import { isRailLayer } from "./layer-rules";
 import { closedLoops, drawingParts, dxfAuto, dxfFrame, effectiveRoles, separateAreas, type DxfModel } from "./dxf";
 import { nearRings, wallUnion } from "./geom";
 import { buildShell } from "./shell";
+import { faceFrames } from "@/lib/design-engine/design-check";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
 
 /** Point inside the wall outlines (even–odd, metres). */
@@ -397,5 +398,13 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   // for the training record: drawing units → plan metres, the reader's keep / drop decision, and the plan's own region
   const reg = t.dxf?.region;
   const readFrame = frame ? { toM: (q: Pt): Pt => toM(frame!.toPx(q)), inRegion: reg ? (q: Pt) => { const [x, y] = frame!.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; } : undefined, onFloor: auto?.onFloor } : null;
+  // which wall faces look outside the building: the open (formwork) side has no slab 150 mm beyond it
+  if (decks.length && mpp > 0) {
+    for (const fr of faceFrames(faces as never, mpp, zoneWalls)) {
+      if ((fr.f as unknown as { part?: string }).part) continue;
+      const q: Pt = [(fr.a[0] + fr.b[0]) / 2 + fr.n[0] * 0.15, (fr.a[1] + fr.b[1]) / 2 + fr.n[1] * 0.15];
+      if (!decks.some((d) => inRingsM(q, [d.pts]))) (fr.f as unknown as Face).outer = true;
+    }
+  }
   return { faces, decks, beams, corners, extCorners, upstands: auto?.upstands ?? [], openings, columns, totals, shell: g, stairSets, stairs, zoneWalls, zoneGaps, zoneBeams, zoneCols, zoneBeam3, zoneStairs, zoneStairOrient, zoneOpenings, zoneArch: archItems, sunk: auto?.sunk ?? [], readNotes, readFrame };
 }
