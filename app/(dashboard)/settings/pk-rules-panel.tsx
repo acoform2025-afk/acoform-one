@@ -164,6 +164,9 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
               <label className="flex flex-col gap-1.5"><span className={lbl}>Slab panel direction</span>
                 <select value={pk.slabDirection} disabled={!canEdit} onChange={(e) => set("slabDirection", e.target.value as PkRules["slabDirection"])} className={input}>
                   <option value="auto">Automatic</option><option value="across">Across (横向)</option><option value="along">Along (纵向)</option></select></label>
+              <label className="flex flex-col gap-1.5"><span className={lbl}>Left-over strip of a deck row</span>
+                <select value={pk.slabStrip} disabled={!canEdit} onChange={(e) => set("slabStrip", e.target.value as PkRules["slabStrip"])} className={input}>
+                  <option value="end">At one end (default)</option><option value="edges">Split to both edges</option><option value="middle">In the middle</option></select></label>
             </div>
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {c("joistEdgeLensOn", "Use the edge joist length priority")}

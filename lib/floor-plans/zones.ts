@@ -112,7 +112,7 @@ export function planRows(span: number, lens: number[], gap: number): number[] {
   return rows;
 }
 
-export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: [number, number, number, number] }, deckW: number[], deckLens: number | number[], codeFor: (w: number, L: number) => string, mbGap = 100, tol = 25, edgeMm = 0): Zone {
+export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: [number, number, number, number] }, deckW: number[], deckLens: number | number[], codeFor: (w: number, L: number) => string, mbGap = 100, tol = 25, edgeMm = 0, stripMode: "end" | "edges" | "middle" = "end"): Zone {
   const lensList = Array.isArray(deckLens) ? deckLens : [deckLens];
   const deckLen = lensList[0];
   const w = z.box[2] - z.box[0], h = z.box[3] - z.box[1];
@@ -149,9 +149,17 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
         panels.push({ no: `${code}-${String(++n).padStart(2, "0")}`, x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]), w: wmm, L: len, custom: cust, code: cust ? `DS-${wmm}-${len}` : codeFor(wmm, len) });
         t = t1;
       };
-      for (const wm of ws) put(wm, false);
       const fl = left <= tol ? 0 : Math.round(left / 5) * 5;
-      if (fl) put(fl, true);
+      if (fl && stripMode === "edges" && fl >= 100) {          // left-over strip split in two, one at each edge of the row
+        const h1 = Math.round(fl / 2 / 5) * 5;
+        put(h1, true); for (const wm of ws) put(wm, false); put(fl - h1, true);
+      } else if (fl && stripMode === "middle") {                // left-over strip in the middle of the row
+        const half = Math.floor(ws.length / 2);
+        for (const wm of ws.slice(0, half)) put(wm, false); put(fl, true); for (const wm of ws.slice(half)) put(wm, false);
+      } else {
+        for (const wm of ws) put(wm, false);
+        if (fl) put(fl, true);
+      }
     }
     if (sb < s1 - 0.05) {                                  // mid beam line between this row and the next
       const mid = sb + G / 2;
