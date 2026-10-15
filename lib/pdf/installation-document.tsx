@@ -95,7 +95,7 @@ function ZoneTable({ z }: { z: Zone }) {
   );
 }
 
-export function InstallationDocument({ zones, walls, wallPanels, info }: { zones: Zone[]; walls: Pt[][]; wallPanels: WallPanelNo[]; info: InstallInfo }) {
+export function InstallationDocument({ zones, walls, wallPanels, info, phases, nPhases = 1 }: { phases?: Record<string, number>; nPhases?: number; zones: Zone[]; walls: Pt[][]; wallPanels: WallPanelNo[]; info: InstallInfo }) {
   const all = zones.flatMap((z) => z.panels);
   const box: [number, number, number, number] = [
     Math.min(...zones.map((z) => z.box[0])), Math.min(...zones.map((z) => z.box[1])),
@@ -104,6 +104,16 @@ export function InstallationDocument({ zones, walls, wallPanels, info }: { zones
   // zone sheets: big zones alone, small ones four to a sheet
   const big = zones.filter((z) => z.panels.length > 60), small = zones.filter((z) => z.panels.length <= 60);
   const zonePages: Zone[][] = [...big.map((z) => [z]), ...chunk(small, 4)];
+  // pour phases: a sheet never mixes two phases, and the sheets run phase 1, 2, 3 …
+  const ph = (z: Zone) => phases?.[z.code] ?? 1;
+  if (phases) {
+    zonePages.length = 0;
+    for (let k = 1; k <= nPhases; k++) {
+      const zk = zones.filter((z) => ph(z) === k);
+      zonePages.push(...zk.filter((z) => z.panels.length > 60).map((z) => [z]), ...chunk(zk.filter((z) => z.panels.length <= 60), 4));
+    }
+  }
+  const phaseRows = phases ? Array.from({ length: nPhases }, (_, i) => { const zk = zones.filter((z) => ph(z) === i + 1); return { k: i + 1, codes: zk.map((z) => z.code).join(", "), area: zk.reduce((t, z) => t + z.area, 0), panels: zk.reduce((t, z) => t + z.panels.length, 0) }; }) : [];
   const deckRows = all.map((p) => ({ no: p.no, zone: p.no.split("-")[0], code: p.code, size: `${p.w} × ${p.L}`, special: p.custom }));
   // deck panels in the PDF list; the full list (deck + every wall panel) is the Excel download
   const listRows = deckRows.map((r) => [r.no, r.zone, r.code, r.size, r.special ? "special" : ""]);
@@ -124,7 +134,8 @@ export function InstallationDocument({ zones, walls, wallPanels, info }: { zones
           <Text style={{ color: GRAY }}>{all.length} deck panels ({stdCount} standard, {all.length - stdCount} special size) · specials to size {specArea.toFixed(1)} m² · zones {area.toFixed(1)} m²</Text>
         </View>
         <Text style={{ color: GRAY, marginBottom: 4 }}>Green = walls · cyan = deck zone M1, M2 … · blue lines = mid beams / prop heads between panel rows · red = special size panels / made-to-size pieces. Panel rows run across the short side of each zone.</Text>
-        <PlanSvg zones={zones} walls={walls} box={box} w={PW - 2 * M} h={PH - 2 * M - FOOT - 40} numbers={false} codes />
+        {phaseRows.length ? <Text style={{ marginBottom: 3, fontWeight: "bold" }}>POUR PHASES: {phaseRows.map((r) => `Phase ${r.k} — ${r.codes} (${r.area.toFixed(0)} m², ${r.panels} deck panels)`).join("   |   ")}</Text> : null}
+        <PlanSvg zones={zones} walls={walls} box={box} w={PW - 2 * M} h={PH - 2 * M - FOOT - (phaseRows.length ? 56 : 40)} numbers={false} codes />
         <Footer info={info} page={++pg} pages={totalPages} title="DECK INSTALLATION" />
       </Page>
       {zonePages.map((list, i) => {
@@ -132,7 +143,7 @@ export function InstallationDocument({ zones, walls, wallPanels, info }: { zones
         const cw = one ? PW - 2 * M - 4 : (PW - 2 * M - 24) / 2, ch = one ? PH - 2 * M - FOOT - 30 : (PH - 2 * M - FOOT - 30) / 2 - 6;
         return (
           <Page key={i} size="A3" orientation="landscape" style={pageStyle}>
-            <Text style={{ fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>DECK INSTALLATION — ZONE{one ? "" : "S"} {list.map((z) => z.code).join(", ")}</Text>
+            <Text style={{ fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>DECK INSTALLATION{phases ? ` — POUR PHASE ${ph(list[0])} OF ${nPhases}` : ""} — ZONE{one ? "" : "S"} {list.map((z) => z.code).join(", ")}</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
               {list.map((z, k) => (
                 <View key={z.code} style={{ width: cw, height: ch, borderWidth: 0.4, borderColor: "#ddd", padding: 4, marginRight: !one && k % 2 === 0 ? 10 : 0, marginBottom: 6, flexDirection: "row" }} wrap={false}>

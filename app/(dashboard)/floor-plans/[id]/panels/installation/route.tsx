@@ -20,6 +20,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (r.error || !r.inp) return new Response(r.error ?? "Measure and save this plan first.", { status: 400 });
   const zones = (r.zones ?? buildZones(r.inp, r.catalog, r.layoutRules));
   if (!zones.length) return new Response("No slab outline found — mark the slab (Slab area tool or a slab layer) and save the plan first.", { status: 400 });
+  // pour phases (?phases=2…6): the zones are cut into that many pours of about equal area, sweeping along the long side of the floor
+  const nPh = Math.max(1, Math.min(6, Math.round(Number(url.searchParams.get("phases")) || 1)));
+  const phaseOf: Record<string, number> = {};
+  if (nPh > 1) {
+    const x0 = Math.min(...zones.map((z) => z.box[0])), x1 = Math.max(...zones.map((z) => z.box[2])), y0 = Math.min(...zones.map((z) => z.box[1])), y1 = Math.max(...zones.map((z) => z.box[3]));
+    const ax = x1 - x0 >= y1 - y0 ? 0 : 1;
+    const order = [...zones].sort((p, q) => (p.box[ax] + p.box[ax + 2]) - (q.box[ax] + q.box[ax + 2]));
+    const tot = zones.reduce((t, z) => t + z.area, 0); let run = 0;
+    for (const z of order) { phaseOf[z.code] = Math.min(nPh, 1 + Math.floor(((run + z.area / 2) / tot) * nPh)); run += z.area; }
+  }
   const wallCode = (w: number) => r.catalog.find((c) => c.panel_category === "wall_panel" && Number(c.width_mm) === w && Number(c.height_mm) === r.opt.stdHeight)?.panel_code ?? `WP-${w}-${r.opt.stdHeight}`;
   const wallPanels = wallPanelNumbers(r.result.faces, r.opt.stdHeight, wallCode);
   const drawingNo = `IN-${r.lead?.lead_code?.split("/").pop() ?? "01"}`;
@@ -27,14 +37,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const name = safe(`${drawingNo}_${rev}_Installation_${r.plan.name}`);
   if (url.searchParams.get("format") === "csv") {
     const cell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-    const lines = [["Panel No.", "Zone / face", "Type", "Code", "Width mm", "Length / height mm", "Special"].map(cell).join(",")];
-    for (const z of zones) for (const p of z.panels) lines.push([p.no, z.code, "Deck", p.code, p.w, p.L, p.custom ? "yes" : ""].map(cell).join(","));
+    const lines = [["Panel No.", "Zone / face", "Type", "Code", "Width mm", "Length / height mm", "Special", ...(nPh > 1 ? ["Pour phase"] : [])].map(cell).join(",")];
+    for (const z of zones) for (const p of z.panels) lines.push([p.no, z.code, "Deck", p.code, p.w, p.L, p.custom ? "yes" : "", ...(nPh > 1 ? [`Phase ${phaseOf[z.code]}`] : [])].map(cell).join(","));
     for (const z of zones) if (z.specialArea > 0.02) lines.push([`${z.code}-SP`, z.code, "Deck special (to size)", "DS", "", "", `${z.specialArea.toFixed(2)} m2`].map(cell).join(","));
     for (const w of wallPanels) lines.push([w.no, w.face, "Wall", w.code, w.w, w.h, /^WF|^WT/.test(w.code) ? "yes" : ""].map(cell).join(","));
     return new Response("﻿" + lines.join("\r\n"), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${name}.csv"`, "Cache-Control": "no-store" } });
   }
   const { data: company } = await supabase.from("tenants").select("company_name").eq("id", r.plan.tenant_id).maybeSingle();
-  const buf = await renderToBuffer(<InstallationDocument zones={zones} walls={r.inp.zoneWalls} wallPanels={wallPanels} info={{
+  const buf = await renderToBuffer(<InstallationDocument phases={nPh > 1 ? phaseOf : undefined} nPhases={nPh} zones={zones} walls={r.inp.zoneWalls} wallPanels={wallPanels} info={{
     company: company?.company_name ?? "Aco Form Work Pvt Ltd", planName: r.plan.name,
     project: r.lead?.project_name ?? r.plan.name, client: r.lead?.company_name ?? r.lead?.customer_name ?? "—",
     drawingNo, rev, date: new Date().toLocaleDateString("en-GB"),
