@@ -496,14 +496,19 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
             </select>
           </label>
         ) : null}
-        <label className="flex items-center gap-1.5">Room
-          <select value={zone} onChange={(e) => { const v = e.target.value; setZone(v); if (!v) { api.current?.highlight(null); api.current?.view("3d"); return; } const z = scene.zones.find((x) => x.code === v); if (z) { api.current?.flyTo(z.at[0], levelY0() + scene.H / 2, z.at[1], Math.max(5, span(scene) * 0.18)); api.current?.highlight((p) => p.z === v); } }}
-            className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100">
-            <option value="">all</option>{scene.zones.map((z) => <option key={z.code} value={z.code}>{z.code}</option>)}
-          </select>
+        <label className="flex items-center gap-1.5">Room / zone
+          <input list="zone-list" value={zone} placeholder="type e.g. M3"
+            onChange={(e) => {
+              const raw = e.target.value; setZone(raw); const v = raw.trim().toLowerCase();
+              if (!v) { api.current?.highlight(null); api.current?.view("3d"); return; }
+              const z = scene.zones.find((x) => x.code.toLowerCase() === v);
+              if (z) { api.current?.flyTo(z.at[0], levelY0() + scene.H / 2, z.at[1], Math.max(5, span(scene) * 0.18)); api.current?.highlight((p) => p.z === z.code); }
+            }}
+            className="w-24 rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-graphite-100" />
+          <datalist id="zone-list">{scene.zones.map((z) => <option key={z.code} value={z.code} />)}</datalist>
         </label>
-        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); const q = query.trim().toLowerCase(); if (!q) { setHits(null); api.current?.highlight(null); return; } const n = api.current?.highlight((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)) ?? 0; setHits(n); const first = scene.panels.find((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)); if (first) api.current?.flyTo(first.p[0][0], first.p[0][1] + levelY0(), first.p[0][2]); }}>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="find panel no. / code (e.g. M4-07, WP-600)" className="w-56 rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-graphite-100" />
+        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); const q = query.trim().toLowerCase(); if (!q) { setHits(null); api.current?.highlight(null); return; } const n = api.current?.highlight((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)) ?? 0; setHits(n); const first = scene.panels.find((p) => `${p.c} ${p.z ?? ""}`.toLowerCase().includes(q)); const zq = scene.zones.find((x) => x.code.toLowerCase() === q); if (zq) api.current?.flyTo(zq.at[0], levelY0() + scene.H / 2, zq.at[1], Math.max(5, span(scene) * 0.18)); else if (first) api.current?.flyTo(first.p[0][0], first.p[0][1] + levelY0(), first.p[0][2]); }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="find zone / panel no. / code (e.g. M3, M4-07)" className="w-56 rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-graphite-100" />
           <button className="rounded border border-graphite-700 px-2 py-1 hover:bg-graphite-800">Find</button>
           {hits != null ? <span className="text-graphite-400">{hits} found</span> : null}
           {hits != null || zone ? <button type="button" onClick={() => { setHits(null); setQuery(""); setZone(""); api.current?.highlight(null); }} className="text-brand-orange hover:underline">clear</button> : null}
