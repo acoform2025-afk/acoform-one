@@ -12,7 +12,7 @@ import type { Zone } from "@/lib/floor-plans/zones";
 import type { FaceLayout } from "./floor-panels";
 import { pinHoleCheck, type FabSpec } from "./fabrication";
 
-export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height" | "leak" | "corner" | "beam-parts" | "props";
+export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height" | "leak" | "corner" | "beam-parts" | "back-rib" | "props";
 export type Issue = { id: string; sev: "error" | "warn"; kind: IssueKind; where: string; detail: string; at?: Pt; z?: number };
 export const ISSUE_LABEL: Record<IssueKind, string> = {
   model: "Model check",
@@ -28,6 +28,7 @@ export const ISSUE_LABEL: Record<IssueKind, string> = {
   leak: "Open gap — concrete can leak",
   corner: "Wall corners (internal / external)",
   "beam-parts": "Beam soffit and side panels",
+  "back-rib": "Wall back-ribs (missing / short rows)",
   props: "Deck props and beam props (load)",
 };
 

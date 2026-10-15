@@ -20,6 +20,7 @@ const HOW: Record<string, string> = {
   leak: "Is any part of a wall face left open, so concrete can run out?",
   corner: "Are there wall corners at odd angles that the standard corner pieces do not fit?",
   "beam-parts": "Do the beam soffit and side panels cover the whole beam?",
+  "back-rib": "Does every wall face have a back-rib at each rib height of the rules (nothing missing)?",
   props: "Is the load on a deck prop or beam prop inside its safe load (screening estimate)?",
   "pin-hole": "Can the special panels be pinned to the standard panels (hole grid, narrow pieces)?",
 };

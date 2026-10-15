@@ -7,7 +7,7 @@ import type { Scene3 } from "./scene3d";
 
 type Pt = [number, number];
 
-export type PartsOpts = { propSpacing: number; rowPitch: number; slabMm: number; propKn: number; bulkheads?: number };
+export type PartsOpts = { propSpacing: number; rowPitch: number; slabMm: number; propKn: number; bulkheads?: number; ribHeights?: number[] };
 
 /** Load a deck prop carries (kN): slab weight 25 kN/m³ + 1.5 construction + 0.5 formwork, over the area one prop holds. A screening estimate, not a design. */
 export const deckPropLoad = (slabMm: number, spacingM: number, rowPitchM: number) => (25 * (slabMm / 1000) + 2) * spacingM * rowPitchM;
@@ -84,6 +84,46 @@ export function partsChecks(sc: Scene3, o: PartsOpts): Omit<Issue, "id">[] {
         if (!inWall(q) && !inBeam(q, bi)) open.push([Math.round(e[0] * 1000) / 1000, Math.round(e[1] * 1000) / 1000]);
       }
       if (open.length && open.length > (o.bulkheads ?? 0)) out.push({ sev: "warn", kind: "beam-parts", where: `Beam ${bi + 1}`, detail: `${open.length} open beam end${open.length > 1 ? "s" : ""} (not against a wall or another beam) and ${o.bulkheads ?? 0} soffit bulkhead${(o.bulkheads ?? 0) === 1 ? "" : "s"} (SB) in the rules — concrete will run out of the end. Set “Soffit bulkheads (SB) per beam” in Settings, or close the end with a made-to-size plate.`, at: open[0], z: Hm - b.d / 2 });
+    }
+  }
+
+  // ── wall back-ribs: every wall face should carry a rib at each row height of the rules that is below the wall top;
+  //    a row that is missing or covers under 80 % of the face is flagged (the video's "back-rib missing" check)
+  const ribList = sc.acc?.ribs ?? [];
+  if (ribList.length && o.ribHeights?.length) {
+    const byFace = new Map<string, typeof sc.panels>();
+    for (const p of sc.panels) if ((p.k === "std" || p.k === "top") && p.z && p.n) { const l = byFace.get(p.z); if (l) l.push(p); else byFace.set(p.z, [p]); }
+    let flagged = 0;
+    for (const [face, ps] of byFace) {
+      if (flagged >= 30) break;
+      const a0 = ps[0].p[0], a1 = ps[0].p[1], n = ps[0].n!;
+      const dx = a1[0] - a0[0], dz = a1[2] - a0[2], dl = Math.hypot(dx, dz); if (dl < 1e-6) continue;
+      const ux = dx / dl, uz = dz / dl;
+      const T = ps.flatMap((p) => p.p.map((v) => (v[0] - a0[0]) * ux + (v[2] - a0[2]) * uz));
+      const t0 = Math.min(...T), t1 = Math.max(...T), L = t1 - t0; if (L < 0.4) continue;
+      const top = Math.max(...ps.flatMap((p) => p.p.map((v) => v[1])));
+      const sOf = (x: number, z: number) => (x - a0[0]) * n[0] + (z - a0[2]) * n[2];
+      const tOf = (x: number, z: number) => (x - a0[0]) * ux + (z - a0[2]) * uz;
+      const rows = o.ribHeights.map((h) => h / 1000).filter((h) => h < top - 0.05);
+      const missing: string[] = [];
+      for (const h of rows) {
+        const iv: [number, number][] = [];
+        for (const r of ribList) {
+          if (Math.abs(r[1] - h) > 0.04) continue;
+          const s0 = sOf(r[0], r[2]), s1 = sOf(r[3], r[4]);
+          if (s0 < -0.02 || s0 > 0.4 || s1 < -0.02 || s1 > 0.4 || Math.abs(s0 - s1) > 0.06) continue;
+          const ta = tOf(r[0], r[2]), tb = tOf(r[3], r[4]);
+          iv.push([Math.max(t0, Math.min(ta, tb)), Math.min(t1, Math.max(ta, tb))]);
+        }
+        if (union(iv) < 0.8 * L) missing.push(`${Math.round(h * 1000)}`);
+      }
+      const hi = rows.length ? Math.max(...rows) : 0;
+      const topGap = rows.length && top - hi > 0.6 ? `the top ${Math.round((top - hi) * 1000)} mm of the face has no rib` : "";
+      if (missing.length || topGap) {
+        flagged++;
+        const mx = (a0[0] + ux * (t0 + t1) / 2), mz = (a0[2] + uz * (t0 + t1) / 2);
+        out.push({ sev: "warn", kind: "back-rib", where: `Wall face ${face}`, detail: `${missing.length ? `Back-rib row${missing.length > 1 ? "s" : ""} at ${missing.join(", ")} mm missing or covering under 80 % of the ${Math.round(L * 1000)} mm face` : ""}${missing.length && topGap ? "; " : ""}${topGap}. Check the back-rib heights in Settings (Detailed rules) or add a rib by hand.`, at: [Math.round(mx * 1000) / 1000, Math.round(mz * 1000) / 1000], z: missing.length ? Number(missing[0]) / 1000 : Math.max(0, top - 0.1) });
+      }
     }
   }
 
