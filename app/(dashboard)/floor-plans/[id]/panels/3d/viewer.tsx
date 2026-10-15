@@ -407,12 +407,34 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           setPick(q ? `${owner?.level ? `${owner.level} · ` : ""}${KIND_LABEL[q.k]} · ${q.c}${q.z ? ` · ${q.z}` : ""}` : null);
         };
         renderer.domElement.addEventListener("click", onClick);
+        // zoom toward the mouse pointer (wheel) and focus on a spot (double-click): the point under the cursor becomes the centre of turning
+        const hitAt = (e: MouseEvent) => {
+          const r = renderer.domElement.getBoundingClientRect();
+          mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+          ray.setFromCamera(mouse, cam);
+          const objs: InstanceType<typeof THREE.Object3D>[] = [];
+          (Object.keys(groups) as Layer[]).forEach((l) => { if (groups[l].visible && l !== "issues") objs.push(groups[l]); });
+          return ray.intersectObjects(objs, true).find((h) => (h.object as { isMesh?: boolean }).isMesh)?.point ?? null;
+        };
+        const onWheel = (e: WheelEvent) => {
+          if (e.deltaY >= 0) return;
+          const p = hitAt(e); if (!p) return;
+          const k = 0.25, dx = (p.x - ctr.target.x) * k, dy = (p.y - ctr.target.y) * k, dz = (p.z - ctr.target.z) * k;
+          ctr.target.x += dx; ctr.target.y += dy; ctr.target.z += dz; cam.position.x += dx; cam.position.y += dy; cam.position.z += dz;
+        };
+        const onDbl = (e: MouseEvent) => {
+          const p = hitAt(e); if (!p) return;
+          const d = Math.max(3, Math.min(cam.position.distanceTo(p) * 0.4, 8));
+          const dir = cam.position.clone().sub(p).normalize();
+          ctr.target.copy(p); cam.position.copy(p).addScaledVector(dir, d); ctr.update();
+        };
+        renderer.domElement.addEventListener("wheel", onWheel, { passive: true }); renderer.domElement.addEventListener("dblclick", onDbl);
         const onResize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); ctr.handleResize(); };
         window.addEventListener("resize", onResize); document.addEventListener("fullscreenchange", onResize);
         const loop = () => { ctr.update(); (renderer.domElement as unknown as { __labelTick?: () => void }).__labelTick?.(); renderer.render(sc, cam); raf = requestAnimationFrame(loop); };
         loop();
         cleanup = () => {
-          cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("fullscreenchange", onResize); renderer.domElement.removeEventListener("click", onClick);
+          cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("fullscreenchange", onResize); renderer.domElement.removeEventListener("click", onClick); renderer.domElement.removeEventListener("wheel", onWheel); renderer.domElement.removeEventListener("dblclick", onDbl);
           ctr.dispose(); renderer.dispose(); sc.traverse((o) => { const m = o as { geometry?: { dispose: () => void } }; m.geometry?.dispose(); });
           renderer.domElement.remove();
         };
