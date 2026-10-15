@@ -17,7 +17,7 @@ export type Stack3 = { levels: { key: string; name: string; kind: string; y0: nu
 export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: string; stack?: Stack3 }) {
   const host = useRef<HTMLDivElement>(null);
   type View = "3d" | "top" | "front" | "back" | "left" | "right";
-  const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; turn: (deg: number) => void; cut: (y: number | null) => void; flyTo: (x: number, y: number, z: number, dist?: number) => void; highlight: (test: ((p: Scene3["panels"][number]) => boolean) | null) => number } | null>(null);
+  const api = useRef<{ set: (l: Layer, v: boolean) => void; view: (v: View) => void; turn: (deg: number) => void; cut: (y: number | null) => void; flyTo: (x: number, y: number, z: number, dist?: number) => void; highlight: (test: ((p: Scene3["panels"][number]) => boolean) | null) => number; labels: (v: boolean) => void } | null>(null);
   const [on, setOn] = useState<Record<Layer, boolean>>({ walls: true, columns: true, wallPanels: true, fillers: true, corners: true, deck: true, slab: false, beams: true, stairs: true, acc: !stack, arch: true, issues: true });
   const [pick, setPick] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -26,6 +26,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
   const [query, setQuery] = useState<string>("");
   const [hits, setHits] = useState<number | null>(null);
   const [showIssues, setShowIssues] = useState(false);
+  const [codes, setCodes] = useState(false);          // write the part code on the panels near the camera
   const totalH = stack ? stack.levels.reduce((s, l) => s + l.h, 0) : scene.H + scene.slab;
   const top = totalH + 0.3;
   const [lvl, setLvl] = useState<string>("");        // whole building: the level the room / find tools work on
@@ -317,7 +318,51 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           const a = (deg * Math.PI) / 180, t = ctr.target, ox = cam.position.x - t.x, oz = cam.position.z - t.z;
           cam.position.x = t.x + ox * Math.cos(a) - oz * Math.sin(a); cam.position.z = t.z + ox * Math.sin(a) + oz * Math.cos(a); ctr.update();
         };
-        api.current = { set: (l, v) => { groups[l].visible = v; }, view, turn, cut: (y) => { clip.constant = y == null ? top : y; }, flyTo, highlight };
+        // part codes written on the panels nearest to the camera (a few dozen at a time, so a big floor stays fast)
+        let labelsOn = false, lastKey = "", lastAt = 0;
+        const labelG = new THREE.Group(); sc.add(labelG);
+        const texCache = new Map<string, { map: InstanceType<typeof THREE.CanvasTexture>; ratio: number }>();
+        const tex = (text: string) => {
+          let t = texCache.get(text); if (t) return t;
+          const cv = document.createElement("canvas"), g2 = cv.getContext("2d")!; const fs = 44;
+          g2.font = `bold ${fs}px sans-serif`; const w = Math.ceil(g2.measureText(text).width) + 20; cv.width = w; cv.height = fs + 16;
+          g2.font = `bold ${fs}px sans-serif`; g2.fillStyle = "rgba(17,24,39,0.82)"; g2.fillRect(0, 0, w, cv.height); g2.fillStyle = "#fde047"; g2.textBaseline = "middle"; g2.fillText(text, 10, cv.height / 2 + 2);
+          t = { map: new THREE.CanvasTexture(cv), ratio: w / cv.height }; texCache.set(text, t); return t;
+        };
+        const labelOf = (q: Scene3["panels"][number]) => {
+          const mark = q.c.match(/\[(M\d+)\]/)?.[1]; const parts = q.c.split(" — ")[0].split(" · ");
+          const rest = parts.length > 1 ? parts.slice(1).join(" ") : parts[0];
+          return (mark ? `${mark} ` : "") + rest.replace(/\s+/g, " ").slice(0, 26);
+        };
+        const refreshLabels = () => {
+          for (const c of [...labelG.children]) { labelG.remove(c); (c as unknown as { material: { dispose: () => void } }).material.dispose(); }
+          if (!labelsOn) return;
+          const cand: { q: Scene3["panels"][number]; d: number; cx: number; cy: number; cz: number }[] = [];
+          for (const pk of pickables) {
+            if (!pk.mesh.parent?.visible) continue;
+            for (const q of pk.list) {
+              const cx = (q.p[0][0] + q.p[2][0]) / 2, cy = (q.p[0][1] + q.p[2][1]) / 2, cz = (q.p[0][2] + q.p[2][2]) / 2;
+              const d = Math.hypot(cx - cam.position.x, cy - cam.position.y, cz - cam.position.z);
+              if (d < 10) cand.push({ q, d, cx, cy, cz });
+            }
+          }
+          cand.sort((a, b) => a.d - b.d);
+          for (const c of cand.slice(0, 60)) {
+            const t = tex(labelOf(c.q)); const n = c.q.n ?? [0, 0, 0];
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.map, depthTest: false, transparent: true }));
+            sp.position.set(c.cx + n[0] * 0.12, c.cy + n[1] * 0.12, c.cz + n[2] * 0.12);
+            const h = Math.min(0.16, Math.max(0.07, c.d * 0.022)); sp.scale.set(h * t.ratio, h, 1); sp.renderOrder = 20;
+            labelG.add(sp);
+          }
+        };
+        const labels = (v: boolean) => { labelsOn = v; lastKey = ""; refreshLabels(); };
+        api.current = { set: (l, v) => { groups[l].visible = v; }, view, turn, cut: (y) => { clip.constant = y == null ? top : y; }, flyTo, highlight, labels };
+        (renderer.domElement as unknown as { __labelTick?: () => void }).__labelTick = () => {
+          if (!labelsOn) return;
+          const key = `${cam.position.x.toFixed(1)},${cam.position.y.toFixed(1)},${cam.position.z.toFixed(1)}`;
+          const now = performance.now();
+          if (key !== lastKey && now - lastAt > 300) { lastKey = key; lastAt = now; refreshLabels(); }
+        };
         (Object.keys(groups) as Layer[]).forEach((l) => { groups[l].visible = on[l]; });
 
         const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
@@ -338,7 +383,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
         renderer.domElement.addEventListener("click", onClick);
         const onResize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); ctr.handleResize(); };
         window.addEventListener("resize", onResize); document.addEventListener("fullscreenchange", onResize);
-        const loop = () => { ctr.update(); renderer.render(sc, cam); raf = requestAnimationFrame(loop); };
+        const loop = () => { ctr.update(); (renderer.domElement as unknown as { __labelTick?: () => void }).__labelTick?.(); renderer.render(sc, cam); raf = requestAnimationFrame(loop); };
         loop();
         cleanup = () => {
           cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("fullscreenchange", onResize); renderer.domElement.removeEventListener("click", onClick);
@@ -379,6 +424,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
         <button type="button" onClick={all} title="Show every layer again (formwork view)" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">All</button>
         <button type="button" onClick={building} title="The building as on the architect's elevation: concrete, slabs, windows, doors, railings — no formwork" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">Building view</button>
         <button type="button" onClick={formwork} title="Formwork only: concrete walls and slab hidden, to check nothing is missing" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">Formwork only</button>
+        <button type="button" disabled={!!stack} onClick={() => setCodes((v) => { api.current?.labels(!v); return !v; })} title={stack ? "Part codes show in the single-floor view" : "Write the part code (size, wall mark) on the panels nearest to the camera — zoom in to read them"} className={`rounded-md border px-2 py-1.5 text-xs disabled:opacity-40 ${codes ? "border-amber-400 bg-amber-400/20 text-amber-200" : "border-graphite-700 text-graphite-200 hover:bg-graphite-800"}`}>Part codes</button>
         <span className="mx-1 h-5 w-px bg-graphite-700" />
         <button type="button" title="Turn left 45°" onClick={() => api.current?.turn(-45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↺ 45°</button>
         <button type="button" title="Turn right 45°" onClick={() => api.current?.turn(45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↻ 45°</button>
