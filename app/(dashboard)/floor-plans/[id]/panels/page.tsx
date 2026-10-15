@@ -213,6 +213,26 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
         ) : null;
       })()}
 
+      {(() => {
+        // numbers for the other parts of the floor: columns CM1…, beams BM1…, slab zones (the M1, M2 … of the installation drawing)
+        const cols = result.columns, beams = result.beams, zs = r.zones ?? [];
+        if (!cols.length && !beams.length && !zs.length) return null;
+        const bsum = new Map<string, { b: number; d: number; len: number; n: number }>();
+        for (const b of beams) { const k = `${b.b}x${b.d}`; const e = bsum.get(k) ?? { b: b.b, d: b.d, len: 0, n: 0 }; e.len += b.length; e.n += b.pieces.length; bsum.set(k, e); }
+        const bl = [...bsum.values()].sort((x, y) => y.len - x.len);
+        return (
+          <details className="mt-5 rounded-lg border border-graphite-800 bg-graphite-900 p-3" open>
+            <summary className="cursor-pointer text-sm font-medium text-graphite-200">Component numbers — {cols.length} column type{cols.length === 1 ? "" : "s"} · {bl.length} beam size{bl.length === 1 ? "" : "s"} · {zs.length} slab zone{zs.length === 1 ? "" : "s"}</summary>
+            <p className="mt-1 text-xs text-graphite-400">Columns are CM1, CM2 … (same size = same number), beams BM1, BM2 … (same width × depth), slab zones are the M1, M2 … of the installation drawing.</p>
+            <div className="mt-2 max-h-96 overflow-y-auto font-mono text-[11px] text-graphite-400">
+              {cols.map((c, i) => <div key={`c${i}`} className="border-b border-graphite-800 py-1"><span className="text-graphite-200">CM{i + 1}</span> · {c.round ? `round Ø${c.w}` : `${c.w} × ${c.d}`} mm · height {c.h} mm × {c.qty} nos</div>)}
+              {bl.map((b, i) => <div key={`b${i}`} className="border-b border-graphite-800 py-1"><span className="text-graphite-200">BM{i + 1}</span> · {b.b ? `${b.b} × ${b.d}` : `one side, depth ${b.d}`} mm · {(b.len / 1000).toFixed(1)} m in {b.n} piece{b.n === 1 ? "" : "s"}</div>)}
+              {[...zs].sort((x, y) => y.specialArea - x.specialArea).map((z) => <div key={z.code} className="border-b border-graphite-800 py-1"><span className="text-graphite-200">{z.code}</span> · slab zone {z.area.toFixed(1)} m² · {z.panels.length} deck panels · special {z.specialArea.toFixed(1)} m²{z.area > 0 && z.specialArea / z.area > 0.15 ? " ⚠ many specials" : ""}</div>)}
+            </div>
+          </details>
+        );
+      })()}
+
       <details className="mt-5 rounded-lg border border-graphite-800 bg-graphite-900 p-3">
         <summary className="cursor-pointer text-sm font-medium text-graphite-200">Wall face layouts ({result.faces.length} faces · {n2(s.faceLength)} m)</summary>
         <div className="mt-2 max-h-96 overflow-y-auto font-mono text-[11px] text-graphite-400">
