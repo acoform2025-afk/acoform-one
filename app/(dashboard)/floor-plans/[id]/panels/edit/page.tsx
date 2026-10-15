@@ -19,7 +19,7 @@ export default async function EditPanelsPage({ params, searchParams }: { params:
   if (r.error || !r.result) return <div className="fade-in">{back}<p className="mt-4 text-sm text-signal-amber">{r.error ?? "Measure and save this plan first."}</p></div>;
   const edits = (r.t.panelEdits ?? {}) as Record<string, number[]>;
   const faces = r.result.faces.filter((f) => !f.end && f.length > 250 && !/-O\d+[HS]$/.test(f.code)).map((f) => ({ code: f.code, length: f.length, panels: f.panels, filler: f.filler, hand: !!edits[f.code] }));
-  const widths = r.layoutRules?.wallWidths?.length ? r.layoutRules.wallWidths : r.catalog.filter((c) => c.panel_category === "wall_panel" && Number(c.height_mm) === r.opt.stdHeight).map((c) => Number(c.width_mm));
+  const widths = r.layoutRules?.pk?.enabled ? [...new Set([...r.layoutRules.pk.wallWidthPriority, ...r.layoutRules.pk.wallWidthPriorityOut])].sort((a, b) => b - a) : r.layoutRules?.wallWidths?.length ? r.layoutRules.wallWidths : r.catalog.filter((c) => c.panel_category === "wall_panel" && Number(c.height_mm) === r.opt.stdHeight).map((c) => Number(c.width_mm));
   const canEdit = await hasPermission("quotations", "create");
   return (
     <div className="fade-in max-w-6xl">
