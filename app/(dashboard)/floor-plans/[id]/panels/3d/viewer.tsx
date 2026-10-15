@@ -329,29 +329,55 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           g2.font = `bold ${fs}px sans-serif`; g2.fillStyle = "rgba(17,24,39,0.82)"; g2.fillRect(0, 0, w, cv.height); g2.fillStyle = "#fde047"; g2.textBaseline = "middle"; g2.fillText(text, 10, cv.height / 2 + 2);
           t = { map: new THREE.CanvasTexture(cv), ratio: w / cv.height }; texCache.set(text, t); return t;
         };
-        const labelOf = (q: Scene3["panels"][number]) => {
+        // short label: wall mark + size for panels, EC / IC for corners; profile details (tube, fillet web) and stairs get none
+        const labelOf = (q: Scene3["panels"][number]): string | null => {
+          if (q.c.includes("· fillet web") || q.c.includes("· tube")) return null;
           const mark = q.c.match(/\[(M\d+)\]/)?.[1]; const parts = q.c.split(" — ")[0].split(" · ");
-          const rest = parts.length > 1 ? parts.slice(1).join(" ") : parts[0];
-          return (mark ? `${mark} ` : "") + rest.replace(/\s+/g, " ").slice(0, 26);
+          const rest = (parts.length > 1 ? parts.slice(1).join(" ") : parts[0]).replace(/\s+/g, " ");
+          const nums = rest.match(/(\d+)\s*×\s*(\d+)/);
+          switch (q.k) {
+            case "std": case "top": case "fill": case "col": case "bside": case "bbot": case "deck": case "dspec": {
+              const size = nums ? `${nums[1]}×${nums[2]}` : rest.slice(0, 14);
+              return `${mark ? mark + " " : ""}${q.k === "top" ? "T " : q.k === "fill" ? "F " : ""}${size}`;
+            }
+            case "ec": return `EC ${rest.match(/(\d+)/)?.[1] ?? ""}`.trim();
+            case "ic": return `IC ${rest.match(/(\d+)/)?.[1] ?? ""}`.trim();
+            default: return null;
+          }
         };
         const refreshLabels = () => {
           for (const c of [...labelG.children]) { labelG.remove(c); (c as unknown as { material: { dispose: () => void } }).material.dispose(); }
           if (!labelsOn) return;
-          const cand: { q: Scene3["panels"][number]; d: number; cx: number; cy: number; cz: number }[] = [];
+          const H = renderer.domElement.clientHeight || 600, W2 = renderer.domElement.clientWidth || 800;
+          const tanF = Math.tan((cam.fov * Math.PI) / 360);
+          const cand: { q: Scene3["panels"][number]; d: number; cx: number; cy: number; cz: number; text: string }[] = [];
           for (const pk of pickables) {
             if (!pk.mesh.parent?.visible) continue;
             for (const q of pk.list) {
+              const text = labelOf(q); if (!text) continue;
               const cx = (q.p[0][0] + q.p[2][0]) / 2, cy = (q.p[0][1] + q.p[2][1]) / 2, cz = (q.p[0][2] + q.p[2][2]) / 2;
-              const d = Math.hypot(cx - cam.position.x, cy - cam.position.y, cz - cam.position.z);
-              if (d < 10) cand.push({ q, d, cx, cy, cz });
+              const dx = cam.position.x - cx, dy = cam.position.y - cy, dz = cam.position.z - cz, d = Math.hypot(dx, dy, dz);
+              if (d > 9 || d < 0.3) continue;
+              const flat = q.k === "deck" || q.k === "dspec" || q.k === "bbot";
+              if (!flat && q.n && q.n[0] * dx + q.n[1] * dy + q.n[2] * dz <= 0) continue;     // facing away from the camera
+              cand.push({ q, d, cx, cy, cz, text });
             }
           }
           cand.sort((a, b) => a.d - b.d);
-          for (const c of cand.slice(0, 60)) {
-            const t = tex(labelOf(c.q)); const n = c.q.n ?? [0, 0, 0];
-            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.map, depthTest: false, transparent: true }));
-            sp.position.set(c.cx + n[0] * 0.12, c.cy + n[1] * 0.12, c.cz + n[2] * 0.12);
-            const h = Math.min(0.16, Math.max(0.07, c.d * 0.022)); sp.scale.set(h * t.ratio, h, 1); sp.renderOrder = 20;
+          // keep a label only where it does not cover one already placed (screen space), at most 35
+          const placed: [number, number, number, number][] = [];
+          const v = new THREE.Vector3();
+          for (const c of cand) {
+            if (placed.length >= 35) break;
+            const t = tex(c.text); const n = c.q.n ?? [0, 0, 0];
+            const h = Math.min(0.1, Math.max(0.05, c.d * 0.014)), w = h * t.ratio;
+            v.set(c.cx + n[0] * 0.1, c.cy + n[1] * 0.1, c.cz + n[2] * 0.1); v.project(cam);
+            if (v.z > 1 || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) continue;
+            const pxM = (H / 2) / (c.d * tanF), sx = (v.x * 0.5 + 0.5) * W2, sy = (-v.y * 0.5 + 0.5) * H, hw = (w * pxM) / 2 + 4, hh = (h * pxM) / 2 + 3;
+            if (placed.some((r) => sx - hw < r[2] && sx + hw > r[0] && sy - hh < r[3] && sy + hh > r[1])) continue;
+            placed.push([sx - hw, sy - hh, sx + hw, sy + hh]);
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.map, depthTest: true, transparent: true }));
+            sp.position.set(c.cx + n[0] * 0.1, c.cy + n[1] * 0.1, c.cz + n[2] * 0.1); sp.scale.set(w, h, 1); sp.renderOrder = 20;
             labelG.add(sp);
           }
         };
