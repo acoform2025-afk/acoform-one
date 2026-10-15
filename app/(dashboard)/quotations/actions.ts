@@ -1,5 +1,6 @@
 "use server";
 
+import { reuseForLead } from "./lead-reuse";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
@@ -71,6 +72,11 @@ export async function createQuotation(formData: FormData): Promise<ActionResult>
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from("users").select("tenant_id").eq("id", user!.id).single();
   if (!profile) return { success: false, error: "Could not resolve your tenant." };
+
+  // one lead = one quotation number: the lead's detailed quotation is reopened (draft) or revised (approved / sent)
+  const re = await reuseForLead(supabase, parsed.data.leadId, "detailed");
+  if (re && "error" in re) return { success: false, error: re.error };
+  if (re) { revalidatePath("/quotations"); return { success: true, data: { id: re.id } }; }
 
   const { data, error } = await supabase.from("quotations").insert({
     tenant_id: profile.tenant_id,

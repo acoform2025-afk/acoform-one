@@ -93,6 +93,11 @@ export default async function QuotationDetailPage({ params, searchParams }: { pa
         </div>
         <div className="flex flex-col items-end gap-2">
           <a href={`/quotations/${id}/pdf`} target="_blank" rel="noopener" className="rounded-md bg-signal-amber px-4 py-2 text-sm font-semibold text-graphite-950 hover:opacity-90">Download PDF</a>
+          <form action={`/quotations/${id}/pdf`} method="get" target="_blank" className="flex items-center gap-1.5 text-xs text-graphite-400">
+            <span>USD copy · ₹ per $1</span>
+            <input name="usd" type="number" step="0.01" min="1" required placeholder="e.g. 88" className="w-20 rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-graphite-100" />
+            <button className="rounded border border-graphite-700 px-2 py-1 text-graphite-200 hover:bg-graphite-800">PDF in USD</button>
+          </form>
           <p className="text-right text-xs text-graphite-500">Date <span className="font-mono text-graphite-300">{quotation.quotation_date}</span> · valid {quotation.validity_days} days</p>
         </div>
       </div>

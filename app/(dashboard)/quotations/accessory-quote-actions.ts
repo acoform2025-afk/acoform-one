@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/auth/permissions";
 import { dbError } from "@/lib/format";
+import { reuseForLead } from "./lead-reuse";
 
 type Result = { success: boolean; error?: string; data?: { id: string } };
 
@@ -56,6 +57,16 @@ export async function createAccessoriesQuote(formData: FormData): Promise<Result
   const { data: profile } = await supabase.from("users").select("tenant_id").eq("id", user!.id).single();
   if (!profile) return { success: false, error: "Could not resolve your tenant." };
   const contact = Object.fromEntries(Object.entries({ kind_attn: d.kindAttn, customer_phone: d.customerPhone, customer_email: d.customerEmail, customer_address: d.customerAddress, project_name: d.projectName }).filter(([, v]) => v !== null));
+  // one lead = one quotation number: an accessories quotation of this lead is added to (draft) or revised (approved / sent)
+  const re = await reuseForLead(supabase, d.leadId, "accessories");
+  if (re && "error" in re) return { success: false, error: re.error };
+  if (re) {
+    const err0 = await addRows(supabase, re.id, rows.data);
+    if (err0) return { success: false, error: `Items could not be added: ${err0}` };
+    await supabase.from("quotations").update({ delivery_place: d.deliveryPlace, application: d.application ?? "Aluminium Formwork", ...contact }).eq("id", re.id);
+    revalidatePath("/quotations");
+    return { success: true, data: { id: re.id } };
+  }
   const { data, error } = await supabase.from("quotations").insert({
     tenant_id: profile.tenant_id, quotation_code: d.quotationCode, customer_name: d.customerName, lead_id: d.leadId ?? null, created_by: user!.id,
     quotation_type: "accessories", delivery_place: d.deliveryPlace, application: d.application ?? "Aluminium Formwork", show_references: false, ...contact,

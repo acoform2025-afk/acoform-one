@@ -28,3 +28,15 @@ export function rupeesInWords(amount: number | string | null | undefined): strin
   const rupees = Math.floor(v / 100), paise = v % 100;
   return `Rupees ${indian(rupees)}${paise ? ` and ${twoDigits(paise)} Paise` : ""} Only`;
 }
+
+/** Western numbering for a quotation shown in US dollars: 1234567 -> "One Million Two Hundred Thirty-Four Thousand Five Hundred Sixty-Seven" */
+export function dollarsInWords(amount: number | string | null | undefined): string {
+  const v = Math.round(Number(amount ?? 0) * 100);
+  const d = Math.floor(v / 100), c = v % 100;
+  const west = (n: number): string => {
+    if (n === 0) return "Zero";
+    const b = Math.floor(n / 1e9), m = Math.floor((n % 1e9) / 1e6), t = Math.floor((n % 1e6) / 1e3), r = n % 1e3;
+    return [b ? threeDigits(b) + " Billion" : "", m ? threeDigits(m) + " Million" : "", t ? threeDigits(t) + " Thousand" : "", r ? threeDigits(r) : ""].filter(Boolean).join(" ");
+  };
+  return `US Dollars ${west(d)}${c ? ` and ${twoDigits(c)} Cents` : ""} Only`;
+}

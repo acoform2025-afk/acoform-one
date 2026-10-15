@@ -8,7 +8,7 @@ import {
   formworkKind,
 } from "@/lib/quotations/document-content";
 import { EXTRA_LINE_TYPES, LINE_TYPE_LABELS, formatQty, summariseLines } from "@/lib/quotations/line-types";
-import { rupeesInWords } from "@/lib/quotations/amount-words";
+import { rupeesInWords, dollarsInWords } from "@/lib/quotations/amount-words";
 import { ACCESSORY_PAYMENT_TERMS, accessoryTerms } from "@/lib/quotations/accessory-quote";
 
 const PUBLIC = path.join(process.cwd(), "public");
@@ -111,8 +111,17 @@ export type PdfLine = {
   panel_code: string | null; width_mm: number | null; height_mm: number | null; area_sqm: number | null;
 };
 
+// the figures are kept in rupees; a quotation sent in US dollars is the same figures divided by the exchange rate typed by the user
+let FX = 1;
+const usd = () => FX > 1;
+const cs = () => (usd() ? "$" : "₹");
 const rupee = (n: number | null | undefined, digits = 0) =>
-  `₹ ${Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  usd()
+    ? `$ ${(Number(n ?? 0) / FX).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `₹ ${Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+const wordsOf = (n: number | string | null | undefined) =>
+  usd() ? dollarsInWords(Math.round(Number(n ?? 0) / FX)) : rupeesInWords(Math.round(Number(n ?? 0)));
+const fxNote = () => (usd() ? ` (converted at US$ 1 = ₹ ${FX.toLocaleString("en-IN", { maximumFractionDigits: 2 })})` : "");
 const num = (n: number | null | undefined, digits = 2) =>
   Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const dmy = (iso: string | null | undefined, sep = "/") => {
@@ -215,7 +224,7 @@ function OptionsSchedule({ q, o }: { q: PdfQuotation; o: QuoteOptions }) {
         <Text style={[s.cell, { width: W.desc }]}>Description</Text>
         <Text style={[s.cell, { width: W.a }, s.right]}>Option 1 Qty (Sqm)</Text>
         <Text style={[s.cell, { width: W.a }, s.right]}>Option 2 Qty (Sqm)</Text>
-        <Text style={[s.cell, { width: W.r }, s.right]}>Rate (₹/Sqm)</Text>
+        <Text style={[s.cell, { width: W.r }, s.right]}>Rate ({cs()}/Sqm)</Text>
         <Text style={[s.cell, { width: "24%" }, s.right]}>Amount Opt. 1 / Opt. 2</Text>
       </View>
       {o.blocks.map((b, i) => (
@@ -261,7 +270,7 @@ function QuickSchedule({ q }: { q: PdfQuotation }) {
           <Text style={[s.cell, { width: "8%" }, s.center]}>Sr.</Text>
           <Text style={[s.cell, { width: "44%" }]}>Description</Text>
           <Text style={[s.cell, { width: "13%" }, s.right]}>Qty (Sqm)</Text>
-          <Text style={[s.cell, { width: "13%" }, s.right]}>Rate (₹/Sqm)</Text>
+          <Text style={[s.cell, { width: "13%" }, s.right]}>Rate ({cs()}/Sqm)</Text>
           <Text style={[s.cell, { width: "22%" }, s.right]}>Amount</Text>
         </View>
         {qb.blocks.map((b, i) => (
@@ -286,7 +295,7 @@ function QuickSchedule({ q }: { q: PdfQuotation }) {
         <Text style={[s.cell, { width: "8%" }, s.center]}>Sr.</Text>
         <Text style={[s.cell, { width: "44%" }]}>Description</Text>
         <Text style={[s.cell, { width: "13%" }, s.right]}>Qty (Sqm)</Text>
-        <Text style={[s.cell, { width: "13%" }, s.right]}>Rate (₹/Sqm)</Text>
+        <Text style={[s.cell, { width: "13%" }, s.right]}>Rate ({cs()}/Sqm)</Text>
         <Text style={[s.cell, { width: "22%" }, s.right]}>Amount</Text>
       </View>
       <View style={s.tr}>
@@ -436,8 +445,8 @@ function AccessoriesDocument({ q, lines, company }: { q: PdfQuotation; lines: Pd
             <Text style={[s.cell, { width: W.spec }]}>Size / Spec.</Text>
             <Text style={[s.cell, { width: W.qty }, s.right]}>Qty</Text>
             <Text style={[s.cell, { width: W.unit }, s.center]}>Unit</Text>
-            <Text style={[s.cell, { width: W.rate }, s.right]}>Rate (₹)</Text>
-            <Text style={[s.cell, { width: W.amt }, s.right]}>Amount (₹)</Text>
+            <Text style={[s.cell, { width: W.rate }, s.right]}>Rate ({cs()})</Text>
+            <Text style={[s.cell, { width: W.amt }, s.right]}>Amount ({cs()})</Text>
           </View>
           {items.map((l, i) => {
             // every row carries the full item name (also when the item repeats in another size)
@@ -457,7 +466,7 @@ function AccessoriesDocument({ q, lines, company }: { q: PdfQuotation; lines: Pd
         <View style={[s.table, { marginTop: 6 }]} wrap={false}>
           <GstAndTotal q={q} />
         </View>
-        <Text style={s.words}><Text style={s.bold}>Amount in words: </Text>{rupeesInWords(Math.round(Number(q.total_with_gst ?? 0)))}</Text>
+        <Text style={s.words}><Text style={s.bold}>Amount in words: </Text>{wordsOf(q.total_with_gst)}{fxNote()}</Text>
 
         <Text style={s.h2}>TERMS &amp; CONDITIONS</Text>
         <Bullets items={[...payment.map((p) => `Payment: ${p}`), ...accessoryTerms({ delivery: q.delivery_place, freightQuoted: freight, gstPct: Number(q.gst_percentage) || 18, validityDays: q.validity_days, validUntil: dmy(validUntil) })]} numbered />
@@ -490,7 +499,8 @@ function AccessoriesDocument({ q, lines, company }: { q: PdfQuotation; lines: Pd
   );
 }
 
-export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] }, plan = null, plans }: { q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia; plan?: PdfFloorPlan | null; plans?: PdfFloorPlan[] }) {
+export function QuotationDocument({ q, lines, company, media = { photos: [], logos: [] }, plan = null, plans, usdRate }: { usdRate?: number; q: PdfQuotation; lines: PdfLine[]; company: PdfCompany; media?: PdfMedia; plan?: PdfFloorPlan | null; plans?: PdfFloorPlan[] }) {
+  FX = usdRate && usdRate > 1 ? usdRate : 1;
   if (q.quotation_type === "accessories") return <AccessoriesDocument q={q} lines={lines} company={company} />;
   const planPages: PdfFloorPlan[] = plans?.length ? plans : plan ? [plan] : [];
   const kind = formworkKind(q.formwork_type);
@@ -568,7 +578,7 @@ export function QuotationDocument({ q, lines, company, media = { photos: [], log
         {chrome}
         <Text style={[s.h2, { marginTop: 0 }]}>PRICE SCHEDULE</Text>
         {q.quotation_type === "quick" ? <QuickSchedule q={q} /> : <DetailedSchedule q={q} lines={lines} />}
-        <Text style={s.words}><Text style={s.bold}>Amount in words: </Text>{rupeesInWords(Math.round(Number(q.total_with_gst ?? 0)))}</Text>
+        <Text style={s.words}><Text style={s.bold}>Amount in words: </Text>{wordsOf(q.total_with_gst)}{fxNote()}</Text>
         {q.nalco_rate_per_kg ? (
           <Text style={[s.small, { marginTop: 3 }]}>
             Nalco Rate :- {num(q.nalco_rate_per_kg)} ₹/Kg{q.nalco_rate_date ? ` (as on ${dmy(q.nalco_rate_date, "-")})` : ""}

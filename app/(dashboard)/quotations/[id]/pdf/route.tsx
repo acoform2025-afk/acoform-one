@@ -13,8 +13,9 @@ import { describeRules, loadRules, normaliseRules } from "@/lib/floor-plans/rule
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const usdRate = Number(new URL(req.url).searchParams.get("usd")) || undefined;   // ?usd=<rupees per US dollar> → the same quotation in US dollars
   const supabase = await createClient();
 
   const { data: q } = await supabase.from("quotations").select("*").eq("id", id).single();
@@ -91,7 +92,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const plan = plans[0] ?? null;
 
   const buffer = await renderToBuffer(
-    <QuotationDocument q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} plan={plan} plans={plans} />,
+    <QuotationDocument usdRate={usdRate} q={q as unknown as PdfQuotation} lines={lines} company={(company ?? {}) as PdfCompany} media={media} plan={plan} plans={plans} />,
   );
 
   const name = q.quotation_type === "accessories"
