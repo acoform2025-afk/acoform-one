@@ -376,8 +376,8 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
             const pxM = (H / 2) / (c.d * tanF), sx = (v.x * 0.5 + 0.5) * W2, sy = (-v.y * 0.5 + 0.5) * H, hw = (w * pxM) / 2 + 4, hh = (h * pxM) / 2 + 3;
             if (placed.some((r) => sx - hw < r[2] && sx + hw > r[0] && sy - hh < r[3] && sy + hh > r[1])) continue;
             placed.push([sx - hw, sy - hh, sx + hw, sy + hh]);
-            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.map, depthTest: true, transparent: true }));
-            sp.position.set(c.cx + n[0] * 0.1, c.cy + n[1] * 0.1, c.cz + n[2] * 0.1); sp.scale.set(w, h, 1); sp.renderOrder = 20;
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t.map, depthTest: false, transparent: true }));
+            sp.position.set(c.cx + n[0] * 0.1, c.cy + n[1] * 0.1, c.cz + n[2] * 0.1); sp.scale.set(w, h, 1); sp.renderOrder = 20; sp.scale.set(w * 1.15, h * 1.15, 1);
             labelG.add(sp);
           }
         };
