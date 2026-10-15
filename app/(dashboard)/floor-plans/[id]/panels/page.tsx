@@ -8,6 +8,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { CreateBom } from "./create-bom";
 import { SystemSelect } from "./system-select";
 import { ColumnSetsInput } from "./column-sets-input";
+import { wallMarks } from "@/lib/design-engine/floor-panels";
 import { PRESETS, describeLayoutRules } from "@/lib/design-engine/layout-rules";
 
 export const metadata = { title: "Panel layout & BOM" };
@@ -163,6 +164,21 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
           </div>
         </section>
       ) : null}
+
+      {(() => {
+        const marks = wallMarks(result.faces);
+        return marks.length ? (
+          <details className="mt-5 rounded-lg border border-graphite-800 bg-graphite-900 p-3" open>
+            <summary className="cursor-pointer text-sm font-medium text-graphite-200">Wall marks — {marks.length} different walls to make ({result.faces.length} wall faces)</summary>
+            <p className="mt-1 text-xs text-graphite-400">Walls with the same panels get the same mark (M01, M02 …). The mark is shown on each panel in the 3D view, e.g. F12 [M03].</p>
+            <div className="mt-2 max-h-96 overflow-y-auto font-mono text-[11px] text-graphite-400">
+              {marks.map((t) => (
+                <div key={t.code} className="border-b border-graphite-800 py-1"><span className="text-graphite-200">{t.code}</span> × {t.count} · {t.face.length} mm → {t.face.panels.join(" + ") || "—"}{t.face.filler ? ` + filler ${t.face.filler}` : ""}{t.face.top ? ` · top ${t.face.top}` : ""} <span className="text-graphite-600">({t.faces.slice(0, 8).join(", ")}{t.faces.length > 8 ? ` +${t.faces.length - 8}` : ""})</span></div>
+              ))}
+            </div>
+          </details>
+        ) : null;
+      })()}
 
       <details className="mt-5 rounded-lg border border-graphite-800 bg-graphite-900 p-3">
         <summary className="cursor-pointer text-sm font-medium text-graphite-200">Wall face layouts ({result.faces.length} faces · {n2(s.faceLength)} m)</summary>

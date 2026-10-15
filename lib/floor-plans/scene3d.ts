@@ -7,7 +7,7 @@ import polygonClipping, { type MultiPolygon } from "polygon-clipping";
 import type { Pt } from "./calc";
 import type { FaceLayout } from "@/lib/design-engine/floor-panels";
 import type { Zone } from "./zones";
-import { fillRun, type StairGeo, type StairLayout } from "@/lib/design-engine/floor-panels";
+import { fillRun, wallMarks, type StairGeo, type StairLayout } from "@/lib/design-engine/floor-panels";
 import { inRings } from "@/lib/design-engine/design-check";
 
 export type Poly2 = Pt[][];                         // outer ring + holes (metres)
@@ -125,6 +125,8 @@ export function buildScene3(o: {
   }
   // wall panels on each face (face geometry in plan px → metres), drawn 5 mm off the concrete
   const mpp = o.mpp;
+  const markOf = new Map<string, string>();
+  for (const t of wallMarks(o.faces)) for (const fc of t.faces) markOf.set(fc, t.code);
   for (const f of o.faces) {
     const fg = f.geo ?? f.geo3;
     if (!fg || !(mpp > 0)) continue;
@@ -138,7 +140,8 @@ export function buildScene3(o: {
     const at = (mm: number): Pt => { const t = Math.min(len, mm / 1000); return [a[0] + ux * t, a[1] + uy * t]; };
     const quad = (x0: number, x1: number, z0: number, z1: number, k: Panel3["k"], c: string) => {
       const p0 = at(x0), p1 = at(x1);
-      panels.push({ p: [[p0[0], base + z0, p0[1]], [p1[0], base + z0, p1[1]], [p1[0], base + z1, p1[1]], [p0[0], base + z1, p0[1]]], k, c, z: f.code, n: [nx * s, 0, ny * s] });
+      const mk = f.geo ? markOf.get(f.code) : undefined;   // wall mark (same mark = same wall)
+      panels.push({ p: [[p0[0], base + z0, p0[1]], [p1[0], base + z0, p1[1]], [p1[0], base + z1, p1[1]], [p0[0], base + z1, p0[1]]], k, c: mk && c.startsWith(f.code) ? `${f.code} [${mk}]${c.slice(f.code.length)}` : c, z: f.code, n: [nx * s, 0, ny * s] });
     };
     const Hm = f.height / 1000, main = Math.min(o.stdHeight / 1000, Hm), top = f.top / 1000;
     let run = 0;

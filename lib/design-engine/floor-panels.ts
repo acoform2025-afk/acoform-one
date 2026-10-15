@@ -117,6 +117,21 @@ export function overlap(a: [number, number][], b: [number, number][]) {
   return out;
 }
 
+/** Wall marks: identical wall faces (same panels, filler, top, height) share one mark M01, M02 … — most repeated first.
+ *  Used by the 3D view, the wall-set drawing (modulation) and the marks table, so they always agree. */
+export type WallMark = { code: string; face: FaceLayout; count: number; faces: string[] };
+export function wallMarks(faces: FaceLayout[]): WallMark[] {
+  const m = new Map<string, WallMark>();
+  for (const f of faces) {
+    const key = `${f.panels.join(",")}|${f.filler}|${f.top}|${f.height}`;
+    const t = m.get(key);
+    if (t) { t.count++; t.faces.push(f.code); } else m.set(key, { code: "", face: f, count: 1, faces: [f.code] });
+  }
+  const list = [...m.values()].sort((a, b) => b.count - a.count || b.face.length - a.face.length);
+  list.forEach((t, i) => { t.code = `M${String(i + 1).padStart(2, "0")}`; });
+  return list;
+}
+
 export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], corners: number, catalog: CatPanel[], o: PanelOptions): PanelResult {
   const warnings: string[] = [];
   const cat = (c: string) => catalog.filter((p) => p.panel_category === c);

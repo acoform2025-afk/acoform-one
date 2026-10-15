@@ -361,6 +361,8 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
   const all = () => setOn((o) => { const n = { ...o }; for (const k of Object.keys(n) as Layer[]) { n[k] = k !== "slab"; api.current?.set(k, n[k]); } return n; });
   // the building as the architect draws it (concrete, slabs, windows, doors, railings) — no formwork
   const building = () => setOn((o) => { const n = { ...o }; const show: Layer[] = ["walls", "columns", "slab", "beams", "stairs", "arch"]; for (const k of Object.keys(n) as Layer[]) { n[k] = show.includes(k); api.current?.set(k, n[k]); } return n; });
+  // the formwork alone: concrete walls and slab hidden (to check nothing is missing)
+  const formwork = () => setOn((o) => { const n = { ...o }; for (const k of Object.keys(n) as Layer[]) { n[k] = k !== "walls" && k !== "slab"; api.current?.set(k, n[k]); } return n; });
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
@@ -376,6 +378,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
         })}
         <button type="button" onClick={all} title="Show every layer again (formwork view)" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">All</button>
         <button type="button" onClick={building} title="The building as on the architect's elevation: concrete, slabs, windows, doors, railings — no formwork" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">Building view</button>
+        <button type="button" onClick={formwork} title="Formwork only: concrete walls and slab hidden, to check nothing is missing" className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">Formwork only</button>
         <span className="mx-1 h-5 w-px bg-graphite-700" />
         <button type="button" title="Turn left 45°" onClick={() => api.current?.turn(-45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↺ 45°</button>
         <button type="button" title="Turn right 45°" onClick={() => api.current?.turn(45)} className="rounded-md border border-graphite-700 px-2 py-1.5 text-xs text-graphite-200 hover:bg-graphite-800">↻ 45°</button>

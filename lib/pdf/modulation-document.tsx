@@ -5,6 +5,7 @@
  */
 import path from "node:path";
 import { Document, Font, G, Image, Line, Page, Path, Polyline, Rect, Svg, Text, View } from "@react-pdf/renderer";
+import { wallMarks } from "@/lib/design-engine/floor-panels";
 import type { BeamLayout, BomRow, ColumnLayout, FaceLayout, Fit, StairLayout } from "@/lib/design-engine/floor-panels";
 import { panelString } from "@/lib/floor-plans/panel-marks";
 
@@ -24,17 +25,7 @@ export type ModType = { code: string; face: FaceLayout; count: number; faces: st
 export type ModInfo = { company: string; project: string; client: string; planName: string; drawingNo: string; rev: string; date: string; stdHeight: number; tieH: number; tieV: number; note: string };
 
 /** Group identical faces (same panels, filler, top, height) into types, most repeated first. */
-export function modulationTypes(faces: FaceLayout[]): ModType[] {
-  const m = new Map<string, ModType>();
-  for (const f of faces) {
-    const key = `${f.panels.join(",")}|${f.filler}|${f.top}|${f.height}`;
-    const t = m.get(key);
-    if (t) { t.count++; t.faces.push(f.code); } else m.set(key, { code: "", face: f, count: 1, faces: [f.code] });
-  }
-  const list = [...m.values()].sort((a, b) => b.count - a.count || b.face.length - a.face.length);
-  list.forEach((t, i) => { t.code = `M${String(i + 1).padStart(2, "0")}`; });
-  return list;
-}
+export const modulationTypes = (faces: FaceLayout[]): ModType[] => wallMarks(faces);
 
 // A3 landscape 1191 × 842 pt
 const PW = 1191, PH = 842, M = 20, FOOT = 46;
