@@ -172,6 +172,7 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
               {c("joistEdgeLensOn", "Use the edge joist length priority")}
               {c("joistUneven", "Joists not evenly spaced (default) — off: evenly spaced")}
               {c("autoSlabProps", "Auto-generate slab-bottom props")}
+              {c("slabRefill", "Lay the left-over bands of a big deck zone again with rows of their own (fewer special pieces)")}
             </div>
           </section>
         </div>

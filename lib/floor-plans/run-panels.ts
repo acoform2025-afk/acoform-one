@@ -91,5 +91,5 @@ export function buildZones(inp: ReturnType<typeof panelInputs>, catalog: CatPane
   const deck = catalog.filter((c) => c.panel_category === "deck_panel");
   const deckW = pk ? [...new Set(pk.slabPanelWidths)].sort((a, b) => b - a) : sys?.deckWidths.length ? sys.deckWidths : deck.filter((c) => Number(c.height_mm) === 1200).map((c) => Number(c.width_mm));
   const codeFor = (w: number, L: number) => deck.find((c) => Number(c.width_mm) === w && Number(c.height_mm) === L)?.panel_code ?? `DP-${w}-${L}`;
-  return deckZones(inp.decks, inp.zoneWalls, inp.zoneGaps, 0.25, inp.zoneBeams).map((z, i) => layoutZone(`M${i + 1}`, z, deckW.length ? deckW : [600, 500, 450, 400, 300], lens, codeFor, sys?.midBeam ?? 100, 25, pk ? pk.slabCornerWidth : (sys?.soffitCornerW ?? 0), pk?.slabStrip ?? "end"));
+  return deckZones(inp.decks, inp.zoneWalls, inp.zoneGaps, 0.25, inp.zoneBeams).map((z, i) => layoutZone(`M${i + 1}`, z, deckW.length ? deckW : [600, 500, 450, 400, 300], lens, codeFor, sys?.midBeam ?? 100, 25, pk ? pk.slabCornerWidth : (sys?.soffitCornerW ?? 0), pk?.slabStrip ?? "end", pk?.slabRefill ?? true));
 }

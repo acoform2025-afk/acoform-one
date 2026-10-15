@@ -112,78 +112,112 @@ export function planRows(span: number, lens: number[], gap: number): number[] {
   return rows;
 }
 
-export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: [number, number, number, number] }, deckW: number[], deckLens: number | number[], codeFor: (w: number, L: number) => string, mbGap = 100, tol = 25, edgeMm = 0, stripMode: "end" | "edges" | "middle" = "end"): Zone {
+export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: [number, number, number, number] }, deckW: number[], deckLens: number | number[], codeFor: (w: number, L: number) => string, mbGap = 100, tol = 25, edgeMm = 0, stripMode: "end" | "edges" | "middle" = "end", refill = true): Zone {
   const lensList = Array.isArray(deckLens) ? deckLens : [deckLens];
   const deckLen = lensList[0];
-  const w = z.box[2] - z.box[0], h = z.box[3] - z.box[1];
-  // rows run across the short side: the 1200 length spans the short direction, so rows step along the long side
-  const along: "x" | "y" = w >= h ? "x" : "y";
-  const sw = (p: Pt): Pt => (along === "x" ? p : [p[1], p[0]]);
-  const outer = z.rings[0].map(sw), holes = z.rings.slice(1).map((r) => r.map(sw));
-  // soffit corners round the room take the first `edgeMm` at every wall / beam side: the deck starts inside them
-  const E = edgeMm / 1000;
-  const xs = outer.map((p) => p[0]); const s0 = Math.min(...xs) + E, s1 = Math.max(...xs) - E;
   const G = mbGap / 1000;
   const panels: DeckPanel[] = []; const mb: [Pt, Pt][] = [];
-  let n = 0;
-  // rows sized to this zone: the allowed lengths that fill the span best (one length = fixed rows as before)
-  const rowLens = lensList.length > 1 ? planRows((s1 - s0) * 1000, lensList, mbGap) : [];
-  let ri = 0;
-  for (let sa = s0; sa < s1 - 0.05; ri++) {
-    const L = (rowLens.length ? rowLens[Math.min(ri, rowLens.length - 1)] : deckLen) / 1000;
-    const sb = Math.min(sa + L, s1), len = Math.round((sb - sa) * 1000 / 5) * 5;
-    const ints = overlap(intervalsAt(sa + 0.02, outer, holes), intervalsAt(sb - 0.02, outer, holes));
-    for (const [lo0, hi0] of ints) {
-      const lo = lo0 + E, hi = hi0 - E; if (hi - lo < 0.05) continue;
-      const run = (hi - lo) * 1000;
-      const { panels: ws, left } = deckW.length ? fillRun(run, deckW) : { panels: [], left: run };
-      let t = lo;
-      const put = (wmm: number, custom: boolean) => {
-        const t1 = t + wmm / 1000;
-        // a wall / column corner pushing into the row: leave this panel out (the spot becomes a special)
-        const e = 0.03, inZone = (x: number, y: number) => inPoly([x, y], outer) && !holes.some((h) => inPoly([x, y], h));
-        const xsS = [sa + e, (sa + sb) / 2, sb - e], ysS = [t + e, (t + t1) / 2, t1 - e];
-        if (!xsS.every((x) => ysS.every((y) => inZone(x, y)))) { t = t1; return; }
-        const a = sw([sa, t]), b = sw([sb, t1]);
-        const cust = custom || !lensList.includes(len);
-        panels.push({ no: `${code}-${String(++n).padStart(2, "0")}`, x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]), w: wmm, L: len, custom: cust, code: cust ? `DS-${wmm}-${len}` : codeFor(wmm, len) });
-        t = t1;
-      };
-      const fl = left <= tol ? 0 : Math.round(left / 5) * 5;
-      if (fl && stripMode === "edges" && fl >= 100) {          // left-over strip split in two, one at each edge of the row
-        const h1 = Math.round(fl / 2 / 5) * 5;
-        put(h1, true); for (const wm of ws) put(wm, false); put(fl - h1, true);
-      } else if (fl && stripMode === "middle") {                // left-over strip in the middle of the row
-        const half = Math.floor(ws.length / 2);
-        for (const wm of ws.slice(0, half)) put(wm, false); put(fl, true); for (const wm of ws.slice(half)) put(wm, false);
-      } else {
-        for (const wm of ws) put(wm, false);
-        if (fl) put(fl, true);
+  // soffit corners round the room take the first `edgeMm` at every wall / beam side: the deck starts inside them
+  const E = edgeMm / 1000;
+
+  /** Rows of deck panels over one region (rings = outer ring + holes), rows of the deck length stepping along `al`.
+   *  Pure: returns the panels (numbered later) and mid beams, so several tries can be compared. */
+  const place = (rings: Pt[][], al: "x" | "y", e: number) => {
+    const ps: DeckPanel[] = []; const mbs: [Pt, Pt][] = [];
+    const sw = (p: Pt): Pt => (al === "x" ? p : [p[1], p[0]]);
+    const outer = rings[0].map(sw), holes = rings.slice(1).map((r) => r.map(sw));
+    const xs = outer.map((p) => p[0]); const s0 = Math.min(...xs) + e, s1 = Math.max(...xs) - e;
+    // rows sized to this region: the allowed lengths that fill the span best (one length = fixed rows as before)
+    const rowLens = lensList.length > 1 ? planRows((s1 - s0) * 1000, lensList, mbGap) : [];
+    let ri = 0;
+    for (let sa = s0; sa < s1 - 0.05; ri++) {
+      const L = (rowLens.length ? rowLens[Math.min(ri, rowLens.length - 1)] : deckLen) / 1000;
+      const sb = Math.min(sa + L, s1), len = Math.round((sb - sa) * 1000 / 5) * 5;
+      const ints = overlap(intervalsAt(sa + 0.02, outer, holes), intervalsAt(sb - 0.02, outer, holes));
+      for (const [lo0, hi0] of ints) {
+        const lo = lo0 + e, hi = hi0 - e; if (hi - lo < 0.05) continue;
+        const run = (hi - lo) * 1000;
+        const { panels: ws, left } = deckW.length ? fillRun(run, deckW) : { panels: [], left: run };
+        let t = lo;
+        const put = (wmm: number, custom: boolean) => {
+          const t1 = t + wmm / 1000;
+          // a wall / column corner pushing into the row: leave this panel out (the spot becomes a special)
+          const ee = 0.03, inZone = (x: number, y: number) => inPoly([x, y], outer) && !holes.some((h) => inPoly([x, y], h));
+          const xsS = [sa + ee, (sa + sb) / 2, sb - ee], ysS = [t + ee, (t + t1) / 2, t1 - ee];
+          if (!xsS.every((x) => ysS.every((y) => inZone(x, y)))) { t = t1; return; }
+          const a = sw([sa, t]), b = sw([sb, t1]);
+          const cust = custom || !lensList.includes(len);
+          ps.push({ no: "", x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]), w: wmm, L: len, custom: cust, code: cust ? `DS-${wmm}-${len}` : codeFor(wmm, len) });
+          t = t1;
+        };
+        const fl = left <= tol ? 0 : Math.round(left / 5) * 5;
+        if (fl && stripMode === "edges" && fl >= 100) {          // left-over strip split in two, one at each edge of the row
+          const h1 = Math.round(fl / 2 / 5) * 5;
+          put(h1, true); for (const wm of ws) put(wm, false); put(fl - h1, true);
+        } else if (fl && stripMode === "middle") {                // left-over strip in the middle of the row
+          const half = Math.floor(ws.length / 2);
+          for (const wm of ws.slice(0, half)) put(wm, false); put(fl, true); for (const wm of ws.slice(half)) put(wm, false);
+        } else {
+          for (const wm of ws) put(wm, false);
+          if (fl) put(fl, true);
+        }
+      }
+      if (sb < s1 - 0.05) {                                  // mid beam line between this row and the next
+        const mid = sb + G / 2;
+        for (const [lo, hi] of intervalsAt(mid, outer, holes)) mbs.push([sw([mid, lo]), sw([mid, hi])]);
+      }
+      sa += L + G;
+    }
+    return { ps, mbs };
+  };
+  const w0 = z.box[2] - z.box[0], h0 = z.box[3] - z.box[1];
+  // rows run across the short side: the 1200 length spans the short direction, so rows step along the long side
+  const along: "x" | "y" = w0 >= h0 ? "x" : "y";
+  { const r = place(z.rings, along, E); panels.push(...r.ps); mb.push(...r.mbs); }
+
+  // what the panels and mid beams do not cover (odd corners, narrow strips): made-to-size deck specials
+  const restOf = (): MultiPolygon => {
+    let rest: MultiPolygon = [z.rings.map(ring)];
+    const cover: MultiPolygon = [
+      ...panels.map((p) => [ring([[p.x0, p.y0], [p.x1, p.y0], [p.x1, p.y1], [p.x0, p.y1]])] as Polygon),
+      ...mb.map(([a, b]) => { const h = G / 2 + 0.002; const v = a[0] === b[0]; return [ring(v ? [[a[0] - h, a[1]], [a[0] + h, a[1]], [b[0] + h, b[1]], [b[0] - h, b[1]]] : [[a[0], a[1] - h], [b[0], b[1] - h], [b[0], b[1] + h], [a[0], a[1] + h]])] as Polygon; }),
+      // the soffit-corner band along every side of the room
+      ...(E > 0 ? z.rings.flatMap((r) => r.map((a, i) => { const b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1; const nx = (-dy / L) * (E + 0.002), ny = (dx / L) * (E + 0.002); return [ring([[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]])] as Polygon; })) : []),
+    ];
+    // the clipping library can fail on near-touching edges (panels laid exactly against the zone outline): retry with
+    // every point snapped to the millimetre before giving up, so the specials are not silently lost
+    if (cover.length) {
+      try { rest = polygonClipping.difference(rest, ...cover); }
+      catch {
+        const snap = (m: MultiPolygon): MultiPolygon => m.map((poly) => poly.map((r) => r.map(([x, y]) => [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000] as [number, number])));
+        try { rest = polygonClipping.difference(snap(rest), ...cover.map((c) => snap([c]))); } catch { rest = []; }
       }
     }
-    if (sb < s1 - 0.05) {                                  // mid beam line between this row and the next
-      const mid = sb + G / 2;
-      for (const [lo, hi] of intervalsAt(mid, outer, holes)) mb.push([sw([mid, lo]), sw([mid, hi])]);
+    return rest;
+  };
+  let rest = restOf();
+
+  // a big zone is laid in one row grid over the whole floor, so a wall off that grid leaves long bands (1.2 m wide, metres long).
+  // Lay those left-over regions again with rows of their own, trying both directions and keeping the one that covers more
+  if (refill) {
+    const extra: DeckPanel[] = []; const extraMb: [Pt, Pt][] = [];
+    for (const poly of rest) {
+      const rings = poly.map((r) => r.slice(0, -1) as Pt[]);
+      const xs = rings[0].map((p) => p[0]), ys = rings[0].map((p) => p[1]);
+      const bw = Math.max(...xs) - Math.min(...xs), bh = Math.max(...ys) - Math.min(...ys);
+      const area = Math.abs(polyArea(rings[0])) - rings.slice(1).reduce((x, r) => x + Math.abs(polyArea(r)), 0);
+      if (area < 0.4 || Math.min(bw, bh) < 0.3) continue;
+      let best: { ps: DeckPanel[]; mbs: [Pt, Pt][] } | null = null, bestCov = 0;
+      for (const al of ["x", "y"] as const) {
+        const r = place(rings, al, 0);
+        const cov = r.ps.reduce((a, q) => a + (q.w * q.L) / 1e6, 0);
+        if (cov > bestCov + 1e-6) { best = r; bestCov = cov; }
+      }
+      if (best && bestCov >= 0.5 * area) { extra.push(...best.ps); extraMb.push(...best.mbs); }
     }
-    sa += L + G;
+    if (extra.length) { panels.push(...extra); mb.push(...extraMb); rest = restOf(); }
   }
-  // what the panels and mid beams do not cover (odd corners, narrow strips): made-to-size deck specials
-  let rest: MultiPolygon = [z.rings.map(ring)];
-  const cover: MultiPolygon = [
-    ...panels.map((p) => [ring([[p.x0, p.y0], [p.x1, p.y0], [p.x1, p.y1], [p.x0, p.y1]])] as Polygon),
-    ...mb.map(([a, b]) => { const h = G / 2 + 0.002; const v = a[0] === b[0]; return [ring(v ? [[a[0] - h, a[1]], [a[0] + h, a[1]], [b[0] + h, b[1]], [b[0] - h, b[1]]] : [[a[0], a[1] - h], [b[0], b[1] - h], [b[0], b[1] + h], [a[0], a[1] + h]])] as Polygon; }),
-    // the soffit-corner band along every side of the room
-    ...(E > 0 ? z.rings.flatMap((r) => r.map((a, i) => { const b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1; const nx = (-dy / L) * (E + 0.002), ny = (dx / L) * (E + 0.002); return [ring([[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]])] as Polygon; })) : []),
-  ];
-  // the clipping library can fail on near-touching edges (panels laid exactly against the zone outline): retry with
-  // every point snapped to the millimetre before giving up, so the specials are not silently lost
-  if (cover.length) {
-    try { rest = polygonClipping.difference(rest, ...cover); }
-    catch {
-      const snap = (m: MultiPolygon): MultiPolygon => m.map((poly) => poly.map((r) => r.map(([x, y]) => [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000] as [number, number])));
-      try { rest = polygonClipping.difference(snap(rest), ...cover.map((c) => snap([c]))); } catch { rest = []; }
-    }
-  }
+  panels.forEach((p, k) => { p.no = `${code}-${String(k + 1).padStart(2, "0")}`; });
   const specials = rest.map((poly) => { const rings = poly.map((r) => r.slice(0, -1) as Pt[]); return { rings, area: Math.abs(polyArea(rings[0])) - rings.slice(1).reduce((x, r) => x + Math.abs(polyArea(r)), 0) }; }).filter((q) => q.area > 0.02);
   return { code, rings: z.rings, area: z.area, box: z.box, along, panels, mb, specials, specialArea: specials.reduce((x, q) => x + q.area, 0) };
 }
