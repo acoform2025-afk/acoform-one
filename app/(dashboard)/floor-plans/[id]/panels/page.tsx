@@ -235,6 +235,18 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
               {bl.map((b, i) => <div key={`b${i}`} className="border-b border-graphite-800 py-1"><span className="text-graphite-200">BM{i + 1}</span> · {b.b ? `${b.b} × ${b.d}` : `one side, depth ${b.d}`} mm · {(b.len / 1000).toFixed(1)} m in {b.n} piece{b.n === 1 ? "" : "s"}</div>)}
               {[...zs].sort((x, y) => y.specialArea - x.specialArea).map((z) => <div key={z.code} className="border-b border-graphite-800 py-1"><span className="text-graphite-200">{z.code}</span> · slab zone {z.area.toFixed(1)} m² · {z.panels.length} deck panels · special {z.specialArea.toFixed(1)} m²{z.area > 0 && z.specialArea / z.area > 0.15 ? " ⚠ many specials" : ""}</div>)}
             </div>
+            {zs.filter((z) => z.specialArea > 2).map((z) => {
+              // what the specials of a big zone are: long strips, small odd pieces, or large blocks (size = bounding box in mm)
+              const sp = z.specials.map((q) => { const xs = q.rings[0].map((p) => p[0]), ys = q.rings[0].map((p) => p[1]); const a = (Math.max(...xs) - Math.min(...xs)) * 1000, b = (Math.max(...ys) - Math.min(...ys)) * 1000; return { area: q.area, lo: Math.round(Math.min(a, b)), hi: Math.round(Math.max(a, b)), at: [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...ys) + Math.min(...ys)) / 2] as [number, number] }; });
+              const strip = sp.filter((q) => q.lo <= 700 && q.hi >= 1500), small = sp.filter((q) => q.area < 0.3 && !(q.lo <= 700 && q.hi >= 1500)), rest = sp.filter((q) => !strip.includes(q) && !small.includes(q));
+              const sum = (l: typeof sp) => l.reduce((t, q) => t + q.area, 0).toFixed(1);
+              return (
+                <div key={`sp${z.code}`} className="mt-3 rounded border border-graphite-800 p-2 text-[11px] text-graphite-400">
+                  <div className="text-graphite-200">What the {z.specialArea.toFixed(1)} m² of specials in {z.code} are: long strips {strip.length} pcs / {sum(strip)} m² · small pieces {small.length} pcs / {sum(small)} m² · other blocks {rest.length} pcs / {sum(rest)} m²</div>
+                  <div className="mt-1 font-mono">{[...sp].sort((x, y) => y.area - x.area).slice(0, 14).map((q, i) => <div key={i}>{q.area.toFixed(2)} m² · {q.lo} × {q.hi} mm · at x {q.at[0].toFixed(1)} m, y {q.at[1].toFixed(1)} m</div>)}</div>
+                </div>
+              );
+            })}
           </details>
         );
       })()}
