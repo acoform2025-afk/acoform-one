@@ -102,6 +102,39 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
           </div>
         ))}
       </div>
+      {(() => {
+        // formwork statistics: contact area by element, concrete volume of the typical floor, panel cover
+        const slabM = (Number(r.t.params.slabMm) || 150) / 1000, clear = totals.clear_height || 0;
+        const thkM = (Number(r.t.params.wallThkMm) || 150) / 1000;
+        const wallVol = (totals.wall_top_drawn > 0 ? totals.wall_top_drawn : totals.wall_length * thkM) * clear;
+        const slabVol = totals.plan_area * slabM;
+        const beamVol = (r.inp?.beams ?? []).reduce((a: number, b: { length: number; b: number; d: number }) => a + (b.length / 1000) * (b.b / 1000) * Math.max(0, (b.d - slabM * 1000) / 1000), 0);
+        const colVol = (r.inp?.columns ?? []).reduce((a: number, c: { w: number; d: number; h: number; qty: number }) => a + (c.w / 1000) * (c.d / 1000) * (c.h / 1000) * c.qty, 0);
+        const vol = wallVol + slabVol + beamVol + colVol;
+        const rows: [string, string, string][] = [
+          ["Walls (both faces)", `${n2(totals.wall_area)} m²`, `${n2(wallVol)} m³`],
+          ["Columns", `${n2(totals.column_area)} m²`, `${n2(colVol)} m³`],
+          ["Slab soffit", `${n2(totals.slab_soffit)} m²`, `${n2(slabVol)} m³`],
+          ["Slab edges", `${n2(totals.slab_edge)} m²`, "—"],
+          ["Beams (sides + soffit)", `${n2(totals.beam_area)} m²`, `${n2(beamVol)} m³`],
+          ["Stairs / extras", `${n2(totals.extra_area)} m²`, "—"],
+        ];
+        return (
+          <details className="mt-4 rounded-lg border border-graphite-800 bg-graphite-900 p-3" open>
+            <summary className="cursor-pointer text-sm font-medium text-graphite-200">Formwork statistics — contact area and concrete volume of the typical floor</summary>
+            <table className="mt-2 w-full max-w-xl text-xs">
+              <thead><tr className="text-left text-graphite-500"><th className="py-1 font-normal">Element</th><th className="py-1 text-right font-normal">Contact area</th><th className="py-1 text-right font-normal">Concrete</th></tr></thead>
+              <tbody className="font-mono text-graphite-300">
+                {rows.map(([k, a, v]) => <tr key={k} className="border-t border-graphite-800"><td className="py-1 font-sans">{k}</td><td className="py-1 text-right">{a}</td><td className="py-1 text-right">{v}</td></tr>)}
+                <tr className="border-t border-graphite-700 font-semibold text-graphite-100"><td className="py-1 font-sans">Total</td><td className="py-1 text-right">{n2(totals.contact_area)} m²</td><td className="py-1 text-right">{n2(vol)} m³</td></tr>
+              </tbody>
+            </table>
+            <p className="mt-2 text-xs text-graphite-400">
+              Panels laid out: {n2(s.panelArea)} m² = {totals.contact_area > 0 ? Math.round((s.panelArea / totals.contact_area) * 100) : 0}% of the contact area{vol > 0 ? ` · ${n2(totals.contact_area / vol)} m² of formwork per m³ of concrete` : ""}. Volumes are estimates from the plan (wall tops, slab area, beam and column sizes) — use them for a quick check against the structural drawings, not for ordering concrete.
+            </p>
+          </details>
+        );
+      })()}
       {canBom ? <CreateBom planId={id} designs={designs} query={{ h: String(opt.stdHeight), kg: String(opt.kgPerM2), prop: String(opt.propSpacing) }} /> : null}
       {s.warnings.length ? (
         <ul className="mt-3 space-y-1 rounded-md border border-signal-amber/30 bg-signal-amber/10 px-3 py-2 text-xs text-signal-amber">
