@@ -647,6 +647,36 @@ export function mergeColumnStrips(paths: DxfPath[], tol: number): DxfPath[] {
   return [...rest, ...rects.map((r) => r.src ?? ({ layer: "columns", closed: true, pts: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]] } as DxfPath))];
 }
 
+/**
+ * Openings (lift shafts, ducts, voids) drawn as boxes with only a thin band between them (a 100–150 mm partition or
+ * the line of a cross wall) are one opening: no panel can be made for a band that narrow. Axis-aligned boxes whose
+ * facing sides are closer than `gap` (drawing units) and overlap along the side grow towards each other and meet.
+ */
+export function closeOpeningGaps(paths: DxfPath[], gap: number): DxfPath[] {
+  if (!(gap > 0)) return paths;
+  type R = { i: number; x0: number; y0: number; x1: number; y1: number };
+  const rects: R[] = [];
+  paths.forEach((p, i) => {
+    const pts = p.pts.length > 1 && p.pts[0][0] === p.pts[p.pts.length - 1][0] && p.pts[0][1] === p.pts[p.pts.length - 1][1] ? p.pts.slice(0, -1) : p.pts;
+    if (pts.length !== 4) return;
+    const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    if (Math.abs(polyArea(pts)) < 0.98 * (x1 - x0) * (y1 - y0)) return;
+    rects.push({ i, x0, y0, x1, y1 });
+  });
+  const g = new Map<number, R>(rects.map((r) => [r.i, { ...r }]));
+  for (const a of rects) for (const b of rects) {
+    if (a.i >= b.i) continue;
+    const ya = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0), xa = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+    const A = g.get(a.i)!, B = g.get(b.i)!;
+    if (ya > 0 && b.x0 > a.x1 && b.x0 - a.x1 <= gap) { const m = (a.x1 + b.x0) / 2; A.x1 = Math.max(A.x1, m); B.x0 = Math.min(B.x0, m); }
+    if (ya > 0 && a.x0 > b.x1 && a.x0 - b.x1 <= gap) { const m = (b.x1 + a.x0) / 2; B.x1 = Math.max(B.x1, m); A.x0 = Math.min(A.x0, m); }
+    if (xa > 0 && b.y0 > a.y1 && b.y0 - a.y1 <= gap) { const m = (a.y1 + b.y0) / 2; A.y1 = Math.max(A.y1, m); B.y0 = Math.min(B.y0, m); }
+    if (xa > 0 && a.y0 > b.y1 && a.y0 - b.y1 <= gap) { const m = (b.y1 + a.y0) / 2; B.y1 = Math.max(B.y1, m); A.y0 = Math.min(A.y0, m); }
+  }
+  return paths.map((p, i) => { const r = g.get(i); return r ? { ...p, pts: [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]] as Pt[], closed: true } : p; });
+}
+
 function outermost(paths: DxfPath[]) {
   const withA = paths.map((p) => ({ p, a: polyArea(p.pts) })).filter((x) => x.a > 0).sort((a, b) => b.a - a.a);
   const keep: typeof withA = [];
@@ -1122,7 +1152,7 @@ export function effectiveRoles(model: DxfModel, roles: Record<string, LayerRole>
   return out ?? roles;
 }
 
-export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][]; beamDepthMm?: number; projectBeams?: Record<string, { b: number; d: number }> } = {}): DxfAuto {
+export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, unitToM: number, keep?: (p: DxfPath) => boolean, minOpeningM2 = 0.4, separate: Pt[][] = [], opts: { sliverMm?: number; minWallMm?: number; dict?: Dictionary; force?: [number, number, number, number][]; beamDepthMm?: number; projectBeams?: Record<string, { b: number; d: number }> } = {}): DxfAuto {
   const u = unitToM, u2 = unitToM * unitToM;
   const roles = effectiveRoles(model, rolesIn);
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
@@ -1299,7 +1329,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       extraOpen.push(b);
     }
   }
-  const openL = outermost([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath), ...extraOpen.map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)]).filter((x) => x.a * u2 >= minOpeningM2);
+  const openL = outermost(closeOpeningGaps([...loops("opening"), ...xMarkedBoxes(of("opening"), 0.02 / u).map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath), ...extraOpen.map((pts) => ({ layer: "opening", pts, closed: true }) as DxfPath)], (opts.sliverMm ?? 200) / 1000 / u)).filter((x) => x.a * u2 >= minOpeningM2);
 
   // beams: outlines on beam layers. A size in the layer name ("BEAM 300X750H") gives each beam its own width and
   // depth: the part clear of walls / columns is its length → both sides (depth − slab) and the bottom. Beam layers
