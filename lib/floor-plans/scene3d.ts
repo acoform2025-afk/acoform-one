@@ -6,7 +6,7 @@
 import polygonClipping, { type MultiPolygon } from "polygon-clipping";
 import type { Pt } from "./calc";
 import type { FaceLayout } from "@/lib/design-engine/floor-panels";
-import type { Zone } from "./zones";
+import { zoneLabelAt, type Zone } from "./zones";
 import { fillRun, wallMarks, type StairGeo, type StairLayout } from "@/lib/design-engine/floor-panels";
 import { inRings } from "@/lib/design-engine/design-check";
 
@@ -608,7 +608,7 @@ export function buildScene3(o: {
     H, slab, box, walls: strip(walls), slabPoly: strip(slabM),
     beams: o.zoneGaps.map((g) => ({ a: g.a, b: g.b, w: Math.max(0.1, g.thk), d: Math.max(slab, o.beamDepthMm / 1000) })),
     cols: (o.cols ?? []).filter((r) => r.length >= 3), beamSolids: (o.beams3 ?? []).filter((b) => b.ring.length >= 3).map((b) => ({ ring: b.ring, d: Math.max(slab, b.d / 1000) })), steps, stairSolids,
-    panels, mb: o.zones.flatMap((z) => z.mb), keel: { w: (o.midBeamMm ?? 150) / 1000, d: 0.1 }, zones: o.zones.map((z) => ({ code: z.code, at: [(z.box[0] + z.box[2]) / 2, (z.box[1] + z.box[3]) / 2] as Pt })),
+    panels, mb: o.zones.flatMap((z) => z.mb), keel: { w: (o.midBeamMm ?? 150) / 1000, d: 0.1 }, zones: o.zones.map((z) => ({ code: z.code, at: zoneLabelAt(z) })),
     stats: { wall: wallN, deck: deckN, special },
     fit: fit.map((x) => ({ ...x, at: [r3(x.at[0]), r3(x.at[1])] as Pt, y: r3(x.y) })),
     acc: { props: acc.props.map((v) => v.map(r3) as Acc3["props"][number]), ties: acc.ties.map((v) => v.map((x) => (x === undefined ? x : r3(x))) as Acc3["ties"][number]), walers: acc.walers.map((v) => v.map(r3) as Acc3["walers"][number]), pushPull: acc.pushPull.map((v) => v.map(r3) as Acc3["pushPull"][number]), brackets: acc.brackets.map((v) => v.map(r3) as Acc3["brackets"][number]), heads: acc.heads.map((v) => v.map((x) => r3(x ?? 0)) as Acc3["heads"][number]), pins: pinList.map((v) => v.map(r3) as NonNullable<Acc3["pins"]>[number]), ...(acc.ribs ? { ribs: acc.ribs.map((v) => v.map(r3) as NonNullable<Acc3["ribs"]>[number]), tubes: (acc.tubes ?? []).map((v) => v.map(r3) as NonNullable<Acc3["tubes"]>[number]) } : {}) },

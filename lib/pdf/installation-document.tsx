@@ -7,7 +7,7 @@ import { PHASE_COLOURS } from "@/lib/floor-plans/pour-phases";
 import path from "node:path";
 import { Document, Font, G, Image, Line, Page, Path, Rect, Svg, Text, View } from "@react-pdf/renderer";
 import type { Pt } from "@/lib/floor-plans/calc";
-import type { Zone } from "@/lib/floor-plans/zones";
+import { zoneLabelAt, type Zone } from "@/lib/floor-plans/zones";
 
 const PUBLIC = path.join(process.cwd(), "public");
 Font.register({
@@ -74,7 +74,7 @@ function PlanSvg({ zones, walls, box, w, h, numbers, codes, phaseOf }: { phaseOf
       ))}
       {wallPath ? <Path d={wallPath} fill="#6b8e23" fillOpacity={0.55} fillRule="evenodd" stroke={WALL} strokeWidth={lw(0.4)} /> : null}
       {codes ? zones.filter((z) => inBox(z.box)).map((z) => {
-        const cx = (z.box[0] + z.box[2]) / 2, cy = (z.box[1] + z.box[3]) / 2;
+        const [cx, cy] = zoneLabelAt(z);
         const size = Math.max(fs(6), Math.min(fs(16), Math.min(z.box[2] - z.box[0], z.box[3] - z.box[1]) * 0.35));
         return <Text key={`c${z.code}`} x={cx - size * 0.6} y={cy + size * 0.35} style={{ fontSize: size, fontFamily: "Carlito", fontWeight: "bold", color: RED }}>{z.code}</Text>;
       }) : null}

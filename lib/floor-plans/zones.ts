@@ -237,3 +237,14 @@ export function wallPanelNumbers(faces: { code: string; height: number; panels: 
   }
   return out;
 }
+
+/** Where to write a zone's label: the middle of its bounding box, unless that falls in a void / courtyard the zone
+ *  wraps round — then the centre of the deck panel nearest the middle. */
+export function zoneLabelAt(z: { box: [number, number, number, number]; panels: { x0: number; y0: number; x1: number; y1: number }[] }): Pt {
+  const cx = (z.box[0] + z.box[2]) / 2, cy = (z.box[1] + z.box[3]) / 2;
+  if (!z.panels.length) return [cx, cy];
+  if (z.panels.some((p) => cx >= p.x0 && cx <= p.x1 && cy >= p.y0 && cy <= p.y1)) return [cx, cy];
+  let best = z.panels[0], bd = Infinity;
+  for (const p of z.panels) { const d = Math.hypot((p.x0 + p.x1) / 2 - cx, (p.y0 + p.y1) / 2 - cy); if (d < bd) { bd = d; best = p; } }
+  return [(best.x0 + best.x1) / 2, (best.y0 + best.y1) / 2];
+}
