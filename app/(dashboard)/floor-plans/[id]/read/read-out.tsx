@@ -85,10 +85,32 @@ export function ReadOut({ planId, planName, fileUrl, indexPath, dict: dict0, can
   const groups = new Map<string, typeof known>();
   for (const t of known) { const g = t.meaning!.group; groups.set(g, [...(groups.get(g) ?? []), t]); }
   const levels = ix.building?.levels ?? [];
+  // review / consultant comments written on the drawing (layers named comment / remark / revision / query …): listed by the sheet they sit on
+  const comments = (() => {
+    const m = model.current; if (!m) return [] as { text: string; where: string; layer: string }[];
+    const seen = new Set<string>(), out: { text: string; where: string; layer: string }[] = [];
+    for (const t of m.texts ?? []) {
+      if (!t.layer || !/comment|remark|revis|query|queries|markup|review|response|(^|[-_ ])rev($|[-_ ])/i.test(t.layer)) continue;
+      const txt = t.text.replace(/\\P/g, " ").replace(/\s+/g, " ").trim(); if (txt.length < 4 || seen.has(txt.toLowerCase() + "|" + Math.round(t.x / 1000))) continue;
+      seen.add(txt.toLowerCase() + "|" + Math.round(t.x / 1000));
+      const part = ix.parts.find((q) => t.x >= q.box[0] && t.x <= q.box[2] && t.y >= q.box[1] && t.y <= q.box[3]);
+      out.push({ text: txt, where: part ? part.title : "outside the drawn plans", layer: t.layer });
+    }
+    return out;
+  })();
 
   return (
     <div className="space-y-6">
       <AiPanel planId={planId} model={model} units={units} indexPath={indexPath} canEdit={canEdit} dict={dict} />
+      {comments.length ? (
+        <section className="rounded border border-yellow-700/40 bg-yellow-900/10 p-3">
+          <h2 className="text-sm font-semibold text-yellow-200">Comments written on the drawing ({comments.length})</h2>
+          <p className="mb-2 text-[11px] text-graphite-400">Review notes from the consultant or architect. They can change columns, walls or levels — confirm them before a quotation is final.</p>
+          <ul className="ml-4 list-disc space-y-0.5 text-xs text-graphite-200">
+            {comments.map((c, i) => <li key={i}>{c.text} <span className="text-graphite-500">— {c.where} · layer {c.layer}</span></li>)}
+          </ul>
+        </section>
+      ) : null}
       {/* summary */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         {[
