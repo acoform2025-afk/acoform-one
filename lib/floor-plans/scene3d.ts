@@ -586,6 +586,20 @@ export function buildScene3(o: {
       }
     }
   }
+  // deck: every mid beam (keel) is carried by prop heads along it — a stretch of keel with no deck head within 700 mm is listed
+  {
+    const H0 = acc.heads.filter((h) => h[3] === 0); let miss = 0;
+    for (const [m0, m1] of o.zones.flatMap((z) => z.mb)) {
+      const L = Math.hypot(m1[0] - m0[0], m1[1] - m0[1]); if (L < 0.3) continue;
+      const n = Math.max(1, Math.ceil(L / 1.2));
+      for (let i = 0; i <= n; i++) {
+        const t = i / n, x = m0[0] + (m1[0] - m0[0]) * t, z = m0[1] + (m1[1] - m0[1]) * t;
+        if (H0.some((h) => Math.abs(h[0] - x) < 0.7 && Math.abs(h[2] - z) < 0.7 && Math.hypot(h[0] - x, h[2] - z) < 0.7)) continue;
+        if (fit.length < 150) fit.push({ id: `FIT-${fit.length + 1}`, text: `deck mid beam (${Math.round(L * 1000)} mm long): no prop head within 700 mm of this point`, at: [x, z], y: H - 0.1 });
+        miss++; break;
+      }
+    }
+  }
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   for (const p of panels) p.p = p.p.map((v) => [r3(v[0]), r3(v[1]), r3(v[2])]) as Panel3["p"];
   return {
