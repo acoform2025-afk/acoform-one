@@ -2,6 +2,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { createClient } from "@/lib/supabase/server";
 import { buildZones, runPanels } from "@/lib/floor-plans/run-panels";
 import { wallPanelNumbers } from "@/lib/floor-plans/zones";
+import { assignPhases } from "@/lib/floor-plans/pour-phases";
 import { InstallationDocument } from "@/lib/pdf/installation-document";
 
 export const runtime = "nodejs";
@@ -21,15 +22,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const zones = (r.zones ?? buildZones(r.inp, r.catalog, r.layoutRules));
   if (!zones.length) return new Response("No slab outline found — mark the slab (Slab area tool or a slab layer) and save the plan first.", { status: 400 });
   // pour phases (?phases=2…6): the zones are cut into that many pours of about equal area, sweeping along the long side of the floor
-  const nPh = Math.max(1, Math.min(6, Math.round(Number(url.searchParams.get("phases")) || 1)));
-  const phaseOf: Record<string, number> = {};
-  if (nPh > 1) {
-    const x0 = Math.min(...zones.map((z) => z.box[0])), x1 = Math.max(...zones.map((z) => z.box[2])), y0 = Math.min(...zones.map((z) => z.box[1])), y1 = Math.max(...zones.map((z) => z.box[3]));
-    const ax = x1 - x0 >= y1 - y0 ? 0 : 1;
-    const order = [...zones].sort((p, q) => (p.box[ax] + p.box[ax + 2]) - (q.box[ax] + q.box[ax + 2]));
-    const tot = zones.reduce((t, z) => t + z.area, 0); let run = 0;
-    for (const z of order) { phaseOf[z.code] = Math.min(nPh, 1 + Math.floor(((run + z.area / 2) / tot) * nPh)); run += z.area; }
-  }
+  const nPhWanted = Math.max(1, Math.min(6, Math.round(Number(url.searchParams.get("phases")) || 1)));
+  const ph = nPhWanted > 1 ? assignPhases(zones, nPhWanted) : { phaseOf: {} as Record<string, number>, n: 1, areas: [] as number[] };
+  const nPh = ph.n, phaseOf = ph.phaseOf;
   const wallCode = (w: number) => r.catalog.find((c) => c.panel_category === "wall_panel" && Number(c.width_mm) === w && Number(c.height_mm) === r.opt.stdHeight)?.panel_code ?? `WP-${w}-${r.opt.stdHeight}`;
   const wallPanels = wallPanelNumbers(r.result.faces, r.opt.stdHeight, wallCode);
   const drawingNo = `IN-${r.lead?.lead_code?.split("/").pop() ?? "01"}`;

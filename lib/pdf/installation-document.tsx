@@ -3,6 +3,7 @@
  * in place, mid-beam lines and made-to-size specials; then one enlarged sheet section per zone with each panel's
  * number; then the numbering list (deck + wall panels). Coordinates in metres, plan axes (x right, y down).
  */
+import { PHASE_COLOURS } from "@/lib/floor-plans/pour-phases";
 import path from "node:path";
 import { Document, Font, G, Image, Line, Page, Path, Rect, Svg, Text, View } from "@react-pdf/renderer";
 import type { Pt } from "@/lib/floor-plans/calc";
@@ -44,7 +45,7 @@ function Footer({ info, page, pages, title }: { info: InstallInfo; page: number;
 }
 
 /** Draws zones (and optionally walls) into a w × h box; box = the area of the plan to show (metres). */
-function PlanSvg({ zones, walls, box, w, h, numbers, codes }: { zones: Zone[]; walls: Pt[][]; box: [number, number, number, number]; w: number; h: number; numbers: boolean; codes: boolean }) {
+function PlanSvg({ zones, walls, box, w, h, numbers, codes, phaseOf }: { phaseOf?: Record<string, number>; zones: Zone[]; walls: Pt[][]; box: [number, number, number, number]; w: number; h: number; numbers: boolean; codes: boolean }) {
   const pad = Math.max(box[2] - box[0], box[3] - box[1]) * 0.03 + 0.2;
   const bx0 = box[0] - pad, by0 = box[1] - pad, bw = box[2] - box[0] + 2 * pad, bh = box[3] - box[1] + 2 * pad;
   const sc = Math.min(w / bw, h / bh);
@@ -62,7 +63,7 @@ function PlanSvg({ zones, walls, box, w, h, numbers, codes }: { zones: Zone[]; w
           {z.specials.map((s, i) => <Path key={`s${i}`} d={s.rings.map((r) => d(r)).join(" ")} fill={SPEC} fillRule="evenodd" stroke={RED} strokeWidth={lw(0.3)} />)}
           {z.panels.map((p) => (
             <G key={p.no}>
-              <Rect x={p.x0} y={p.y0} width={p.x1 - p.x0} height={p.y1 - p.y0} fill={p.custom ? SPEC : PANEL} stroke="#1f2937" strokeWidth={lw(0.25)} />
+              <Rect x={p.x0} y={p.y0} width={p.x1 - p.x0} height={p.y1 - p.y0} fill={p.custom ? SPEC : phaseOf ? PHASE_COLOURS[((phaseOf[z.code] ?? 1) - 1) % PHASE_COLOURS.length] : PANEL} stroke="#1f2937" strokeWidth={lw(0.25)} />
               {numbers && Math.min(p.x1 - p.x0, p.y1 - p.y0) * sc > 7 ? (
                 <Text x={p.x0 + (p.x1 - p.x0) / 2 - fs(4.2)} y={p.y0 + (p.y1 - p.y0) / 2 + fs(1.6)} style={{ fontSize: fs(4.6), fontFamily: "Carlito", color: p.custom ? RED : "#111" }}>{p.no.split("-").pop()}</Text>
               ) : null}
@@ -146,7 +147,8 @@ export function InstallationDocument({ zones, walls, wallPanels, info, phases, n
         </View>
         <Text style={{ color: GRAY, marginBottom: 4 }}>Green = walls · cyan = deck zone M1, M2 … · blue lines = mid beams / prop heads between panel rows · red = special size panels / made-to-size pieces. Panel rows run across the short side of each zone.</Text>
         {phaseRows.length ? <Text style={{ marginBottom: 3, fontWeight: "bold" }}>POUR PHASES: {phaseRows.map((r) => `Phase ${r.k} — ${r.codes} (${r.area.toFixed(0)} m², ${r.panels} deck panels)`).join("   |   ")}</Text> : null}
-        <PlanSvg zones={zones} walls={walls} box={box} w={PW - 2 * M} h={PH - 2 * M - FOOT - (phaseRows.length ? 56 : 40)} numbers={false} codes />
+        {phaseRows.length ? <Text style={{ marginBottom: 3, fontSize: 7, color: "#92400e" }}>Panel colour = pour phase (Phase 1 blue · 2 yellow · 3 green · 4 pink · 5 violet · 6 orange).{(() => { const tot = zones.reduce((t, z) => t + z.area, 0); const big = zones.find((z) => z.area > tot * 0.4); return big ? `  Note: zone ${big.code} is ${((big.area / tot) * 100).toFixed(0)}% of the slab (${big.area.toFixed(0)} m²) — much bigger than the other pours; add a pour joint inside it if a smaller pour is wanted.` : ""; })()}</Text> : null}
+        <PlanSvg zones={zones} walls={walls} box={box} w={PW - 2 * M} h={PH - 2 * M - FOOT - (phaseRows.length ? 66 : 40)} numbers={false} codes phaseOf={phases} />
         <Footer info={info} page={++pg} pages={totalPages} title="DECK INSTALLATION" />
       </Page>
       {zonePages.flatMap((list, i) => {
