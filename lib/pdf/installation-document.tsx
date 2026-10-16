@@ -81,18 +81,23 @@ function PlanSvg({ zones, walls, box, w, h, numbers, codes }: { zones: Zone[]; w
   );
 }
 
-function ZoneTable({ z }: { z: Zone }) {
+type LegRow = { text: string; custom: boolean };
+function zoneRows(z: Zone): LegRow[] {
   const types = new Map<string, { code: string; w: number; L: number; nos: string[]; custom: boolean }>();
   for (const p of z.panels) { const k = p.code; const t = types.get(k) ?? { code: p.code, w: p.w, L: p.L, nos: [], custom: p.custom }; t.nos.push(p.no.split("-").pop()!); types.set(k, t); }
-  const rows = [...types.values()].sort((a, b) => Number(a.custom) - Number(b.custom) || b.w - a.w);
-  return (
-    <View style={{ fontSize: 6.4 }}>
-      {rows.map((t) => (
-        <Text key={t.code} style={{ color: t.custom ? RED : "#111" }}>{t.code} ({t.w}×{t.L}) × {t.nos.length}: {t.nos.join(", ")}</Text>
-      ))}
-      {z.specialArea > 0.02 ? <Text style={{ color: RED }}>Made-to-size specials: {z.specialArea.toFixed(2)} m² (red, no number)</Text> : null}
-    </View>
-  );
+  const rows: LegRow[] = [...types.values()].sort((a, b) => Number(a.custom) - Number(b.custom) || b.w - a.w).map((t) => ({ text: `${t.code} (${t.w}×${t.L}) × ${t.nos.length}: ${t.nos.join(", ")}`, custom: t.custom }));
+  if (z.specialArea > 0.02) rows.push({ text: `Made-to-size specials: ${z.specialArea.toFixed(2)} m² (red, no number)`, custom: true });
+  return rows;
+}
+/** Splits the legend so the part that fits the box stays on the plan sheet and the rest goes to a continuation sheet. */
+function splitLegend(rows: LegRow[], widthPt: number, heightPt: number): [LegRow[], LegRow[]] {
+  const cpl = Math.max(10, Math.floor(widthPt / (6.4 * 0.5))), cap = Math.max(5, Math.floor(heightPt / 7.6));
+  let used = 0; const a: LegRow[] = [];
+  for (let i = 0; i < rows.length; i++) { const n = Math.ceil(rows[i].text.length / cpl); if (used + n > cap) return [a, rows.slice(i)]; used += n; a.push(rows[i]); }
+  return [a, []];
+}
+function LegendRows({ rows, size = 6.4 }: { rows: LegRow[]; size?: number }) {
+  return <View style={{ fontSize: size }}>{rows.map((r, i) => <Text key={i} style={{ color: r.custom ? RED : "#111" }}>{r.text}</Text>)}</View>;
 }
 
 export function InstallationDocument({ zones, walls, wallPanels, info, phases, nPhases = 1 }: { phases?: Record<string, number>; nPhases?: number; zones: Zone[]; walls: Pt[][]; wallPanels: WallPanelNo[]; info: InstallInfo }) {
@@ -120,7 +125,13 @@ export function InstallationDocument({ zones, walls, wallPanels, info, phases, n
   const PER = 4 * 46;
   // the per-zone tables already list every number; the full list is the Excel download (keeps the PDF light)
   const listPages: string[][][] = listRows.length > 400 ? [] : chunk(listRows, PER);
-  const totalPages = 1 + zonePages.length + listPages.length;
+  const legSplit = zonePages.map((list) => {
+    const one = list.length === 1;
+    const cw = one ? PW - 2 * M - 4 : (PW - 2 * M - 24) / 2, ch = one ? PH - 2 * M - FOOT - 30 : (PH - 2 * M - FOOT - 30) / 2 - 6;
+    return list.map((z) => splitLegend(zoneRows(z), cw * 0.34 - 18, ch - 40));
+  });
+  const extraLeg = legSplit.map((l) => l.filter((x) => x[1].length));
+  const totalPages = 1 + zonePages.length + extraLeg.reduce((a, l) => a + l.length, 0) + listPages.length;
   let pg = 0;
   const stdCount = all.filter((p) => !p.custom).length;
   const specArea = zones.reduce((a, z) => a + z.specialArea, 0);
@@ -138,10 +149,10 @@ export function InstallationDocument({ zones, walls, wallPanels, info, phases, n
         <PlanSvg zones={zones} walls={walls} box={box} w={PW - 2 * M} h={PH - 2 * M - FOOT - (phaseRows.length ? 56 : 40)} numbers={false} codes />
         <Footer info={info} page={++pg} pages={totalPages} title="DECK INSTALLATION" />
       </Page>
-      {zonePages.map((list, i) => {
+      {zonePages.flatMap((list, i) => {
         const one = list.length === 1;
         const cw = one ? PW - 2 * M - 4 : (PW - 2 * M - 24) / 2, ch = one ? PH - 2 * M - FOOT - 30 : (PH - 2 * M - FOOT - 30) / 2 - 6;
-        return (
+        const pageEl = (
           <Page key={i} size="A3" orientation="landscape" style={pageStyle}>
             <Text style={{ fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>DECK INSTALLATION{phases ? ` — POUR PHASE ${ph(list[0])} OF ${nPhases}` : ""} — ZONE{one ? "" : "S"} {list.map((z) => z.code).join(", ")}</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
@@ -153,7 +164,8 @@ export function InstallationDocument({ zones, walls, wallPanels, info, phases, n
                   </View>
                   <View style={{ width: cw * 0.34 - 10, paddingLeft: 4 }}>
                     <Text style={{ fontWeight: "bold", marginBottom: 2 }}>Panels in {z.code} (number on the plan = last digits)</Text>
-                    <ZoneTable z={z} />
+                    <LegendRows rows={legSplit[i][k][0]} />
+                    {legSplit[i][k][1].length ? <Text style={{ color: RED, fontWeight: "bold" }}>… list continues on the next sheet</Text> : null}
                   </View>
                 </View>
               ))}
@@ -161,6 +173,16 @@ export function InstallationDocument({ zones, walls, wallPanels, info, phases, n
             <Footer info={info} page={++pg} pages={totalPages} title="DECK INSTALLATION" />
           </Page>
         );
+        const more = list.map((z, k) => ({ z, rest: legSplit[i][k][1] })).filter((x) => x.rest.length);
+        return [pageEl, ...more.map((x) => (
+          <Page key={`${i}-${x.z.code}`} size="A3" orientation="landscape" style={pageStyle}>
+            <Text style={{ fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>DECK INSTALLATION — ZONE {x.z.code} — PANEL LIST (continued)</Text>
+            <View style={{ flexDirection: "row" }}>
+              {chunk(x.rest, Math.ceil(x.rest.length / 2)).map((col, c) => <View key={c} style={{ width: "50%", paddingRight: 10 }}><LegendRows rows={col} size={7} /></View>)}
+            </View>
+            <Footer info={info} page={++pg} pages={totalPages} title="DECK INSTALLATION" />
+          </Page>
+        ))];
       })}
       {listPages.map((rows, i) => (
         <Page key={`l${i}`} size="A3" orientation="landscape" style={pageStyle}>
