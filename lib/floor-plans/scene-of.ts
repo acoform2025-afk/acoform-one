@@ -2,6 +2,7 @@ import type { runPanels } from "./run-panels";
 import { checkLayout } from "./check-run";
 import { buildScene3, type Scene3 } from "./scene3d";
 import { partsChecks } from "./parts-check";
+import { zoneLabelAt } from "./zones";
 import { summarise, type Issue } from "@/lib/design-engine/design-check";
 
 export type Ran = NonNullable<Awaited<ReturnType<typeof runPanels>>>;
@@ -11,7 +12,10 @@ export function partsIssues(r: Ran, scene: Scene3): Issue[] {
   if (r.error || !r.inp || !r.shell) return [];
   const rules = r.layoutRules;
   const rowPitch = ((rules?.deckLengths?.[0] ?? 1200) + (rules?.midBeam ?? 100)) / 1000;
-  return partsChecks(scene, { propSpacing: r.opt.propSpacing, rowPitch, slabMm: Number(r.t.params.slabMm) || 150, propKn: rules?.propKn ?? 20, bulkheads: rules?.pk?.beamBulkheads ?? 0, ribHeights: rules?.pk?.enabled ? rules.pk.ribHeights : undefined }).map((i, n) => ({ id: `P${String(n + 1).padStart(3, "0")}`, ...i }));
+  const base = partsChecks(scene, { propSpacing: r.opt.propSpacing, rowPitch, slabMm: Number(r.t.params.slabMm) || 150, propKn: rules?.propKn ?? 20, bulkheads: rules?.pk?.beamBulkheads ?? 0, ribHeights: rules?.pk?.enabled ? rules.pk.ribHeights : undefined });
+  // very small deck zones: a closed little room (shaft, pocket) with one or two panels — worth a look, not merged (a wall stands between it and its neighbours)
+  const tiny: Omit<Issue, "id">[] = (r.zones ?? []).filter((z) => z.area < 1 && z.panels.length > 0).map((z) => { const at = zoneLabelAt(z); return { sev: "warn" as const, kind: "model" as const, where: `Zone ${z.code}`, detail: `very small deck zone (${z.area.toFixed(1)} m², ${z.panels.length} panel${z.panels.length === 1 ? "" : "s"}) — closed off by walls; check it is a real slab pocket or shaft, or cover it with the next zone's deck`, at }; });
+  return [...base, ...tiny].map((i, n) => ({ id: `P${String(n + 1).padStart(3, "0")}`, ...i }));
 }
 
 /** The design check with the corner, beam-panel and prop checks added (check page, check list). */
