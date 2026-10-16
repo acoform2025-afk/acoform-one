@@ -796,7 +796,7 @@ export function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, 
 /** Flights near each other (dog-leg: side by side; also when each flight is drawn on its own layer) → one staircase. */
 function mergeFlights(flights: [number, number, number, number][], u: number): [number, number, number, number][] {
   const g = 1.5 / u, parent = flights.map((_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
   for (let i = 0; i < flights.length; i++) for (let j = i + 1; j < flights.length; j++) {
     const a = flights[i], b = flights[j];
     if (a[0] - g <= b[2] && b[0] - g <= a[2] && a[1] - g <= b[3] && b[1] - g <= a[3]) parent[find(i)] = find(j);
@@ -822,7 +822,7 @@ const SHAFT_TXT = /(^|[^a-z])(p\.?|s\.?|pass(enger)?\.?|serv(ice)?\.?|fire\.?)?\
 function stairClusters(paths: DxfPath[], u: number): [number, number, number, number][] {
   const boxes = paths.map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; });
   const g = 1 / u; const parent = boxes.map((_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
     const a = boxes[i], b = boxes[j];
     if (a[0] - g <= b[2] && b[0] - g <= a[2] && a[1] - g <= b[3] && b[1] - g <= a[3]) parent[find(i)] = find(j);
@@ -1074,7 +1074,7 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
   if (!els.length) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size, notes: capNotes };
   // union-find over box nearness, with a coarse grid so big drawings stay fast
   const parent = els.map((_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
   const cell = gap * 2, grid = new Map<string, number[]>();
   const keyOf = (x: number, y: number) => `${Math.floor(x / cell)}:${Math.floor(y / cell)}`;
   els.forEach((e, i) => { for (let x = e.box[0]; x <= e.box[2] + cell; x += cell) for (let y = e.box[1]; y <= e.box[3] + cell; y += cell) { const k = keyOf(x, y); const a = grid.get(k); if (a) a.push(i); else grid.set(k, [i]); } });
