@@ -34,5 +34,6 @@ export function sceneOf(r: Ran, floorMm?: number, ckIn?: ReturnType<typeof check
     pkWall: r.layoutRules?.pk?.enabled ? { ribHeights: r.layoutRules.pk.ribHeights, ribMax: r.layoutRules.pk.ribMax, tubeHeights: r.layoutRules.pk.tubeHeights, tubeMax: r.layoutRules.pk.tubeMax, ribGap: r.layoutRules.pk.ribGap } : undefined,
   });
   scene.issues = [...ck.check.issues, ...(ckIn ? [] : partsIssues(r, scene))].filter((i) => i.at).map((i) => ({ id: i.id, sev: i.sev, text: `${i.where}: ${i.detail}`, at: [Math.round(i.at![0] * 1000) / 1000, Math.round(i.at![1] * 1000) / 1000], y: i.z ?? scene.H }));
+  if (scene.fit?.length) scene.issues = [...(scene.issues ?? []), ...scene.fit.map((x) => ({ id: x.id, sev: "warn" as const, text: `Fitting: ${x.text}`, at: x.at, y: x.y }))];
   return scene;
 }

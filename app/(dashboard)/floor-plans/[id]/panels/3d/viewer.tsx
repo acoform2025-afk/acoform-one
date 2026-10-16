@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Scene3 } from "@/lib/floor-plans/scene3d";
 
 type Layer = "walls" | "columns" | "wallPanels" | "fillers" | "corners" | "deck" | "slab" | "beams" | "stairs" | "acc" | "arch" | "issues";
-const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", fillers: "Fillers / specials", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", acc: "Props, ties & walers", arch: "Railings & projections", issues: "Design check" };
+const LABEL: Record<Layer, string> = { walls: "Concrete walls", columns: "Columns", wallPanels: "Wall panels", fillers: "Fillers / specials", corners: "Corners & kickers", deck: "Deck panels", slab: "Slab", beams: "Beams", stairs: "Staircase", acc: "Props, ties, pins & walers", arch: "Railings & projections", issues: "Design check" };
 const COLOR = { std: 0x7aa7e0, top: 0xf2c76b, fill: 0xff3fb3, deck: 0x9fd3c7, dspec: 0xff8ad1, ic: 0x34d399, ec: 0x10b981, sc: 0xa78bfa, kick: 0xfb923c, bside: 0xd4a373, bbot: 0xb08968, col: 0xfcd34d, stair: 0xc9b79c, riser: 0xe7d3b8, cheek: 0xd9a066, lsoff: 0xb9c7a0, tread: 0xf3e6cc, cchan: 0x64748b, stp: 0xa16207, tz: 0x93c5fd, cpp: 0x64748b, trec: 0x475569, wall: 0x9aa59a, slab: 0xd9d9d9, beam: 0xb08968, colC: 0x8b8f99 };
 const KIND_LAYER: Record<Scene3["panels"][number]["k"], Layer> = { std: "wallPanels", top: "wallPanels", fill: "fillers", deck: "deck", dspec: "fillers", ic: "corners", ec: "corners", sc: "corners", kick: "corners", bside: "beams", bbot: "beams", col: "columns", stair: "stairs", riser: "stairs", cheek: "stairs", lsoff: "stairs", tread: "stairs", cchan: "stairs", stp: "stairs", tz: "stairs", cpp: "stairs", trec: "stairs" };
 const KIND_LABEL: Record<Scene3["panels"][number]["k"], string> = { std: "standard wall panel", top: "wall-top piece", fill: "wall filler (non-standard width)", deck: "deck panel", dspec: "deck filler / special", ic: "internal corner", ec: "external corner", sc: "soffit corner", kick: "kicker", bside: "beam side panel", bbot: "beam bottom", col: "column panel", stair: "stair soffit panel", riser: "riser shutter / step panel riser leg", cheek: "dog-tooth side panel 狗牙板", lsoff: "landing soffit panel", tread: "L-step panel tread cover 踏步板", cchan: "stair C-channel 楼梯C槽", stp: "stair stop panel 挡板", tz: "special wall panel under the flight", cpp: "stair prop strip 150 SPCPP", trec: "step nosing angle 65+65 SPTREC" };
@@ -146,6 +146,10 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
               rod((A.tubes ?? []).map((w) => [[w[0], w[1], w[2]], [w[3], w[1], w[4]]]), 0.025, 0x0f766e);       // square tubes
             } else rod(A.walers.map((w) => [[w[0], w[1], w[2]], [w[3], w[1], w[4]]]), 0.035, 0x1f2937);        // alignment walers
             rod(A.pushPull.map((p) => [[p[0], p[1], p[2]], [p[3], 0.02, p[4]]]), 0.022, 0xfacc15);              // push-pull props
+            if (A.pins?.length) {
+              rod(A.pins.map((q) => [[q[0] - q[3] * 0.04, q[1], q[2] - q[4] * 0.04], [q[0] + q[3] * 0.04, q[1], q[2] + q[4] * 0.04]]), 0.008, 0xe5e7eb);   // round pins through the rail holes of two panels
+              turned(A.pins.map((q) => [q[0] + q[3] * 0.045, q[1], q[2] + q[4] * 0.045, Math.atan2(q[4], q[3])]), [0.014, 0.07, 0.028], 0x9ca3af);         // wedge holding each pin
+            }
             blocks(A.brackets, [0.06, 0.08, 0.06], 0x9a3412);                                                      // riser brackets
           }
           if (fl.glass?.length) {
@@ -463,7 +467,7 @@ export function Viewer3D({ scene, focus, stack }: { scene: Scene3; focus?: strin
           // how many pieces each layer has — a layer with nothing on this floor (e.g. no columns in a shear-wall building) is shown greyed with "0"
           const pcs = scene.panels.filter((p) => KIND_LAYER[p.k] === l).length;
           const n = l === "walls" ? scene.walls.length : l === "columns" ? (scene.cols?.length ?? 0) + pcs : l === "slab" ? scene.slabPoly.length : l === "beams" ? (scene.beamSolids?.length ?? 0) + scene.beams.length + pcs
-            : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "arch" ? (scene.arch?.length ?? 0) : l === "acc" ? (scene.acc ? scene.acc.props.length + scene.acc.ties.length + (scene.acc.ribs?.length ?? scene.acc.walers.length) : 0) : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
+            : l === "stairs" ? (scene.steps?.length ?? 0) + pcs : l === "arch" ? (scene.arch?.length ?? 0) : l === "acc" ? (scene.acc ? scene.acc.props.length + scene.acc.ties.length + (scene.acc.pins?.length ?? 0) + (scene.acc.ribs?.length ?? scene.acc.walers.length) : 0) : l === "issues" ? (scene.issues?.length ?? 0) : pcs;
           return (
             <button key={l} type="button" onClick={() => toggle(l)} onDoubleClick={() => only(l)} title={`${n ? `${n} on this floor` : "nothing of this kind on this floor"} · double-click to see only this`}
               className={`rounded-md px-2.5 py-1.5 text-xs ${on[l] ? "bg-brand-orange text-white" : n ? "border border-graphite-700 text-graphite-300 hover:bg-graphite-800" : "border border-dashed border-graphite-800 text-graphite-600"}`}>{LABEL[l]}{n ? "" : " (0)"}</button>
