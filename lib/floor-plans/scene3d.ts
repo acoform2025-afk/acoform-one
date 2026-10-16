@@ -152,8 +152,10 @@ export function buildScene3(o: {
     {
       const pr = f.panels.map((w) => w / 1000); if (f.filler) pr.push(f.filler / 1000);
       let at0 = 0;
-      for (let i = 0; i < pr.length - 1; i++) {
-        at0 += pr[i]; const t = Math.min(len, at0), jx = a[0] + ux * t + nx * s * 0.035, jz = a[1] + uy * t + ny * s * 0.035;
+      for (let i = 0; i < pr.length + 1; i++) {
+        if (i > 0) at0 += pr[i - 1];       // joint i: 0 = face start (corner / stop-end beside it), last = face end
+        if (i === 0 && f.geo3) continue;      // pieces over / under an opening have no corner at their ends
+        if (i === pr.length && f.geo3) continue; const t = Math.min(len, at0), jx = a[0] + ux * t + nx * s * 0.035, jz = a[1] + uy * t + ny * s * 0.035;
         const jh = f.filler ? Hm : main, n = Math.max(1, Math.floor(jh / 0.3));
         for (let k = 0; k < n; k++) pinList.push([jx, base + 0.15 + k * 0.3, jz, ux, uy]);
       }
