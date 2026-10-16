@@ -1,5 +1,6 @@
 "use client";
 
+import { applyAiHatches, type AiRead } from "@/lib/floor-plans/ai-read";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dxfTextFromBlob } from "@/lib/floor-plans/dxf-text";
 import Link from "next/link";
@@ -29,7 +30,7 @@ import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
 
 type Tool = "pan" | "zoom" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft" | "separate";
-type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
+type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; ai_url?: string | null; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
 
 const MAX_SIDE = 2400;
 const boxA = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
@@ -212,6 +213,8 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
         if (plan.source_kind === "dxf") {
           const model = readDxf(await dxfTextFromBlob(await res.blob()));
           if (cancelled) return;
+          // the AI reading the user accepted: its hatch meanings add walls / openings / columns from the file's own hatch outlines
+          if (plan.ai_url) { try { const ar = await fetch(plan.ai_url); if (ar.ok) applyAiHatches(model as never, (await ar.json()) as AiRead, UNIT_TO_M[(plan.takeoff?.dxf?.units ?? model.units) as DxfUnits] ?? 0.001); } catch { /* no AI reading */ } }
           modelRef.current = model;
           const saved = normalise(plan.takeoff);
           const roles: Record<string, LayerRole> = {};

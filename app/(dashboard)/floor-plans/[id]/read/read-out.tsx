@@ -9,6 +9,7 @@ import { buildDrawingIndex, type DrawingIndex, type IndexPart } from "@/lib/floo
 import { KIND_LABEL } from "@/lib/floor-plans/building";
 import { CONCEPT_BY_KEY, TEACHABLE, layerKey, type Dictionary } from "@/lib/floor-plans/vocab";
 import { teachDrawing } from "../../dictionary-actions";
+import { AiPanel } from "./ai-panel";
 
 const ROLES: LayerRole[] = ["ignore", "walls", "columns", "slab", "opening", "beams", "upstand"];
 const ROLE_LABEL: Record<LayerRole, string> = { ignore: "Not counted", walls: "Walls", columns: "Columns", slab: "Slab edge", opening: "Openings", beams: "Beams", upstand: "Upstands" };
@@ -20,7 +21,7 @@ const SHOWN_FOUND = ["lift", "duct", "cutout", "ots", "stair", "ramp", "toilet",
 
 type Props = { planId: string; planName: string; fileUrl: string; indexPath: string; dict: Dictionary; canEdit: boolean; roles: Record<string, LayerRole>; units?: string; said: { floors?: number; floorMm?: number; slabMm?: number } };
 
-export function ReadOut({ planName, fileUrl, indexPath, dict: dict0, canEdit, units, said }: Props) {
+export function ReadOut({ planId, planName, fileUrl, indexPath, dict: dict0, canEdit, units, said }: Props) {
   const [busy, setBusy] = useState<string | null>("Downloading the drawing…");
   const [err, setErr] = useState<string | null>(null);
   const [dict, setDict] = useState<Dictionary>(dict0);
@@ -87,6 +88,7 @@ export function ReadOut({ planName, fileUrl, indexPath, dict: dict0, canEdit, un
 
   return (
     <div className="space-y-6">
+      <AiPanel planId={planId} model={model} units={units} indexPath={indexPath} canEdit={canEdit} dict={dict} />
       {/* summary */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         {[

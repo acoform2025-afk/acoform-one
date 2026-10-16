@@ -38,6 +38,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
 
   const bucket = supabase.storage.from("floor-plans");
   const { data: fileUrl } = await bucket.createSignedUrl(plan.file_path, 60 * 60);
+  const { data: aiUrl } = await bucket.createSignedUrl(plan.file_path.replace(/[^/]+$/, "ai.json"), 60 * 60);
   const origPath = plan.original_path ?? plan.file_path;
   const { data: dl } = await bucket.createSignedUrl(origPath, 60 * 60, { download: plan.file_name ?? true });
   const { data: orig } = plan.original_path ? await bucket.createSignedUrl(plan.original_path, 60 * 60) : { data: null };
@@ -103,7 +104,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
       <div className="mt-4">
         {fileUrl?.signedUrl ? (
           <TakeoffTool
-            plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}` } : null }}
+            plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, ai_url: aiUrl?.signedUrl ?? null, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}` } : null }}
             tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules} siblings={siblings} dict={dict} project={project} projectPending={projectPending && !!project?.missing.length}
           />
         ) : <p className="text-sm text-signal-red">The plan file could not be opened.</p>}
