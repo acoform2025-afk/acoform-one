@@ -112,7 +112,7 @@ export function planRows(span: number, lens: number[], gap: number): number[] {
   return rows;
 }
 
-export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: [number, number, number, number] }, deckW: number[], deckLens: number | number[], codeFor: (w: number, L: number) => string, mbGap = 100, tol = 25, edgeMm = 0, stripMode: "end" | "edges" | "middle" = "end", refill = true): Zone {
+export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: [number, number, number, number] }, deckW: number[], deckLens: number | number[], codeFor: (w: number, L: number) => string, mbGap = 100, tol = 25, edgeMm = 0, stripMode: "end" | "edges" | "middle" = "end", refill = true, minStrip = 0): Zone {
   const lensList = Array.isArray(deckLens) ? deckLens : [deckLens];
   const deckLen = lensList[0];
   const G = mbGap / 1000;
@@ -150,7 +150,9 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
           ps.push({ no: "", x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]), w: wmm, L: len, custom: cust, code: cust ? `DS-${wmm}-${len}` : codeFor(wmm, len) });
           t = t1;
         };
-        const fl = left <= tol ? 0 : Math.round(left / 5) * 5;
+        let fl = left <= tol ? 0 : Math.round(left / 5) * 5;
+        // a strip too narrow to make or fit (a 35 mm sliver): join it with the narrowest panel of the row, one wider made-to-size piece
+        if (fl > 0 && fl < minStrip && ws.length) { const k = ws.indexOf(Math.min(...ws)); fl += ws[k]; ws.splice(k, 1); }
         if (fl && stripMode === "edges" && fl >= 100) {          // left-over strip split in two, one at each edge of the row
           const h1 = Math.round(fl / 2 / 5) * 5;
           put(h1, true); for (const wm of ws) put(wm, false); put(fl - h1, true);

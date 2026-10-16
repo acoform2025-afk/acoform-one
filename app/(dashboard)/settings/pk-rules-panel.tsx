@@ -135,6 +135,7 @@ export function PkRulesPanel({ pk, onChange, canEdit }: { pk: PkRules; onChange:
             <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-orange">Slab corner (soffit corner)</h4>
             <div className="mt-2 grid gap-4 md:grid-cols-3">
               {n("slabCornerWidth", "Corner width", "(mm)")}
+              {n("slabMinStrip", "Smallest made-to-size strip (0 = off)", "(mm)")}
               {l("slabCornerLens", "Corner length priority")}
               {n("slabInnerCornerLen", "Inside turning corner length", "(mm)")}
               {n("slabCornerMin", "Corner min length", "(mm)")}

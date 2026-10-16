@@ -99,6 +99,7 @@ export type PkRules = {
   slabRemainEvenAt: number; slabRemainCrossAt: number;
   joistMidLens: number[]; joistEdgeMin: number; joistEdgeMax: number; joistEdgeLensOn: boolean; joistEdgeLens: number[]; joistUneven: boolean; joistMaxDiff: number;
   autoSlabProps: boolean; slabDirection: "auto" | "across" | "along";
+  slabMinStrip: number;                      // a left-over strip narrower than this (mm) is joined with the panel beside it; 0 = off
   slabRefill: boolean;                       // left-over bands of a big zone are laid again with rows of their own
   slabStrip: "end" | "edges" | "middle";   // where the left-over strip of a deck row goes: at one end / split to both edges / in the middle
   wallAutoTie: boolean; wallAutoRib: boolean; wallAutoBrace: boolean; wallPanelWithAngle: boolean; wallTiePlate: boolean; extWallUpturn50: boolean;
@@ -121,7 +122,7 @@ export const DEFAULT_PK: PkRules = {
   slabPanelWidths: [400, 300, 300], slabPanelLens: [1200, 1100, 1000], slabPanelMinW: 100, slabPanelMinL: 500, slabFirstLen: 1000, slabFirstEqLast: false,
   slabRemainEvenAt: 500, slabRemainCrossAt: 400,
   joistMidLens: [1000, 600], joistEdgeMin: 350, joistEdgeMax: 750, joistEdgeLensOn: false, joistEdgeLens: [600, 400], joistUneven: true, joistMaxDiff: 100,
-  autoSlabProps: false, slabDirection: "auto", slabStrip: "end", slabRefill: true,
+  autoSlabProps: false, slabDirection: "auto", slabStrip: "end", slabRefill: true, slabMinStrip: 100,
   wallAutoTie: false, wallAutoRib: true, wallAutoBrace: false, wallPanelWithAngle: true, wallTiePlate: false, extWallUpturn50: true,
 };
 
@@ -177,7 +178,7 @@ export function normalisePk(raw: unknown): PkRules {
     joistMidLens: plist(r.joistMidLens, d.joistMidLens, 200, 3000), joistEdgeMin: pnum(r.joistEdgeMin, d.joistEdgeMin, 100, 2000), joistEdgeMax: pnum(r.joistEdgeMax, d.joistEdgeMax, 100, 3000),
     joistEdgeLensOn: pbool(r.joistEdgeLensOn, d.joistEdgeLensOn), joistEdgeLens: plist(r.joistEdgeLens, d.joistEdgeLens, 200, 3000),
     joistUneven: pbool(r.joistUneven, d.joistUneven), joistMaxDiff: pnum(r.joistMaxDiff, d.joistMaxDiff, 0, 1000),
-    autoSlabProps: pbool(r.autoSlabProps, d.autoSlabProps), slabDirection: r.slabDirection === "across" || r.slabDirection === "along" ? r.slabDirection : "auto", slabRefill: pbool(r.slabRefill, d.slabRefill), slabStrip: r.slabStrip === "edges" || r.slabStrip === "middle" ? r.slabStrip : "end",
+    autoSlabProps: pbool(r.autoSlabProps, d.autoSlabProps), slabDirection: r.slabDirection === "across" || r.slabDirection === "along" ? r.slabDirection : "auto", slabRefill: pbool(r.slabRefill, d.slabRefill), slabMinStrip: pnum(r.slabMinStrip, d.slabMinStrip, 0, 300), slabStrip: r.slabStrip === "edges" || r.slabStrip === "middle" ? r.slabStrip : "end",
     wallAutoTie: pbool(r.wallAutoTie, d.wallAutoTie), wallAutoRib: pbool(r.wallAutoRib, d.wallAutoRib), wallAutoBrace: pbool(r.wallAutoBrace, d.wallAutoBrace),
     wallPanelWithAngle: pbool(r.wallPanelWithAngle, d.wallPanelWithAngle), wallTiePlate: pbool(r.wallTiePlate, d.wallTiePlate), extWallUpturn50: pbool(r.extWallUpturn50, d.extWallUpturn50),
   };
