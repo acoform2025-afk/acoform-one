@@ -166,6 +166,9 @@ function KeyPlan({ m, tile }: { m: AsmModel; tile: [number, number, number, numb
 }
 function PartList({ rows, title, total }: { rows: { code: string; n: number }[]; title: string; total?: string }) {
   const cols = rows.length > 46 ? 2 : 1, per = Math.ceil(rows.length / cols);
+  // a name must never run into the count beside it: shorten the long "made to size" wording and cut what still does not fit
+  const cpl = Math.max(10, Math.floor(((LIST_W - 8) / cols - 20) / (6.4 * 0.52)));
+  const fit = (t: string) => { const u = t.replace(/deck special \(made to size(, cut to shape)?\)/i, "Special").replace(/\s*×\s*/g, "×").replace(/\s+/g, " ").trim(); return u.length > cpl ? u.slice(0, cpl - 1) + "…" : u; };
   return (
     <View style={{ position: "absolute", right: M, top: M + HEAD_H, width: LIST_W, bottom: M + FOOT + 72, borderWidth: 0.5, borderColor: "#cbd5e1", backgroundColor: "#ffffff", padding: 4, fontSize: 6.4 }}>
       <Text style={{ fontWeight: "bold", fontSize: 7.5, marginBottom: 2 }}>{title}</Text>
@@ -174,7 +177,7 @@ function PartList({ rows, title, total }: { rows: { code: string; n: number }[];
         {Array.from({ length: cols }, (_, c) => (
           <View key={c} style={{ flex: 1 }}>
             {rows.slice(c * per, (c + 1) * per).slice(0, 92).map((r) => (
-              <View key={r.code} style={{ flexDirection: "row", justifyContent: "space-between", borderBottomWidth: 0.3, borderColor: "#eee" }}><Text>{r.code}</Text><Text>{r.n}</Text></View>
+              <View key={r.code} style={{ flexDirection: "row", borderBottomWidth: 0.3, borderColor: "#eee" }}><Text style={{ flex: 1 }}>{fit(r.code)}</Text><Text style={{ width: 16, textAlign: "right" }}>{r.n}</Text></View>
             ))}
           </View>
         ))}
