@@ -183,7 +183,7 @@ export function buildScene3(o: {
       const out = inRings([mx + px * 0.03, my + py * 0.03], o.zoneWalls) ? -1 : 1;
       panels.push({ p: [[p[0], 0, p[1]], [e[0], 0, e[1]], [e[0], H, e[1]], [p[0], H, p[1]]], k, c, n: [px * out, 0, py * out] });
     }
-    // the real profile: an internal corner has a fillet web across the inside of the angle; an external corner is a hollow 40 mm tube standing proud of the corner
+    // the real profile: an internal corner has a fillet web across the inside of the angle; an external corner is a plain thin L-angle (parts photo), drawn as its two legs only
     {
       const u1: Pt = [prev[0] - p[0], prev[1] - p[1]], u2: Pt = [next[0] - p[0], next[1] - p[1]], l1 = Math.hypot(...u1), l2 = Math.hypot(...u2);
       if (l1 > 0.1 && l2 > 0.1) {
@@ -192,10 +192,8 @@ export function buildScene3(o: {
         if (ic) {
           const f = 0.03, q1: Pt = [p[0] + d1[0] * f, p[1] + d1[1] * f], q2: Pt = [p[0] + d2[0] * f, p[1] + d2[1] * f];
           panels.push({ p: [[q1[0], 0, q1[1]], [q2[0], 0, q2[1]], [q2[0], H, q2[1]], [q1[0], H, q1[1]]], k, c: c + " · fillet web", n: [bx / bl, 0, by / bl] });
-        } else {
-          const t = 0.04, o1: Pt = [p[0] - d1[0] * t, p[1] - d1[1] * t], o2: Pt = [p[0] - d2[0] * t, p[1] - d2[1] * t], oc: Pt = [o1[0] + o2[0] - p[0], o1[1] + o2[1] - p[1]];
-          for (const [A2, B2] of [[o1, oc], [oc, o2]] as [Pt, Pt][]) panels.push({ p: [[A2[0], 0, A2[1]], [B2[0], 0, B2[1]], [B2[0], H, B2[1]], [A2[0], H, A2[1]]], k, c: c + " · tube", n: [-bx / bl, 0, -by / bl] });
         }
+        // external corner: the plain thin L-angle of the parts list (two legs, no tube) — the two legs above are the whole piece
       }
     }
   }
