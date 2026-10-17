@@ -2,6 +2,7 @@ import path from "node:path";
 import { Document, Font, G, Image, Line, Page, Path, Polygon, Svg, Text, View } from "@react-pdf/renderer";
 import { stripOutline, type ShellGeometry } from "@/lib/floor-plans/shell";
 import type { Pt } from "@/lib/floor-plans/calc";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 const PUBLIC = path.join(process.cwd(), "public");
 Font.register({
@@ -75,7 +76,7 @@ export function ShellPlanDocument({ g, info }: { g: ShellGeometry; info: ShellSh
               {(g.dxf.opening ?? []).map((l, i) => (
                 <G key={`o${i}`}>
                   <Path d={d(l.pts, l.closed)} stroke="#7c3aed" strokeWidth={px(0.5)} fill="#ede9fe" />
-                  {l.closed ? <Line x1={Math.min(...l.pts.map((p) => p[0]))} y1={Math.min(...l.pts.map((p) => p[1]))} x2={Math.max(...l.pts.map((p) => p[0]))} y2={Math.max(...l.pts.map((p) => p[1]))} stroke="#7c3aed" strokeWidth={px(0.4)} /> : null}
+                  {l.closed ? <Line x1={minOf(l.pts.map((p) => p[0]))} y1={minOf(l.pts.map((p) => p[1]))} x2={maxOf(l.pts.map((p) => p[0]))} y2={maxOf(l.pts.map((p) => p[1]))} stroke="#7c3aed" strokeWidth={px(0.4)} /> : null}
                 </G>
               ))}
               {(g.dxf.beams ?? []).map((l, i) => <Path key={`b${i}`} d={d(l.pts, l.closed)} stroke="#db2777" strokeWidth={px(0.5)} strokeDasharray={`${px(3)} ${px(2)}`} fill="none" />)}
@@ -91,8 +92,8 @@ export function ShellPlanDocument({ g, info }: { g: ShellGeometry; info: ShellSh
                   return (
                     <G key={s.id}>
                       <Path d={d(s.pts, true)} stroke="#7c3aed" strokeWidth={px(0.6)} fill="#ede9fe" />
-                      <Line x1={Math.min(...xs)} y1={Math.min(...ys)} x2={Math.max(...xs)} y2={Math.max(...ys)} stroke="#7c3aed" strokeWidth={px(0.5)} />
-                      <Line x1={Math.min(...xs)} y1={Math.max(...ys)} x2={Math.max(...xs)} y2={Math.min(...ys)} stroke="#7c3aed" strokeWidth={px(0.5)} />
+                      <Line x1={minOf(xs)} y1={minOf(ys)} x2={maxOf(xs)} y2={maxOf(ys)} stroke="#7c3aed" strokeWidth={px(0.5)} />
+                      <Line x1={minOf(xs)} y1={maxOf(ys)} x2={maxOf(xs)} y2={minOf(ys)} stroke="#7c3aed" strokeWidth={px(0.5)} />
                     </G>
                   );
                 }

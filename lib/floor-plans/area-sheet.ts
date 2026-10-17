@@ -4,6 +4,7 @@
  */
 import type { DxfAuto, Pt, Takeoff, Totals } from "./calc";
 import type { SheetGeo, SheetSection } from "@/lib/pdf/area-sheet-document";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 const f2 = (v: number) => (Math.round(v * 100) / 100).toString();
 const f3 = (v: number) => (Math.round(v * 1000) / 1000).toString();
@@ -103,7 +104,7 @@ export function sheetGeo(auto: DxfAuto | null): SheetGeo | null {
   if (!all.length) return null;
   const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
   return {
-    box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)],
+    box: [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)],
     walls: auto.wallRings ?? [], wallLines: auto.wallLoose ?? [],
     slab: auto.slabLoops ?? [], ducts: auto.openingLoops ?? [],
     gaps: (auto.gaps ?? []).map((g) => [g.a, g.b] as [Pt, Pt]),
@@ -133,7 +134,7 @@ export function sheetGeoFromShapes(t: Takeoff): SheetGeo | null {
       if (r.length) (s.h && s.h < 1500 ? parapets : walls).push(r);
     } else if (s.kind === "slab" && s.pts.length >= 3) slab.push(s.pts.map(fl));
     else if (s.kind === "opening" && s.pts.length >= 3) {
-      if (/stair/i.test(s.label ?? "")) { const xs = s.pts.map((q) => q[0]), ys = s.pts.map((q) => -q[1]); stairs.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]); }
+      if (/stair/i.test(s.label ?? "")) { const xs = s.pts.map((q) => q[0]), ys = s.pts.map((q) => -q[1]); stairs.push([minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]); }
       else ducts.push(s.pts.map(fl));
     } else if (s.kind === "column" && s.pts.length >= 3) columns.push(s.pts.map(fl));
     else if ((s.kind === "door" || s.kind === "window") && s.pts.length >= 2) gaps.push([fl(s.pts[0]), fl(s.pts[s.pts.length - 1])]);
@@ -141,5 +142,5 @@ export function sheetGeoFromShapes(t: Takeoff): SheetGeo | null {
   const all = [...walls, ...parapets, ...slab, ...columns].flat();
   if (!all.length) return null;
   const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
-  return { box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], walls, wallLines: [], slab, ducts, gaps, stairs, columns, parapets, edgeBeams: [], beams: [], beamDepths: [] };
+  return { box: [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)], walls, wallLines: [], slab, ducts, gaps, stairs, columns, parapets, edgeBeams: [], beams: [], beamDepths: [] };
 }

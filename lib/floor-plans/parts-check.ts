@@ -4,6 +4,7 @@
  */
 import { inRings, type Issue } from "@/lib/design-engine/design-check";
 import type { Scene3 } from "./scene3d";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 type Pt = [number, number];
 
@@ -44,7 +45,7 @@ export function partsChecks(sc: Scene3, o: PartsOpts): Omit<Issue, "id">[] {
     for (const p of sc.panels) {
       if (p.k !== "bside" && p.k !== "bbot") continue;
       const q = p.p.map((v) => proj(v[0], v[2]));
-      const t0 = Math.min(...q.map((v) => v[0])), t1 = Math.max(...q.map((v) => v[0])), s0 = Math.min(...q.map((v) => v[1])), s1 = Math.max(...q.map((v) => v[1]));
+      const t0 = minOf(q.map((v) => v[0])), t1 = maxOf(q.map((v) => v[0])), s0 = minOf(q.map((v) => v[1])), s1 = maxOf(q.map((v) => v[1]));
       if (t1 < -0.05 || t0 > L + 0.05) continue;
       const half = b.w / 2;
       if (p.k === "bbot" && s0 >= -half - 0.06 && s1 <= half + 0.06) bottom.push([Math.max(0, t0), Math.min(L, t1)]);
@@ -100,8 +101,8 @@ export function partsChecks(sc: Scene3, o: PartsOpts): Omit<Issue, "id">[] {
       const dx = a1[0] - a0[0], dz = a1[2] - a0[2], dl = Math.hypot(dx, dz); if (dl < 1e-6) continue;
       const ux = dx / dl, uz = dz / dl;
       const T = ps.flatMap((p) => p.p.map((v) => (v[0] - a0[0]) * ux + (v[2] - a0[2]) * uz));
-      const t0 = Math.min(...T), t1 = Math.max(...T), L = t1 - t0; if (L < 0.4) continue;
-      const top = Math.max(...ps.flatMap((p) => p.p.map((v) => v[1])));
+      const t0 = minOf(T), t1 = maxOf(T), L = t1 - t0; if (L < 0.4) continue;
+      const top = maxOf(ps.flatMap((p) => p.p.map((v) => v[1])));
       const sOf = (x: number, z: number) => (x - a0[0]) * n[0] + (z - a0[2]) * n[2];
       const tOf = (x: number, z: number) => (x - a0[0]) * ux + (z - a0[2]) * uz;
       const rows = o.ribHeights.map((h) => h / 1000).filter((h) => h < top - 0.05);
@@ -117,7 +118,7 @@ export function partsChecks(sc: Scene3, o: PartsOpts): Omit<Issue, "id">[] {
         }
         if (union(iv) < 0.8 * L) missing.push(`${Math.round(h * 1000)}`);
       }
-      const hi = rows.length ? Math.max(...rows) : 0;
+      const hi = rows.length ? maxOf(rows) : 0;
       const topGap = rows.length && top - hi > 0.6 ? `the top ${Math.round((top - hi) * 1000)} mm of the face has no rib` : "";
       if (missing.length || topGap) {
         flagged++;

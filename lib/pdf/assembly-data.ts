@@ -5,6 +5,7 @@
  */
 import type { Pt } from "@/lib/floor-plans/calc";
 import type { Panel3, Panel3Kind, Scene3 } from "@/lib/floor-plans/scene3d";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type AsmFamily = "wall" | "corner" | "beam" | "deck" | "stair" | "waler";
 /** One piece on a sheet: strip = vertical panel seen from above (face a→b, n away from the concrete), rect = horizontal panel, line = keel / waler, dot = prop head / tie. */
@@ -44,7 +45,7 @@ export function codeOf(p: Panel3, cf: CodeFor, stdH: number): string {
     case "bside": { const m = c.match(/BS\s*(\d+)\s*×\s*(\d+)/); return m ? `BS-${m[2]}-${m[1]}` : `BS-${mm(dist(plan(p.p[0]), plan(p.p[1])))}`; }
     case "bbot": { const m = c.match(/BB\s*(\d+)\s*×\s*(\d+)/); return m ? `BB-${m[2]}-${m[1]}` : `BB-${mm(dist(plan(p.p[0]), plan(p.p[1])))}`; }
     case "deck": case "dspec": return c.split("·").pop()!.trim();
-    case "lsoff": { const xs = p.p.map((q) => q[0]), zs = p.p.map((q) => q[2]); const w = mm(Math.max(...xs) - Math.min(...xs)), L = mm(Math.max(...zs) - Math.min(...zs)); return `LS-${Math.min(w, L)}-${Math.max(w, L)}`; }
+    case "lsoff": { const xs = p.p.map((q) => q[0]), zs = p.p.map((q) => q[2]); const w = mm(maxOf(xs) - minOf(xs)), L = mm(maxOf(zs) - minOf(zs)); return `LS-${Math.min(w, L)}-${Math.max(w, L)}`; }
     case "stair": { const m = c.match(/(\d+)\s*D\s*(\d+)/); return m ? `${m[1]}D${m[2]}` : "SP"; }
     case "cheek": return "SPCH";
     case "cpp": return `SPCPP-${num(c, /SPCPP\s*(\d+)/) || 150}`;
@@ -64,7 +65,7 @@ const FAM: Partial<Record<Panel3Kind, AsmFamily>> = { std: "wall", top: "wall", 
 export function assemblyModel(scene: Scene3, o: { codes?: Partial<CodeFor>; stdH: number; propSpacing: number; tieH: number; tieV: number; faces?: { code: string; a: Pt; b: Pt; n: Pt }[] }): AsmModel {
   const cf = { ...DEFAULT_CODES, ...(o.codes ?? {}) };
   const items: AsmItem[] = [];
-  const rect = (p: Panel3): [Pt, Pt] => { const xs = p.p.map((q) => q[0]), zs = p.p.map((q) => q[2]); return [[Math.min(...xs), Math.min(...zs)], [Math.max(...xs), Math.max(...zs)]]; };
+  const rect = (p: Panel3): [Pt, Pt] => { const xs = p.p.map((q) => q[0]), zs = p.p.map((q) => q[2]); return [[minOf(xs), minOf(zs)], [maxOf(xs), maxOf(zs)]]; };
   for (const p of scene.panels) {
     const fam = FAM[p.k]; if (!fam) continue;
     if (p.c.includes("· fillet web") || p.c.includes("· tube")) continue;   // profile detail of a corner, not a separate piece
@@ -90,7 +91,7 @@ export function assemblyModel(scene: Scene3, o: { codes?: Partial<CodeFor>; stdH
     for (const t of acc.ties) if (t[1] < 0.35 && t[5]) items.push({ fam: "waler", k: "tie", code: "TIE", shape: "line", a: [t[0], t[2]], b: [t[0] - t[3] * t[5], t[2] - t[4] * t[5]] });
   }
   const stairs: Pt[][] = (scene.stairSolids ?? []).map((s) => {
-    const s0 = Math.min(...s.prof.map((q) => q[0])), s1 = Math.max(...s.prof.map((q) => q[0]));
+    const s0 = minOf(s.prof.map((q) => q[0])), s1 = maxOf(s.prof.map((q) => q[0]));
     const [ox, oy] = s.o, [ux, uy] = s.u, [ex, ey] = s.ext;
     return [[ox + ux * s0, oy + uy * s0], [ox + ux * s1, oy + uy * s1], [ox + ux * s1 + ex, oy + uy * s1 + ey], [ox + ux * s0 + ex, oy + uy * s0 + ey]] as Pt[];
   });

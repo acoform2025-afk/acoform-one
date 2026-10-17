@@ -1,3 +1,4 @@
+import { minOf, maxOf } from "@/lib/util/minmax";
 // ACOFORM wall layout engine (rebuilt). Pure functions — no database access.
 // Places catalog wall panels along each wall face, with corner pieces and a custom filler for any remainder.
 // Assumptions (review with ACOFORM design team):
@@ -152,9 +153,9 @@ export function generateLayouts(walls: Wall[], catalog: CatalogPanel[], ratePerK
   });
 
   // Scores 0–100 (higher is better). Composite: reuse 40%, cost 30%, inventory simplicity 20%, pieces to handle 10%.
-  const minCost = Math.min(...raw.map((r) => r.total_estimated_cost)) || 1;
-  const minTypes = Math.min(...raw.map((r) => r.distinct_panel_type_count)) || 1;
-  const minPieces = Math.min(...raw.map((r) => r.pieces)) || 1;
+  const minCost = minOf(raw.map((r) => r.total_estimated_cost)) || 1;
+  const minTypes = minOf(raw.map((r) => r.distinct_panel_type_count)) || 1;
+  const minPieces = minOf(raw.map((r) => r.pieces)) || 1;
   const scored = raw.map((r) => {
     const reuse = 100 * r.standardization_rate;
     const costScore = 100 * (minCost / (r.total_estimated_cost || minCost));

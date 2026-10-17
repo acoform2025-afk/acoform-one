@@ -4,6 +4,7 @@
  */
 import { OPENING_DEFAULTS, shapeMeasure, UNIT_TO_M, type LayerRole, type Pt, type Shape, type Takeoff } from "./calc";
 import { dxfFrame, effectiveRoles, type DxfModel } from "./dxf";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type ShellLine = { pts: Pt[]; closed: boolean };
 export type ShellTag = { at: Pt; text: string; kind: Shape["kind"] | "dxf" };
@@ -84,7 +85,7 @@ export function buildShell(t: Takeoff, model: DxfModel | null): ShellGeometry {
   const wallByT = new Map<number, number>();
   const mid = (pts: Pt[]): Pt => {
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    return [(minOf(xs) + maxOf(xs)) / 2, (minOf(ys) + maxOf(ys)) / 2];
   };
   for (const s of shapes) {
     const m = mpp ? shapeMeasure(s, mpp) : { area: 0, length: 0, perimeter: 0 };
@@ -114,7 +115,7 @@ export function buildShell(t: Takeoff, model: DxfModel | null): ShellGeometry {
       tags.push({ at: mid(s.pts), text: `${s.code} DUCT`, kind: "opening" });
     } else if (s.kind === "column") {
       const xs = s.pts.map((p) => p[0]), ys = s.pts.map((p) => p[1]);
-      tags.push({ at: mid(s.pts), text: `${s.code} ${mm((Math.max(...xs) - Math.min(...xs)) * mpp)}×${mm((Math.max(...ys) - Math.min(...ys)) * mpp)}`, kind: "column" });
+      tags.push({ at: mid(s.pts), text: `${s.code} ${mm((maxOf(xs) - minOf(xs)) * mpp)}×${mm((maxOf(ys) - minOf(ys)) * mpp)}`, kind: "column" });
     }
   }
   sch.walls = [...wallByT.entries()].map(([th, len]) => ({ t: th, len })).sort((a, b) => a.t - b.t);

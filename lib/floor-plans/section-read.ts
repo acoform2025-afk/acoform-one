@@ -1,3 +1,4 @@
+import { minOf, maxOf } from "@/lib/util/minmax";
 /**
  * Slab thickness and floor height read from a building section (the "SECTION 1 / Section 3" views in the drawing).
  * In a section every floor shows as a band of long horizontal lines: the floor top (FFL), sometimes a finish /
@@ -12,7 +13,7 @@ export function sectionLevels(lines: { x0: number; x1: number; y: number }[], un
   const mm = unitToM * 1000;
   const L = lines.filter((l) => (l.x1 - l.x0) * unitToM >= 1);
   if (L.length < 6) return null;
-  const W = Math.max(...L.map((l) => l.x1)) - Math.min(...L.map((l) => l.x0));
+  const W = maxOf(L.map((l) => l.x1)) - minOf(L.map((l) => l.x0));
   if (W * unitToM < 6) return null;
   // levels: lines at the same height (5 mm) added up; a floor line runs across a good part of the section
   const lv = new Map<number, number>();
@@ -57,7 +58,7 @@ export function agreedSection(list: SectionLevels[]): SectionLevels | null {
   const best = [...c.values()].sort((a, b) => b.length - a.length || b[0].floors - a[0].floors)[0];
   const beams = best.map((s) => s.beamMm).filter((b): b is number => !!b);
   const beamMm = beams.length ? beams.sort((a, b) => beams.filter((x) => x === b).length - beams.filter((x) => x === a).length)[0] : undefined;
-  return { ...best[0], floors: Math.max(...best.map((s) => s.floors)), name: best.map((s) => s.name).filter(Boolean).join(", ") || undefined, ...(beamMm ? { beamMm } : {}) };
+  return { ...best[0], floors: maxOf(best.map((s) => s.floors)), name: best.map((s) => s.name).filter(Boolean).join(", ") || undefined, ...(beamMm ? { beamMm } : {}) };
 }
 
 /** Marker text written by the DWG converter: "SECTION|floorMm|totalMm|finishMm|floors|beamMm|name". */

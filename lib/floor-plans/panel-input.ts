@@ -10,6 +10,7 @@ import { nearRings, wallUnion } from "./geom";
 import { buildShell } from "./shell";
 import { faceFrames } from "@/lib/design-engine/design-check";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 /** Point inside the wall outlines (even–odd, metres). */
 const inRingsM = (q: Pt, rings: Pt[][]) => {
@@ -305,7 +306,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   for (const s of g.shapes.filter((x) => x.kind === "column")) {
     if (!(mpp > 0)) break;
     const xs = s.pts.map((p) => p[0]), ys = s.pts.map((p) => p[1]);
-    const w = (Math.max(...xs) - Math.min(...xs)) * mpp * 1000, d = (Math.max(...ys) - Math.min(...ys)) * mpp * 1000;
+    const w = (maxOf(xs) - minOf(xs)) * mpp * 1000, d = (maxOf(ys) - minOf(ys)) * mpp * 1000;
     const round = s.pts.length > 6 && Math.abs(polyArea(s.pts)) * mpp * mpp * 1e6 < 0.85 * w * d;
     addCol(w, d, s.h && s.h > 0 ? s.h : H, round, polyLength(s.pts, true) * mpp * 1000, 1);
   }
@@ -334,12 +335,12 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   // 3D model: columns (drawn + DXF), beams with their depth, staircase boxes
   const zoneCols: Pt[][] = [
     ...(frame ? (auto?.columnRings ?? []).map((r) => r.map((q) => toM(frame!.toPx(q)))) : []),
-    ...(mpp > 0 ? g.shapes.filter((x) => x.kind === "column" && x.pts.length >= 2).map((x) => { if (x.pts.length >= 3) return x.pts.map((q) => toM(q)); const xs = x.pts.map((q) => q[0]), ys = x.pts.map((q) => q[1]); const a = toM([Math.min(...xs), Math.min(...ys)]), b = toM([Math.max(...xs), Math.max(...ys)]); return [a, [b[0], a[1]], b, [a[0], b[1]]] as Pt[]; }) : []),
+    ...(mpp > 0 ? g.shapes.filter((x) => x.kind === "column" && x.pts.length >= 2).map((x) => { if (x.pts.length >= 3) return x.pts.map((q) => toM(q)); const xs = x.pts.map((q) => q[0]), ys = x.pts.map((q) => q[1]); const a = toM([minOf(xs), minOf(ys)]), b = toM([maxOf(xs), maxOf(ys)]); return [a, [b[0], a[1]], b, [a[0], b[1]]] as Pt[]; }) : []),
   ];
   const zoneBeam3: { ring: Pt[]; d: number }[] = frame ? (auto?.beamRings ?? []).map((r, i) => ({ ring: r.map((q) => toM(frame!.toPx(q))), d: auto?.beamRingDepth?.[i] ?? (t.params.beamDepthMm ?? 600) })) : [];
   const zoneStairs: [number, number, number, number][] = frame ? (auto?.stairBoxes ?? []).map((bx) => { const p = toM(frame!.toPx([bx[0], bx[1]])), q = toM(frame!.toPx([bx[2], bx[3]])); return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as [number, number, number, number]; }) : []
   // hand-drawn plans: an opening shape labelled "stair" is the stairwell box (dog-leg stair drawn in the 3D model)
-  if (mpp > 0) for (const x of g.shapes) if (x.kind === "opening" && /stair/i.test(x.label ?? "") && x.pts.length >= 3) { const xs = x.pts.map((q) => toM(q)[0]), ys = x.pts.map((q) => toM(q)[1]); zoneStairs.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]); }
+  if (mpp > 0) for (const x of g.shapes) if (x.kind === "opening" && /stair/i.test(x.label ?? "") && x.pts.length >= 3) { const xs = x.pts.map((q) => toM(q)[0]), ys = x.pts.map((q) => toM(q)[1]); zoneStairs.push([minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]); }
   // which way each stair climbs and at which end its mid-landing is (read from the tread lines and the UP / DN arrows)
   const zoneStairOrient: ({ along: boolean; landHigh: boolean; upHigh?: boolean; spans?: [number, number][] } | null)[] = zoneStairs.map((zb, i) => {
     const m = (auto as { stairsMeasured?: { run?: "x" | "y"; landPt?: Pt; upPt?: Pt; flights: { span?: [number, number] }[] }[] } | undefined)?.stairsMeasured?.[i];

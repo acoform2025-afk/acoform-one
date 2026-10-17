@@ -9,6 +9,7 @@ import type { FaceLayout } from "@/lib/design-engine/floor-panels";
 import { zoneLabelAt, type Zone } from "./zones";
 import { fillRun, wallMarks, type StairGeo, type StairLayout } from "@/lib/design-engine/floor-panels";
 import { inRings } from "@/lib/design-engine/design-check";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type Poly2 = Pt[][];                         // outer ring + holes (metres)
 export type Panel3Kind = "std" | "top" | "fill" | "deck" | "dspec" | "ic" | "ec" | "sc" | "kick" | "bside" | "bbot" | "col" | "stair" | "riser" | "cheek" | "lsoff" | "tread" | "cchan" | "stp" | "tz" | "cpp" | "trec";
@@ -238,7 +239,7 @@ export function buildScene3(o: {
     }
     // bottom: the ring as a rectangle (beams are narrow strips), split along its length into standard bottom panels
     const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]);
-    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), alongX = x1 - x0 >= y1 - y0;
+    const x0 = minOf(xs), x1 = maxOf(xs), y0 = minOf(ys), y1 = maxOf(ys), alongX = x1 - x0 >= y1 - y0;
     const Lb = alongX ? x1 - x0 : y1 - y0, wb = Math.round((alongX ? y1 - y0 : x1 - x0) * 1000);
     const runB = fillRun(Math.round(Lb * 1000), bbL);
     const piecesB = [...runB.panels.map((w) => ({ w, custom: false })), ...(runB.left > 20 ? [{ w: runB.left, custom: true }] : [])];
@@ -504,7 +505,7 @@ export function buildScene3(o: {
   for (const b3 of o.beams3 ?? []) {
     const d = Math.max(slab, b3.d / 1000), h = d - slab; if (h <= 0.01 || b3.ring.length < 3) continue;
     const xs2 = b3.ring.map((q) => q[0]), ys2 = b3.ring.map((q) => q[1]);
-    const x0 = Math.min(...xs2), x1 = Math.max(...xs2), y0 = Math.min(...ys2), y1 = Math.max(...ys2), along = x1 - x0 >= y1 - y0;
+    const x0 = minOf(xs2), x1 = maxOf(xs2), y0 = minOf(ys2), y1 = maxOf(ys2), along = x1 - x0 >= y1 - y0;
     const L = along ? x1 - x0 : y1 - y0, n = Math.max(1, Math.ceil(L / 1.2));
     for (let i = 0; i <= n; i++) { const t = 0.1 + (i * (L - 0.2)) / n; addProp(along ? x0 + t : (x0 + x1) / 2, along ? (y0 + y1) / 2 : y0 + t, H - h - 0.005, 1); }
   }
@@ -567,7 +568,7 @@ export function buildScene3(o: {
   const xs: number[] = [], ys: number[] = [];
   for (const poly of slabM) for (const [x, y] of poly[0]) { xs.push(x); ys.push(y); }
   for (const poly of walls) for (const [x, y] of poly[0]) { xs.push(x); ys.push(y); }
-  const box: [number, number, number, number] = xs.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] : [0, 0, 10, 10];
+  const box: [number, number, number, number] = xs.length ? [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)] : [0, 0, 10, 10];
   // fitting check: every full wall panel must have a tie through it (ties go through the panel rails at the joints of one face and
   // end on the opposite face) — a panel with no tie end inside its area on its face is listed
   const fit: NonNullable<Scene3["fit"]> = [];

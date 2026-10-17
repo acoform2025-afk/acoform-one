@@ -9,6 +9,7 @@
 
 import type { Building } from "./building";
 import { DEFAULT_RULES, normaliseRules, type MeasureRules } from "./rules";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type Pt = [number, number];
 export type ShapeKind = "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft" | "separate";
@@ -192,7 +193,7 @@ export function polyLength(pts: Pt[], closed: boolean): number {
 }
 function bboxSize(pts: Pt[]): [number, number] {
   const xs = pts.map((p) => p[0]); const ys = pts.map((p) => p[1]);
-  return [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+  return [maxOf(xs) - minOf(xs), maxOf(ys) - minOf(ys)];
 }
 
 /** Value of one drawn shape in metres (area m² for areas, length m for walls). */

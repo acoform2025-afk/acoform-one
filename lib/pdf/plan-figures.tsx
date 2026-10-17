@@ -11,6 +11,7 @@
 import { G, Line, Path, Polygon, Rect, Svg, Text as SvgText } from "@react-pdf/renderer";
 import type { Pt } from "@/lib/floor-plans/calc";
 import type { SheetGeo } from "./area-sheet-document";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export const FIG = {
   wall: { fill: "#c7d2fe", stroke: "#3730a3", label: "Concrete walls (both faces formed)" },
@@ -102,7 +103,7 @@ export function IsoFigure({ geo, H, parapetH, w, h, unitToM = 0.001, slabM = 0.1
   const all = faces.flatMap((f) => f.pts);
   if (!all.length) return null;
   const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
-  const box: [number, number, number, number] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  const box: [number, number, number, number] = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)];
   const bw = Math.max(1e-6, box[2] - box[0]), bh = Math.max(1e-6, box[3] - box[1]), pad = 6;
   const k = Math.min((w - 2 * pad) / bw, (h - 2 * pad) / bh), ox = pad + ((w - 2 * pad) - bw * k) / 2, oy = pad + ((h - 2 * pad) - bh * k) / 2;
   const T = (p: [number, number]) => `${(ox + (p[0] - box[0]) * k).toFixed(1)},${(oy + (p[1] - box[1]) * k).toFixed(1)}`;

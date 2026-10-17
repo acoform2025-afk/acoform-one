@@ -9,6 +9,7 @@
 import path from "node:path";
 import { Document, Font, G, Image, Line, Page, Path, Polygon, Rect, Svg, Text, View, Circle } from "@react-pdf/renderer";
 import { fillRun, type StairLayout } from "@/lib/design-engine/floor-panels";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 const PUBLIC = path.join(process.cwd(), "public");
 Font.register({ family: "Carlito", fonts: [{ src: path.join(PUBLIC, "fonts", "Carlito-Regular.ttf") }, { src: path.join(PUBLIC, "fonts", "Carlito-Bold.ttf"), fontWeight: "bold" }] });
@@ -242,7 +243,7 @@ function ExplodedView({ s, info }: { s: StairLayout; info: StairInfo }) {
   }
   const all = items.flatMap((it) => it.pts.map((p) => P(p[0], p[1], p[2])));
   const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
-  const box: [number, number, number, number] = [Math.min(...xs) - 600, Math.min(...ys) - 600, Math.max(...xs) + 600, Math.max(...ys) + 600];
+  const box: [number, number, number, number] = [minOf(xs) - 600, minOf(ys) - 600, maxOf(xs) + 600, maxOf(ys) + 600];
   // painter's order: far first
   const order = items.map((it, i) => ({ it, i, d: it.pts.reduce((a, p) => a + p[0] + p[1] + p[2] * 0.2, 0) / it.pts.length })).sort((a, b) => a.d - b.d);
   return (

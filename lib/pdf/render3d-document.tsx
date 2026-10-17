@@ -8,6 +8,7 @@
 import path from "node:path";
 import { Document, Font, Image, Line, Page, Polygon, Svg, Text, View } from "@react-pdf/renderer";
 import type { Panel3Kind, Scene3 } from "@/lib/floor-plans/scene3d";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 const PUBLIC = path.join(process.cwd(), "public");
 Font.register({ family: "Carlito", fonts: [{ src: path.join(PUBLIC, "fonts", "Carlito-Regular.ttf") }, { src: path.join(PUBLIC, "fonts", "Carlito-Bold.ttf"), fontWeight: "bold" }] });
@@ -73,7 +74,7 @@ function IsoView({ items, az, el, w, h }: { items: Item[]; az: number; el: numbe
   }).sort((a, b) => a.d - b.d);
   const xs = drawn.flatMap((x) => x.scr.map((p) => p[0])), ys = drawn.flatMap((x) => x.scr.map((p) => p[1]));
   if (!xs.length) return <Text style={{ color: GRAY }}>Nothing to draw.</Text>;
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const x0 = minOf(xs), x1 = maxOf(xs), y0 = minOf(ys), y1 = maxOf(ys);
   const pad = Math.max(x1 - x0, y1 - y0) * 0.03, bw = x1 - x0 + 2 * pad, bh = y1 - y0 + 2 * pad;
   const sc = Math.min(w / bw, h / bh), k = 1 / sc;
   return (

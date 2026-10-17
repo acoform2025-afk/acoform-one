@@ -10,6 +10,7 @@ import { SystemSelect } from "./system-select";
 import { ColumnSetsInput } from "./column-sets-input";
 import { wallMarks } from "@/lib/design-engine/floor-panels";
 import { PRESETS, describeLayoutRules } from "@/lib/design-engine/layout-rules";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export const metadata = { title: "Panel layout & BOM" };
 export const dynamic = "force-dynamic";
@@ -238,7 +239,7 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
             </div>
             {zs.filter((z) => z.specialArea > 2).map((z) => {
               // what the specials of a big zone are: long strips, small odd pieces, or large blocks (size = bounding box in mm)
-              const sp = z.specials.map((q) => { const xs = q.rings[0].map((p) => p[0]), ys = q.rings[0].map((p) => p[1]); const a = (Math.max(...xs) - Math.min(...xs)) * 1000, b = (Math.max(...ys) - Math.min(...ys)) * 1000; return { area: q.area, lo: Math.round(Math.min(a, b)), hi: Math.round(Math.max(a, b)), at: [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...ys) + Math.min(...ys)) / 2] as [number, number] }; });
+              const sp = z.specials.map((q) => { const xs = q.rings[0].map((p) => p[0]), ys = q.rings[0].map((p) => p[1]); const a = (maxOf(xs) - minOf(xs)) * 1000, b = (maxOf(ys) - minOf(ys)) * 1000; return { area: q.area, lo: Math.round(Math.min(a, b)), hi: Math.round(Math.max(a, b)), at: [(maxOf(xs) + minOf(xs)) / 2, (maxOf(ys) + minOf(ys)) / 2] as [number, number] }; });
               const strip = sp.filter((q) => q.lo <= 700 && q.hi >= 1500), small = sp.filter((q) => q.area < 0.3 && !(q.lo <= 700 && q.hi >= 1500)), rest = sp.filter((q) => !strip.includes(q) && !small.includes(q));
               const sum = (l: typeof sp) => l.reduce((t, q) => t + q.area, 0).toFixed(1);
               return (

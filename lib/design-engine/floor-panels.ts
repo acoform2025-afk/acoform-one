@@ -13,6 +13,7 @@
 import type { Pt } from "@/lib/floor-plans/calc";
 import { fabSpec } from "./fabrication";
 import type { LayoutRules } from "./layout-rules";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type CatPanel = { id: string; panel_code: string; panel_category: string; width_mm: number; height_mm: number; weight_kg: number; area_sqm: number };
 export type FaceGeo = { a: Pt; b: Pt; off: number };                                    // plan px; off = sideways offset (px)
@@ -324,7 +325,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
     elements.push({ kind: "deck", code: `M1–M${zd.zones}`, size: `${zd.zones} rooms / bays`, qty: 1, area: zd.area, detail: `${zd.panels.length} deck panels, lengths ${lens.slice(0, 6).join(" / ")} · specials ${zd.specialArea.toFixed(2)} m²` });
   }
   for (const d of zd ? [] : decks) {
-    const xs = d.pts.map((p) => p[0]); const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const xs = d.pts.map((p) => p[0]); const x0 = minOf(xs), x1 = maxOf(xs);
     const ys = d.pts.map((p) => p[1]);
     const before = { fill: fillArea, spec: deckFiller, n: [...deckCount.values()].reduce((a, b) => a + b, 0) };
     for (let x = x0; x < x1 - 0.05; x += L) {
@@ -340,7 +341,7 @@ export function layoutFloor(faces: Face[], decks: DeckPoly[], beams: BeamRun[], 
         fillArea += (run * stripLen * 1000) / 1e6;
       }
     }
-    deckRows.push({ code: d.code, size: `${(x1 - x0).toFixed(2)} × ${(Math.max(...ys) - Math.min(...ys)).toFixed(2)} m`, area: fillArea - before.fill, n: [...deckCount.values()].reduce((a, b) => a + b, 0) - before.n, special: deckFiller - before.spec });
+    deckRows.push({ code: d.code, size: `${(x1 - x0).toFixed(2)} × ${(maxOf(ys) - minOf(ys)).toFixed(2)} m`, area: fillArea - before.fill, n: [...deckCount.values()].reduce((a, b) => a + b, 0) - before.n, special: deckFiller - before.spec });
   }
   const scale = !zd && fillArea > 0 && o.soffitArea > 0 ? Math.min(1, o.soffitArea / fillArea) : 1;
   for (const r of deckRows) elements.push({ kind: "deck", code: r.code, size: r.size, qty: 1, area: r.area * scale, detail: `${Math.round(r.n * scale)} deck panels × ${deckLen} long · specials ${(r.special * scale).toFixed(2)} m²${scale < 0.98 ? ` (net of wall tops / columns, ×${scale.toFixed(2)})` : ""}` });

@@ -10,6 +10,7 @@ import path from "node:path";
 import { Document, Font, G, Image, Line, Page, Path, Rect, Svg, Text, View, Circle } from "@react-pdf/renderer";
 import type { Pt } from "@/lib/floor-plans/calc";
 import { countOf, type AsmFamily, type AsmItem, type AsmModel } from "./assembly-data";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 const PUBLIC = path.join(process.cwd(), "public");
 Font.register({ family: "Carlito", fonts: [{ src: path.join(PUBLIC, "fonts", "Carlito-Regular.ttf") }, { src: path.join(PUBLIC, "fonts", "Carlito-Bold.ttf"), fontWeight: "bold" }] });
@@ -227,7 +228,7 @@ export function AssemblyDocument({ m, info, notes }: { m: AsmModel; info: AsmInf
       const byStair = new Map<string, AsmItem[]>();
       for (const it of items) { const key = it.z ?? "ST"; const g = byStair.get(key); if (g) g.push(it); else byStair.set(key, [it]); }
       // stair prop heads carry no zone: attach them to the nearest stair box
-      const boxes = [...byStair].map(([key, g]) => ({ key, b: [Math.min(...g.map((i) => Math.min(i.a[0], i.b[0]))), Math.min(...g.map((i) => Math.min(i.a[1], i.b[1]))), Math.max(...g.map((i) => Math.max(i.a[0], i.b[0]))), Math.max(...g.map((i) => Math.max(i.a[1], i.b[1])))] as [number, number, number, number] }));
+      const boxes = [...byStair].map(([key, g]) => ({ key, b: [minOf(g.map((i) => Math.min(i.a[0], i.b[0]))), minOf(g.map((i) => Math.min(i.a[1], i.b[1]))), maxOf(g.map((i) => Math.max(i.a[0], i.b[0]))), maxOf(g.map((i) => Math.max(i.a[1], i.b[1])))] as [number, number, number, number] }));
       let n = 0;
       for (const bx of boxes) {
         if (bx.key === "ST") continue;

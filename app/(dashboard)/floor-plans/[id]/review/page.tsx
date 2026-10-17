@@ -7,6 +7,7 @@ import { readChecks, type ReadBox } from "@/lib/floor-plans/read-checks";
 import type { Pt } from "@/lib/floor-plans/calc";
 import { AnswerButtons, ApproveButton, ClearAnswers } from "./answer-buttons";
 import { fingerprintDiff, readingFingerprint, type Approved } from "@/lib/floor-plans/reading-record";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export const metadata = { title: "Reading review" };
 export const dynamic = "force-dynamic";
@@ -48,7 +49,7 @@ export default async function ReadingReviewPage({ params }: { params: Promise<{ 
   const inp = r.inp;
   const walls = inp.zoneWalls;
   const pts = walls.flat();
-  const box: ReadBox = pts.length ? [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))] : [0, 0, 10, 10];
+  const box: ReadBox = pts.length ? [minOf(pts.map((p) => p[0])), minOf(pts.map((p) => p[1])), maxOf(pts.map((p) => p[0])), maxOf(pts.map((p) => p[1]))] : [0, 0, 10, 10];
   const dxf = r.t.dxf as { includeM?: ReadBox[]; excludeM?: ReadBox[] } | undefined;
   const mpp = r.shell?.mpp ?? 0, m = (p: Pt): Pt => [p[0] * mpp, p[1] * mpp];   // face geometry is in plan px
   const marked = { includeM: dxf?.includeM ?? [], excludeM: dxf?.excludeM ?? [] };

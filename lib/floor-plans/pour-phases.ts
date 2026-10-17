@@ -1,3 +1,4 @@
+import { minOf, maxOf } from "@/lib/util/minmax";
 /** Cut deck zones into n pours of about equal area.
  *  Zones are taken in a sweep along the long side of the floor (so neighbours pour together) and split into n
  *  consecutive groups so that the areas are as even as possible. Every phase gets at least one zone. */
@@ -7,8 +8,8 @@ export function assignPhases(zones: PhZone[], nWanted: number): { phaseOf: Recor
   const n = Math.max(1, Math.min(Math.round(nWanted) || 1, zones.length));
   const phaseOf: Record<string, number> = {};
   if (!zones.length) return { phaseOf, n: 1, areas: [] };
-  const x0 = Math.min(...zones.map((z) => z.box[0])), x1 = Math.max(...zones.map((z) => z.box[2]));
-  const y0 = Math.min(...zones.map((z) => z.box[1])), y1 = Math.max(...zones.map((z) => z.box[3]));
+  const x0 = minOf(zones.map((z) => z.box[0])), x1 = maxOf(zones.map((z) => z.box[2]));
+  const y0 = minOf(zones.map((z) => z.box[1])), y1 = maxOf(zones.map((z) => z.box[3]));
   const ax = x1 - x0 >= y1 - y0 ? 0 : 1;
   const order = [...zones].sort((p, q) => (p.box[ax] + p.box[ax + 2]) - (q.box[ax] + q.box[ax + 2]));
   const m = order.length, pre = [0];

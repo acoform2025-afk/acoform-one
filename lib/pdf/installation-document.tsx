@@ -8,6 +8,7 @@ import path from "node:path";
 import { Document, Font, G, Image, Line, Page, Path, Rect, Svg, Text, View } from "@react-pdf/renderer";
 import type { Pt } from "@/lib/floor-plans/calc";
 import { zoneLabelAt, type Zone } from "@/lib/floor-plans/zones";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 const PUBLIC = path.join(process.cwd(), "public");
 Font.register({
@@ -104,8 +105,8 @@ function LegendRows({ rows, size = 6.4 }: { rows: LegRow[]; size?: number }) {
 export function InstallationDocument({ zones, walls, wallPanels, info, phases, nPhases = 1 }: { phases?: Record<string, number>; nPhases?: number; zones: Zone[]; walls: Pt[][]; wallPanels: WallPanelNo[]; info: InstallInfo }) {
   const all = zones.flatMap((z) => z.panels);
   const box: [number, number, number, number] = [
-    Math.min(...zones.map((z) => z.box[0])), Math.min(...zones.map((z) => z.box[1])),
-    Math.max(...zones.map((z) => z.box[2])), Math.max(...zones.map((z) => z.box[3])),
+    minOf(zones.map((z) => z.box[0])), minOf(zones.map((z) => z.box[1])),
+    maxOf(zones.map((z) => z.box[2])), maxOf(zones.map((z) => z.box[3])),
   ];
   // zone sheets: big zones alone, small ones four to a sheet
   const big = zones.filter((z) => z.panels.length > 60), small = zones.filter((z) => z.panels.length <= 60);

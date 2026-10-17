@@ -4,11 +4,12 @@
  * can zoom to it and select it. Pure geometry — no database, no drawing file.
  */
 import type { Pt, Takeoff, Shape } from "./calc";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type TakeoffCheck = { id: string; sev: "error" | "warn" | "info"; title: string; detail: string; box: [number, number, number, number]; shapeId?: string };
 
 const area = (p: Pt[]) => { let a = 0; for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i][0] * q[1] - q[0] * p[i][1]; } return Math.abs(a) / 2; };
-const bbox = (p: Pt[]): [number, number, number, number] => [Math.min(...p.map((q) => q[0])), Math.min(...p.map((q) => q[1])), Math.max(...p.map((q) => q[0])), Math.max(...p.map((q) => q[1]))];
+const bbox = (p: Pt[]): [number, number, number, number] => [minOf(p.map((q) => q[0])), minOf(p.map((q) => q[1])), maxOf(p.map((q) => q[0])), maxOf(p.map((q) => q[1]))];
 const inPoly = (pt: Pt, p: Pt[]) => { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) { if ((p[i][1] > pt[1]) !== (p[j][1] > pt[1]) && pt[0] < ((p[j][0] - p[i][0]) * (pt[1] - p[i][1])) / (p[j][1] - p[i][1]) + p[i][0]) c = !c; } return c; };
 const cross = (a: Pt, b: Pt, c: Pt) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 const segCross = (a: Pt, b: Pt, c: Pt, d: Pt) => { const d1 = cross(a, b, c), d2 = cross(a, b, d), d3 = cross(c, d, a), d4 = cross(c, d, b); return d1 * d2 < 0 && d3 * d4 < 0; };
@@ -79,7 +80,7 @@ export function takeoffChecks(t: Takeoff, mpp: number | null): TakeoffCheck[] {
     const thk = ((t.params?.wallThkMm ?? 150) / 1000) / (mpp || 0.01);
     for (const s of sh.filter((x) => (x.kind === "door" || x.kind === "window") && x.pts.length >= 2)) {
       const mid: Pt = [(s.pts[0][0] + s.pts[1][0]) / 2, (s.pts[0][1] + s.pts[1][1]) / 2];
-      const d = Math.min(...walls.flatMap((w) => w.pts.slice(1).map((p, i) => distSeg(mid, w.pts[i], p))));
+      const d = minOf(walls.flatMap((w) => w.pts.slice(1).map((p, i) => distSeg(mid, w.pts[i], p))));
       if (d > Math.max(thk * 1.5, 25)) out.push({ id: id(), sev: "warn", title: `${name(s)} is not on a wall`, detail: `It is ${mpp ? (d * mpp).toFixed(2) + " m" : "some distance"} from the nearest wall, so no wall area is taken off for it. Drag its ends onto the wall line.`, box: pad(bbox(s.pts), 40), shapeId: s.id });
     }
   } else if (sh.some((x) => x.kind === "door" || x.kind === "window")) {

@@ -7,6 +7,7 @@
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, type Pt } from "./calc";
 import { fillRun, intervalsAt, overlap } from "@/lib/design-engine/floor-panels";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type DeckPanel = { no: string; x0: number; y0: number; x1: number; y1: number; w: number; L: number; custom: boolean; code: string };
 export type Zone = { code: string; rings: Pt[][]; area: number; box: [number, number, number, number]; along: "x" | "y"; panels: DeckPanel[]; mb: [Pt, Pt][]; specials: { rings: Pt[][]; area: number }[]; specialArea: number };
@@ -41,7 +42,7 @@ export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[]
   // beams and columns grown by 3 mm: two that only touch (a beam butting onto a column face) leave a zero-width slit
   // in the difference, which joins the decks on both sides of the beam into one zone (panels then cross the beam and
   // are dropped, leaving bare strips)
-  const grow = (r: Pt[]): Pt[] => { const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]); const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2, e = 0.003; return r.map((q) => [q[0] + (q[0] > cx ? e : q[0] < cx ? -e : 0), q[1] + (q[1] > cy ? e : q[1] < cy ? -e : 0)] as Pt); };
+  const grow = (r: Pt[]): Pt[] => { const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]); const cx = (minOf(xs) + maxOf(xs)) / 2, cy = (minOf(ys) + maxOf(ys)) / 2, e = 0.003; return r.map((q) => [q[0] + (q[0] > cx ? e : q[0] < cx ? -e : 0), q[1] + (q[1] > cy ? e : q[1] < cy ? -e : 0)] as Pt); };
   const solid0: MultiPolygon = solids.filter((r) => r.length >= 3).map((r) => [ring(r)] as Polygon);
   const solid: MultiPolygon = solids.filter((r) => r.length >= 3).map((r) => [ring(grow(r))] as Polygon);
   // the slab outline trimmed 40 mm inwards along its outer edge: a slab edge drawn a few cm outside the wall (groove
@@ -72,7 +73,7 @@ export function deckZones(slabs: { pts: Pt[]; holes: Pt[][] }[], wallRings: Pt[]
     const rings = poly.map((r) => r.slice(0, -1) as Pt[]);
     const area = Math.abs(polyArea(rings[0])) - rings.slice(1).reduce((a, r) => a + Math.abs(polyArea(r)), 0);
     const xs = rings[0].map((p) => p[0]), ys = rings[0].map((p) => p[1]);
-    const box: [number, number, number, number] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const box: [number, number, number, number] = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)];
     if (area < minArea || box[2] - box[0] < 0.3 || box[3] - box[1] < 0.3) continue;
     out.push({ rings, area, box });
   }
@@ -126,7 +127,7 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
     const ps: DeckPanel[] = []; const mbs: [Pt, Pt][] = [];
     const sw = (p: Pt): Pt => (al === "x" ? p : [p[1], p[0]]);
     const outer = rings[0].map(sw), holes = rings.slice(1).map((r) => r.map(sw));
-    const xs = outer.map((p) => p[0]); const s0 = Math.min(...xs) + e, s1 = Math.max(...xs) - e;
+    const xs = outer.map((p) => p[0]); const s0 = minOf(xs) + e, s1 = maxOf(xs) - e;
     // rows sized to this region: the allowed lengths that fill the span best (one length = fixed rows as before)
     const rowLens = lensList.length > 1 ? planRows((s1 - s0) * 1000, lensList, mbGap) : [];
     let ri = 0;
@@ -152,7 +153,7 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
         };
         let fl = left <= tol ? 0 : Math.round(left / 5) * 5;
         // a strip too narrow to make or fit (a 35 mm sliver): join it with the narrowest panel of the row, one wider made-to-size piece
-        if (fl > 0 && fl < minStrip && ws.length) { const k = ws.indexOf(Math.min(...ws)); fl += ws[k]; ws.splice(k, 1); }
+        if (fl > 0 && fl < minStrip && ws.length) { const k = ws.indexOf(minOf(ws)); fl += ws[k]; ws.splice(k, 1); }
         if (fl && stripMode === "edges" && fl >= 100) {          // left-over strip split in two, one at each edge of the row
           const h1 = Math.round(fl / 2 / 5) * 5;
           put(h1, true); for (const wm of ws) put(wm, false); put(fl - h1, true);
@@ -206,7 +207,7 @@ export function layoutZone(code: string, z: { rings: Pt[][]; area: number; box: 
     for (const poly of rest) {
       const rings = poly.map((r) => r.slice(0, -1) as Pt[]);
       const xs = rings[0].map((p) => p[0]), ys = rings[0].map((p) => p[1]);
-      const bw = Math.max(...xs) - Math.min(...xs), bh = Math.max(...ys) - Math.min(...ys);
+      const bw = maxOf(xs) - minOf(xs), bh = maxOf(ys) - minOf(ys);
       const area = Math.abs(polyArea(rings[0])) - rings.slice(1).reduce((x, r) => x + Math.abs(polyArea(r)), 0);
       if (area < 0.4 || Math.min(bw, bh) < 0.3) continue;
       let best: { ps: DeckPanel[]; mbs: [Pt, Pt][] } | null = null, bestCov = 0;

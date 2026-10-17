@@ -7,6 +7,7 @@
  */
 import polygonClipping, { type MultiPolygon, type Polygon } from "polygon-clipping";
 import { polyArea, polyLength, type Pt } from "./calc";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export function wallUnion(polys: Pt[][], holes: Pt[][] = []): { area: number; perimeter: number; rings: Pt[][]; isHole?: boolean[] } {
   const input: Polygon[] = [];
@@ -53,8 +54,8 @@ export function outlineFromWalls(walls: { pts: Pt[]; closed: boolean }[], unit: 
   const pts = walls.flatMap((w) => w.pts);
   if (pts.length < 3) return { area: 0, loops: [] };
   const pad = (closeR + 0.5) * unit;
-  const x0 = Math.min(...pts.map((p) => p[0])) - pad, y0 = Math.min(...pts.map((p) => p[1])) - pad;
-  const x1 = Math.max(...pts.map((p) => p[0])) + pad, y1 = Math.max(...pts.map((p) => p[1])) + pad;
+  const x0 = minOf(pts.map((p) => p[0])) - pad, y0 = minOf(pts.map((p) => p[1])) - pad;
+  const x1 = maxOf(pts.map((p) => p[0])) + pad, y1 = maxOf(pts.map((p) => p[1])) + pad;
   let G = 0.025 * unit;                                             // 25 mm cells
   const maxCells = 4_000_000;
   if (((x1 - x0) / G) * ((y1 - y0) / G) > maxCells) G = Math.sqrt(((x1 - x0) * (y1 - y0)) / maxCells);

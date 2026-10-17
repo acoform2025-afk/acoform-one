@@ -21,6 +21,7 @@ import { isNoiseLayer, suggestLayerRole } from "./layer-rules";
 import { parseLevelName, readBuilding, type Building, type LevelKind } from "./building";
 import { drawingSection } from "./dxf";
 import { CONCEPT_ROLE, EMPTY_DICT, layerKey, meaningOf, normText, textCategory, type Dictionary, type Meaning, type TextCat } from "./vocab";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type IndexLayer = {
   name: string; lines: number; closed: number; texts: number; lengthM: number; fills?: number;
@@ -72,7 +73,7 @@ function layerGeometry(paths: DxfModel["paths"], unitToM: number): Map<string, {
     // small rectangles 0.2–1.5 m a side, not long strips: columns
     if (p.closed && (n === 4 || n === 5)) {
       const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
-      const w = (Math.max(...xs) - Math.min(...xs)) * unitToM, h = (Math.max(...ys) - Math.min(...ys)) * unitToM;
+      const w = (maxOf(xs) - minOf(xs)) * unitToM, h = (maxOf(ys) - minOf(ys)) * unitToM;
       if (Math.min(w, h) >= 0.2 && Math.max(w, h) <= 1.5 && Math.max(w, h) / Math.min(w, h) <= 4) rects.set(p.layer, (rects.get(p.layer) ?? 0) + 1);
     }
   }

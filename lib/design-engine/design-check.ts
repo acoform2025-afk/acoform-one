@@ -11,6 +11,7 @@ import type { Pt } from "@/lib/floor-plans/calc";
 import type { Zone } from "@/lib/floor-plans/zones";
 import type { FaceLayout } from "./floor-panels";
 import { pinHoleCheck, type FabSpec } from "./fabrication";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type IssueKind = "model" | "face-fit" | "wall-clash" | "wall-in-concrete" | "deck-on-wall" | "deck-on-beam" | "deck-overlap" | "uncovered" | "pin-hole" | "face-height" | "leak" | "corner" | "beam-parts" | "back-rib" | "props";
 export type Issue = { id: string; sev: "error" | "warn"; kind: IssueKind; where: string; detail: string; at?: Pt; z?: number };
@@ -49,7 +50,7 @@ const segDist = (p: Pt, a: Pt, b: Pt) => {
   return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
 };
 type Box = [number, number, number, number];
-const boxOf = (pts: Pt[]): Box => [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+const boxOf = (pts: Pt[]): Box => [minOf(pts.map((p) => p[0])), minOf(pts.map((p) => p[1])), maxOf(pts.map((p) => p[0])), maxOf(pts.map((p) => p[1]))];
 const boxHit = (a: Box, b: Box, e = 0) => a[0] < b[2] + e && b[0] < a[2] + e && a[1] < b[3] + e && b[1] < a[3] + e;
 
 /** Separating-axis overlap depth of two convex quads (0 = no overlap). */
@@ -57,7 +58,7 @@ function quadOverlap(A: Pt[], B: Pt[]) {
   let depth = Infinity;
   for (const P of [A, B]) for (let i = 0; i < P.length; i++) {
     const a = P[i], b = P[(i + 1) % P.length]; const nx = -(b[1] - a[1]), ny = b[0] - a[0]; const L = Math.hypot(nx, ny); if (!L) continue;
-    const pr = (Q: Pt[]) => { const v = Q.map((q) => (q[0] * nx + q[1] * ny) / L); return [Math.min(...v), Math.max(...v)]; };
+    const pr = (Q: Pt[]) => { const v = Q.map((q) => (q[0] * nx + q[1] * ny) / L); return [minOf(v), maxOf(v)]; };
     const [a0, a1] = pr(A), [b0, b1] = pr(B);
     const d = Math.min(a1, b1) - Math.max(a0, b0); if (d <= 0) return 0;
     depth = Math.min(depth, d);
@@ -194,7 +195,7 @@ export function designCheck(o: CheckInput) {
     if (z.specialArea < 0.15) continue;
     const big = [...z.specials].sort((a, b) => b.area - a.area)[0];
     const xs = big.rings[0].map((p) => p[0]), ys = big.rings[0].map((p) => p[1]);
-    add({ sev: "warn", kind: "uncovered", where: z.code, detail: `${z.specialArea.toFixed(2)} m² of zone ${z.code} (${z.area.toFixed(1)} m²) is not covered by standard deck panels — ${z.specials.length} piece(s) need special deck panels or plywood.`, at: [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2], z: Hm });
+    add({ sev: "warn", kind: "uncovered", where: z.code, detail: `${z.specialArea.toFixed(2)} m² of zone ${z.code} (${z.area.toFixed(1)} m²) is not covered by standard deck panels — ${z.specials.length} piece(s) need special deck panels or plywood.`, at: [(minOf(xs) + maxOf(xs)) / 2, (minOf(ys) + maxOf(ys)) / 2], z: Hm });
   }
   // ── wall panel height: every normal wall face should reach the underside of the slab (clear height), not stop short or poke through
   if (o.H > 0) for (const f of o.faces) {

@@ -7,6 +7,7 @@ import { autoStairRows, type DxfAuto, type Takeoff, type Totals } from "./calc";
 import type { Question } from "./building";
 import type { MeasureRules } from "./rules";
 import type { SectionLevels } from "./section-read";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | null, rules: MeasureRules, section: SectionLevels | null): Question[] {
   const Q: Question[] = [];
@@ -39,7 +40,7 @@ export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | nul
   {
     const odd = autoStairRows(auto, p.floorHeight || 3).filter((r) => r.oddRiser);
     if (odd.length) {
-      const n = Math.max(...odd.map((r) => r.risers)), lo = (n * 0.15).toFixed(2), hi = (n * 0.175).toFixed(2);
+      const n = maxOf(odd.map((r) => r.risers)), lo = (n * 0.15).toFixed(2), hi = (n * 0.175).toFixed(2);
       ask("m-stairfh", "architect", `The staircase on the plan has ${n} risers per floor. With the floor height used (${(p.floorHeight || 3).toFixed(2)} m) each riser would be ${Math.round(((p.floorHeight || 3) * 1000) / n)} mm, so the floor-to-floor height is probably about ${lo}–${hi} m. Please confirm the floor-to-floor height (and the riser height).`, "The floor height sets the wall panel height, the stair risers and the quoted area.");
     }
   }

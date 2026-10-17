@@ -5,6 +5,7 @@
  * the table can be shown on the drawing and read like any other text.
  */
 import { unzipSync, strFromU8 } from "fflate";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 /** Minimal OLE compound-file reader: every stream by name. */
 function cfbStreams(buf: Uint8Array): Map<string, Uint8Array> {
@@ -82,7 +83,7 @@ function xlsxTable(zip: Uint8Array): OleTable | null {
     }
     if (!grid.size) continue;
     const rIdx = [...grid.keys()].sort((a, b) => a - b), r0 = rIdx[0], r1 = rIdx[rIdx.length - 1];
-    const cAll = [...grid.values()].flatMap((m) => [...m.keys()]), c0 = Math.min(...cAll), c1 = Math.max(...cAll);
+    const cAll = [...grid.values()].flatMap((m) => [...m.keys()]), c0 = minOf(cAll), c1 = maxOf(cAll);
     const widths = new Map<number, number>();
     for (const m of x.matchAll(/<col\b[^>]*\bmin="(\d+)"[^>]*\bmax="(\d+)"[^>]*\bwidth="([\d.]+)"/g)) for (let i = Number(m[1]) - 1; i <= Number(m[2]) - 1; i++) widths.set(i, Number(m[3]));
     const rows: string[][] = [];

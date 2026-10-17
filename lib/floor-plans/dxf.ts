@@ -10,6 +10,7 @@ import { labelledSpaces, nearRings, outlineFromWalls, pairedWallStrips, wallGaps
 import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, isRailLayer, suggestLayerRole, WET_ROOM } from "./layer-rules";
 import { meaningOf, type Dictionary } from "./vocab";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean; dashed?: boolean };   // dashed: drawn with a broken linetype (hidden / dashed)
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole; colStrip?: boolean };   // colStrip: a layer named by a size (750, 1200 …) whose filled outlines are built onto the columns — part of the columns   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
@@ -620,7 +621,7 @@ export function mergeColumnStrips(paths: DxfPath[], tol: number): DxfPath[] {
   const rects: R[] = [], rest: DxfPath[] = [];
   for (const p of paths) {
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
-    const r = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), src: p };
+    const r = { x0: minOf(xs), y0: minOf(ys), x1: maxOf(xs), y1: maxOf(ys), src: p };
     const boxA = (r.x1 - r.x0) * (r.y1 - r.y0), a = polyArea(p.pts);
     if (p.pts.length <= 5 && boxA > 0 && a >= 0.98 * boxA) rects.push(r); else rest.push(p);
   }
@@ -660,7 +661,7 @@ export function closeOpeningGaps(paths: DxfPath[], gap: number): DxfPath[] {
     const pts = p.pts.length > 1 && p.pts[0][0] === p.pts[p.pts.length - 1][0] && p.pts[0][1] === p.pts[p.pts.length - 1][1] ? p.pts.slice(0, -1) : p.pts;
     if (pts.length !== 4) return;
     const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
-    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const x0 = minOf(xs), x1 = maxOf(xs), y0 = minOf(ys), y1 = maxOf(ys);
     if (Math.abs(polyArea(pts)) < 0.98 * (x1 - x0) * (y1 - y0)) return;
     rects.push({ i, x0, y0, x1, y1 });
   });
@@ -778,7 +779,7 @@ export function treadFlightBoxes(paths: DxfPath[], u: number): [number, number, 
       const flush = () => {
         if (run.length >= 5) {
           const xs = run.flatMap((r) => [r.sg.a[0], r.sg.b[0]]), ys = run.flatMap((r) => [r.sg.a[1], r.sg.b[1]]);
-          flights.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+          flights.push([minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]);
         }
         run = [];
       };
@@ -820,7 +821,7 @@ const SHAFT_TXT = /(^|[^a-z])(p\.?|s\.?|pass(enger)?\.?|serv(ice)?\.?|fire\.?)?\
 
 /** Staircases: stair-layer lines grouped (1 m apart), groups at least 2 × 2 m. Boxes in drawing units. */
 function stairClusters(paths: DxfPath[], u: number): [number, number, number, number][] {
-  const boxes = paths.map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; });
+  const boxes = paths.map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]; });
   const g = 1 / u; const parent = boxes.map((_, i) => i);
   const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
@@ -921,7 +922,7 @@ function dwGapsOf(rings: Pt[][], dw: (DxfPath & { kind: "door" | "window" })[], 
   // one door / window = the lines lying within 150 mm of each other (same kind)
   type G = { x0: number; y0: number; x1: number; y1: number; door: boolean; n: number };
   const groups: G[] = []; const near = 0.15 / u;
-  const boxOf = (p: DxfPath) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; };
+  const boxOf = (p: DxfPath) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]; };
   for (const p of dw) {
     const [x0, y0, x1, y1] = boxOf(p);
     if ((x1 - x0) * u > 6 || (y1 - y0) * u > 6) continue;
@@ -1064,9 +1065,9 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
     const L = polyLength(p.pts, p.closed) * u; if (L < 0.15) continue;
     // a single slanting line on a beam / slab layer is a leader or a section mark, not a connector
     if ((kind === "beam" || kind === "slab") && !straight(p)) continue;
-    if (kind === "link") { const xs0 = p.pts.map((q) => q[0]), ys0 = p.pts.map((q) => q[1]); const b0: [number, number, number, number] = [Math.min(...xs0), Math.min(...ys0), Math.max(...xs0), Math.max(...ys0)]; if (!inCaption(b0) && (!keep || keep(p))) els.push({ p, box: b0, strong: false, wallA: 0, link: true }); continue; }
+    if (kind === "link") { const xs0 = p.pts.map((q) => q[0]), ys0 = p.pts.map((q) => q[1]); const b0: [number, number, number, number] = [minOf(xs0), minOf(ys0), maxOf(xs0), maxOf(ys0)]; if (!inCaption(b0) && (!keep || keep(p))) els.push({ p, box: b0, strong: false, wallA: 0, link: true }); continue; }
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
-    const box: [number, number, number, number] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const box: [number, number, number, number] = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)];
     if (inCaption(box) && !forced(box)) { detail.add(p); continue; }
     els.push({ p, box, strong: kind !== "beam" || p.closed, wallA: kind === "wall" && p.closed ? Math.abs(polyArea(p.pts)) : kind === "wall" ? L * 0.2 / u : 0 });
   }
@@ -1127,7 +1128,7 @@ export function beamSchedule(model: DxfModel, u: number): { name: string; sz: { 
       const vert = win.filter((t) => Math.abs(Math.abs(t.r ?? 0) - Math.PI / 2) < 0.2).map((t) => Number(t.text)).filter((v) => v >= 150 && v <= 2500);
       const hor = win.filter((t) => Math.abs(t.r ?? 0) < 0.2).sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y)).map((t) => Number(t.text)).filter((v) => v >= 100 && v <= 1200);
       if (!vert.length || !hor.length) continue;
-      const sz = { b: hor[0], d: Math.max(...vert) };
+      const sz = { b: hor[0], d: maxOf(vert) };
       if (sz.d <= sz.b) continue;
       const id = m[1];
       const keys = /^L\d/.test(id) ? [`L${id.startsWith("LB") ? id.slice(2) : id.slice(1)}`.replace(/^L/, "LB"), id] : id.startsWith("B") ? [id] : [`B${id}`, id];
@@ -1156,7 +1157,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   const u = unitToM, u2 = unitToM * unitToM;
   const roles = effectiveRoles(model, rolesIn);
   // revision clouds (a ring of small arcs round a note) and the leader lines hooked to them are mark-ups, never walls
-  const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m] as [number, number, number, number]; });
+  const clouds = model.paths.filter((p) => isRevCloud(p.pts, u)).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); const m = 0.3 / u; return [minOf(xs) - m, minOf(ys) - m, maxOf(xs) + m, maxOf(ys) + m] as [number, number, number, number]; });
   const inCloud = (q: Pt) => clouds.some((b) => q[0] >= b[0] && q[0] <= b[2] && q[1] >= b[1] && q[1] <= b[3]);
   // the leader of a cloud is a slanting line with one end at the cloud; the walls the cloud is drawn round stay
   const slanted = (p: DxfPath) => { const a = p.pts[0], b = p.pts[p.pts.length - 1], dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]); return Math.min(dx, dy) > 0.05 * Math.max(dx, dy); };
@@ -1180,7 +1181,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   // columns: small rectangular / round outlines; big or L-shaped ones (shear walls, lift cores) are walls
   const colAll = outermost(mergeColumnStrips(loops("columns", true).filter((p) => p.pts.length >= 3), tol)).map(({ p }) => {
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
-    const w = (Math.max(...xs) - Math.min(...xs)) * u, d = (Math.max(...ys) - Math.min(...ys)) * u, area = polyArea(p.pts) * u2;
+    const w = (maxOf(xs) - minOf(xs)) * u, d = (maxOf(ys) - minOf(ys)) * u, area = polyArea(p.pts) * u2;
     // round: many points, as wide as deep and about π/4 of its box; anything else that is not a rectangle is a wall
     const round = p.pts.length > 8 && Math.abs(w - d) <= 0.1 * Math.max(w, d) && area >= 0.7 * w * d && area <= 0.86 * w * d;
     return { p, w, d, perimeter: polyLength(p.pts, true) * u, area, round, isCol: area > 0 && w >= 0.1 && d >= 0.1 && w <= 4 && d <= 4 && (area >= 0.86 * w * d || round) };
@@ -1196,7 +1197,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   { const wp = of("walls");
     if (slabEarly.length && wp.length) {
       const xs = wp.flatMap((p) => p.pts.map((q) => q[0])), ys = wp.flatMap((p) => p.pts.map((q) => q[1]));
-      const wallBox = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+      const wallBox = (maxOf(xs) - minOf(xs)) * (maxOf(ys) - minOf(ys));
       if (slabEarly.reduce((s2, x) => s2 + x.a, 0) >= 0.25 * wallBox) {
         const rings = slabEarly.map((x) => x.p.pts);
         onFloor = (pts: Pt[]) => { const c: Pt = [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length]; return rings.some((r) => inside(c, r)) || nearRings(c, rings, 0.8 / u); };
@@ -1253,7 +1254,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   // the wall panels and gets no column set of its own
   { const wallRef = [...wallPolys, ...colWalls];
     const touches = (pts: Pt[]) => pts.some((q) => nearRings(q, wallRef, 0.03 / u) || wallRef.some((w) => inside(q, w)));
-    for (const c of colAll) if (c.isCol && wallRef.length && touches(c.p.pts)) { c.isCol = false; colWalls.push(c.p.pts); const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]); notes.push({ kind: "wall-column", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] }); } }
+    for (const c of colAll) if (c.isCol && wallRef.length && touches(c.p.pts)) { c.isCol = false; colWalls.push(c.p.pts); const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]); notes.push({ kind: "wall-column", box: [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)] }); } }
   const U = wallUnion([...wallPolys, ...colWalls], wallHoles);
   const UP = parapetPolys.length ? wallUnion(parapetPolys) : null;
   let looseLen = 0, unpairedLen = 0; const loose: Pt[][] = [];
@@ -1312,14 +1313,14 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     const ltKnown = model.paths.some((p) => p.dashed);
     const xLines = of("beams").filter((p) => !p.closed && p.pts.length === 2);
     for (const b of ltKnown ? xMarkedBoxes(xLines.filter((p) => p.dashed), 0.02 / u, 0.15 / u) : []) {
-      const xs = b.map((q) => q[0]), ys = b.map((q) => q[1]), bx = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+      const xs = b.map((q) => q[0]), ys = b.map((q) => q[1]), bx = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)];
       const w = (bx[2] - bx[0]) * u, h = (bx[3] - bx[1]) * u;
       if (w < 0.4 || h < 0.4 || w * h > 150) continue;
       const note = (model.texts ?? []).find((t) => t.x >= bx[0] && t.x <= bx[2] && t.y >= bx[1] && t.y <= bx[3] && /sunk|drop/i.test(t.text));
       sunkX.push({ depth: Number(note?.text.match(/(\d{2,3})/)?.[1] ?? 0), perimeter: 2 * (w + h), area: w * h, box: bx as [number, number, number, number] });
     }
     for (const b of xMarkedBoxes(ltKnown ? xLines.filter((p) => !p.dashed) : xLines, 0.02 / u)) {
-      const xs = b.map((q) => q[0]), ys = b.map((q) => q[1]), bx = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+      const xs = b.map((q) => q[0]), ys = b.map((q) => q[1]), bx = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)];
       const w = (bx[2] - bx[0]) * u, h = (bx[3] - bx[1]) * u;
       if (w < 0.4 || h < 0.4 || w * h > 150) continue;
       const inB = (x: number, y: number) => x >= bx[0] && x <= bx[2] && y >= bx[1] && y <= bx[3];
@@ -1371,7 +1372,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   }
   const sizeNear = (r: Pt[], wMm: number) => {
     const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]), pad = 0.6 / u;
-    const b = [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
+    const b = [minOf(xs) - pad, minOf(ys) - pad, maxOf(xs) + pad, maxOf(ys) + pad];
     const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
     // the label of this beam: inside its box, and its width matches the drawn width
     const hits = sizeTexts.filter((x) => x.t.x >= b[0] && x.t.x <= b[2] && x.t.y >= b[1] && x.t.y <= b[3] && Math.abs(x.sz!.b - wMm) <= 0.5 * x.sz!.b);
@@ -1379,7 +1380,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     if (hits[0]) return hits[0].sz;
     // no label at this piece: a long beam is cut into pieces at every crossing and labelled once — look along its axis (≤ 8 m)
     const w = b[2] - b[0], h = b[3] - b[1], along = w >= h, reach = 8 / u, across = 0.8 / u;
-    const b2 = along ? [b[0] - reach, Math.min(...ys) - across, b[2] + reach, Math.max(...ys) + across] : [Math.min(...xs) - across, b[1] - reach, Math.max(...xs) + across, b[3] + reach];
+    const b2 = along ? [b[0] - reach, minOf(ys) - across, b[2] + reach, maxOf(ys) + across] : [minOf(xs) - across, b[1] - reach, maxOf(xs) + across, b[3] + reach];
     const far = sizeTexts.filter((x) => x.t.x >= b2[0] && x.t.x <= b2[2] && x.t.y >= b2[1] && x.t.y <= b2[3] && Math.abs(x.sz!.b - wMm) <= 0.5 * x.sz!.b);
     far.sort((p1, p2) => Math.hypot(p1.t.x - cx, p1.t.y - cy) - Math.hypot(p2.t.x - cx, p2.t.y - cy));
     return far[0]?.sz ?? null;
@@ -1451,7 +1452,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       let polys: Pt[][] = [r];
       try { if (solidU.length) { const diff = polygonClipping.difference([closeRing(r)] as Polygon, solidU); polys = diff.map((poly) => poly[0].slice(0, -1) as Pt[]); clearA = diff.reduce((s2, poly) => s2 + Math.abs(polyArea(poly[0].slice(0, -1) as Pt[])) - poly.slice(1).reduce((h, q) => h + Math.abs(polyArea(q.slice(0, -1) as Pt[])), 0), 0) * u2; } } catch { /* keep the full area */ }
       const k = `${sz.b}x${sz.d}`;
-      beamParts.push({ k, b: sz.b, d: sz.d, ring: r, polys, bb: [Math.min(...r.map((q) => q[0])), Math.min(...r.map((q) => q[1])), Math.max(...r.map((q) => q[0])), Math.max(...r.map((q) => q[1]))] });
+      beamParts.push({ k, b: sz.b, d: sz.d, ring: r, polys, bb: [minOf(r.map((q) => q[0])), minOf(r.map((q) => q[1])), maxOf(r.map((q) => q[0])), maxOf(r.map((q) => q[1]))] });
       const g = sized.get(k) ?? { b: sz.b, d: sz.d, len: 0, bottom: 0, count: 0, inner: 0, outer: 0, lintel: 0 };
       g.len += clearA / (sz.b / 1000); g.bottom += clearA; g.count++; sized.set(k, g);
     }
@@ -1461,7 +1462,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   if (assumedBeams.length) {
     const xs = assumedBeams.flatMap((x) => x.ring.map((q) => q[0])), ys = assumedBeams.flatMap((x) => x.ring.map((q) => q[1]));
     const by = new Map<string, number>(); for (const x of assumedBeams) by.set(`${x.b}×${x.d}`, (by.get(`${x.b}×${x.d}`) ?? 0) + 1);
-    notes.push({ kind: "beam-size", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], n: assumedBeams.length, text: [...by].map(([k, n]) => `${n} × ${k}`).join(", ") });
+    notes.push({ kind: "beam-size", box: [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)], n: assumedBeams.length, text: [...by].map(([k, n]) => `${n} × ${k}`).join(", ") });
   }
 
   // slab: slab layer outlines; if none, the outer face of the walls (with columns and beams: a framed building's
@@ -1472,7 +1473,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   // a slab layer that covers only a small corner of the walls (a detail, a balcony) is not the floor outline
   if (slab.length && wallPaths.length) {
     const xs = wallPaths.flatMap((p) => p.pts.map((q) => q[0])), ys = wallPaths.flatMap((p) => p.pts.map((q) => q[1]));
-    const wallBox = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    const wallBox = (maxOf(xs) - minOf(xs)) * (maxOf(ys) - minOf(ys));
     if (slab.reduce((s2, x) => s2 + x.a, 0) < 0.25 * wallBox) slab = [];
   }
   if (!slab.length && (wallPaths.length || beamRings.length)) {
@@ -1489,7 +1490,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     if (misc.length && wallPaths.length) {
       const o2 = outlineFromWalls([...base, ...misc], 1 / u);
       const wx = wallPaths.flatMap((p) => p.pts.map((q) => q[0])), wy = wallPaths.flatMap((p) => p.pts.map((q) => q[1]));
-      const m2 = 2 / u, bx = [Math.min(...wx) - m2, Math.min(...wy) - m2, Math.max(...wx) + m2, Math.max(...wy) + m2];
+      const m2 = 2 / u, bx = [minOf(wx) - m2, minOf(wy) - m2, maxOf(wx) + m2, maxOf(wy) + m2];
       const within = o2.loops.every((l) => l.every((q) => q[0] >= bx[0] && q[0] <= bx[2] && q[1] >= bx[1] && q[1] <= bx[3]));
       if (within && o2.area > o.area * 1.02) o = o2;
     }
@@ -1528,8 +1529,8 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       if (kept.some((k) => inside(c, k)) || !pts.some((q) => nearRings(q, kept, 0.3 / u))) return false;
       return !bayCands.some((o) => o !== pts && Math.abs(polyArea(o)) > Math.abs(polyArea(pts)) && pts.every((q) => inside(q, o) || nearRings(q, [o], 0.02 / u)));   // nested: outer only
     });
-    for (const b2 of bays) { const xs = b2.map((q) => q[0]), ys = b2.map((q) => q[1]); notes.push({ kind: "bay", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] }); }
-    for (const k2 of kept) if (!walled(k2)) { const xs = k2.map((q) => q[0]), ys = k2.map((q) => q[1]); notes.push({ kind: "unwalled", box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] }); }
+    for (const b2 of bays) { const xs = b2.map((q) => q[0]), ys = b2.map((q) => q[1]); notes.push({ kind: "bay", box: [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)] }); }
+    for (const k2 of kept) if (!walled(k2)) { const xs = k2.map((q) => q[0]), ys = k2.map((q) => q[1]); notes.push({ kind: "unwalled", box: [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)] }); }
     kept.push(...bays);
     const use = kept.length ? kept : outer;
     if (use.length) { slab = use.map((pts) => ({ p: { layer: "slab", pts, closed: true } as DxfPath, a: Math.abs(polyArea(pts)) })); slabFromWalls = true; }
@@ -1602,14 +1603,14 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   const wallClosed = [...wallPaths.filter((p) => p.closed && p.pts.length >= 3).map((p) => p.pts), ...colWalls];   // incl. a second outline of the same column on a column layer
   const inWallOutline = (c: { p: DxfPath }) => {
     const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]);
-    const m: Pt = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    const m: Pt = [(minOf(xs) + maxOf(xs)) / 2, (minOf(ys) + maxOf(ys)) / 2];
     return wallClosed.some((w) => inside(m, w)) && U.rings.some((r) => inside(m, r));
   };
   // when the slab is the outer face of the walls, a column standing clear outside it (a neighbouring block / drawing
   // overlapping this one, or a column drawn on an overlay view) is not on this floor
   const offSlab = (c: { p: DxfPath }) => {
     if (!slabFromWalls || !slab.length) return false;
-    const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]); const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const xs = c.p.pts.map((q) => q[0]), ys = c.p.pts.map((q) => q[1]); const cx = (minOf(xs) + maxOf(xs)) / 2, cy = (minOf(ys) + maxOf(ys)) / 2;
     const m = 1 / u;
     return !slab.some((x) => inside([cx, cy], x.p.pts) || [[m, 0], [-m, 0], [0, m], [0, -m]].some(([dx, dy]) => inside([cx + dx, cy + dy], x.p.pts)));
   };
@@ -1738,7 +1739,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
             const sorted = [...fl].sort((p1, p2) => p1.span![0] - p2.span![0]), per = fl.length / k;
             for (let g = 0; g < k; g++) {
               const part = sorted.slice(g * per, (g + 1) * per);
-              const c0 = Math.min(...part.map((f) => f.span![0])), c1 = Math.max(...part.map((f) => f.span![1]));
+              const c0 = minOf(part.map((f) => f.span![0])), c1 = maxOf(part.map((f) => f.span![1]));
               const nb: [number, number, number, number] = vert ? [b[0], c0, b[2], c1] : [c0, b[1], c1, b[3]];
               ns.push(nb); nm.push({ ...m, box: nb, flights: part, landingM2: Math.round((m.landingM2 / k) * 100) / 100 });
             }
@@ -1760,7 +1761,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
         const near = arrows.filter((t) => t.x >= b[0] - e && t.x <= b[2] + e && t.y >= b[1] - e && t.y <= b[3] + e).map((t) => (run === "x" ? t.x : t.y));
         const floorLow = near.length ? near.reduce((x, y) => x + y, 0) / near.length <= mid : true;
         const avgW = m.flights.reduce((x, f) => x + f.width, 0) / m.flights.length / 1000 / u;        // drawing units
-        const runLen = Math.max(...m.flights.map((f) => f.treads * f.tread)) / 1000 / u;
+        const runLen = maxOf(m.flights.map((f) => f.treads * f.tread)) / 1000 / u;
         const need = runLen + 0.8 * avgW;
         let nb = b;
         if (hi - lo < need) {
@@ -1826,9 +1827,9 @@ function formworkCaptionBoxes(texts: DxfText[], boxes: [number, number, number, 
     if (!FORMWORK_CAPTION.test(cap.text) || cap.text.length > 60 || /not\s+(for|in)|excluded|conventional/i.test(cap.text)) continue;
     const under = boxes.filter((b) => b[3] <= cap.y + 2 * M && b[3] >= cap.y - 40 * M && Math.abs((b[0] + b[2]) / 2 - cap.x) <= 250 * M);
     if (!under.length) continue;
-    const rowTop = Math.max(...under.map((b) => b[3]));
+    const rowTop = maxOf(under.map((b) => b[3]));
     const row = under.filter((b) => Math.abs(b[3] - rowTop) <= 15 * M);
-    out.push([Math.min(...row.map((b) => b[0])) - 5 * M, Math.min(...row.map((b) => b[1])) - 40 * M, Math.max(...row.map((b) => b[2])) + 5 * M, rowTop + 2 * M]);
+    out.push([minOf(row.map((b) => b[0])) - 5 * M, minOf(row.map((b) => b[1])) - 40 * M, maxOf(row.map((b) => b[2])) + 5 * M, rowTop + 2 * M]);
   }
   return out;
 }
@@ -2027,7 +2028,7 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
     const box: [number, number, number, number] = [bx0 + i0 * C, by0 + j0 * C, bx0 + (i1 + 1) * C, by0 + (j1 + 1) * C];
     out.push({ box, count: n, w: (box[2] - box[0]) * unitToM, h: (box[3] - box[1]) * unitToM, score: n });
   }
-  const max = Math.max(...out.map((o) => o.count));
+  const max = maxOf(out.map((o) => o.count));
   const texts = model.texts ?? [];
   const kept = out.filter((o) => o.count >= max * 0.08 && o.w >= 3 && o.h >= 3);
   const areaOf = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
@@ -2153,7 +2154,7 @@ export function sheetFrames(model: DxfModel, unitToM: number): Box[] {
   for (const p of model.paths) {
     if (!p.closed || p.pts.length < 4 || p.pts.length > 5) continue;
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
-    const b: Box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const b: Box = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)];
     const w = (b[2] - b[0]) * unitToM, h = (b[3] - b[1]) * unitToM;
     if (Math.min(w, h) < 10 || Math.max(w, h) / Math.min(w, h) < 1.2 || Math.max(w, h) / Math.min(w, h) > 2.2) continue;
     // a rectangle: every corner on the box
@@ -2390,7 +2391,7 @@ function markFormworkScope(parts: DrawingPart[], texts: DxfText[], unitToM: numb
     if (idx < 0) continue;
     for (let i = idx + 1; i < sameRow.length; i++) { if (sameRow[i].box[0] - sameRow[i - 1].box[2] > 25 * M) break; row.add(sameRow[i]); }
     for (let i = idx - 1; i >= 0; i--) { if (sameRow[i + 1].box[0] - sameRow[i].box[2] > 25 * M) break; row.add(sameRow[i]); }
-    const xs0 = Math.min(...[...row].map((p) => p.box[0])), xs1 = Math.max(...[...row].map((p) => p.box[2])), yb = Math.min(...[...row].map((p) => p.box[1]));
+    const xs0 = minOf([...row].map((p) => p.box[0])), xs1 = maxOf([...row].map((p) => p.box[2])), yb = minOf([...row].map((p) => p.box[1]));
     // small pieces inside the row's width and up to 40 m under it (sections / details of the same set)
     for (const p of parts) if (!row.has(p) && p.box[0] >= xs0 - 5 * M && p.box[2] <= xs1 + 5 * M && p.box[3] <= yb + 2 * M && p.box[3] >= yb - 40 * M) row.add(p);
     // pieces lying inside a row drawing (a plan inside its sheet frame)

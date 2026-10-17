@@ -28,6 +28,7 @@ import { takeoffChecks } from "@/lib/floor-plans/takeoff-checks";
 import { describeRules, DEFAULT_RULES, type MeasureRules } from "@/lib/floor-plans/rules";
 import { UseInQuotation, type QuoteOption } from "./use-in-quotation";
 import { SendToDesign, type DesignOption } from "./send-to-design";
+import { minOf, maxOf } from "@/lib/util/minmax";
 
 type Tool = "pan" | "zoom" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft" | "separate";
 type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; ai_url?: string | null; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
@@ -1181,7 +1182,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
           {canEdit ? (() => {
             const st = t.shapes.find((x) => x.kind === "opening" && /stair/i.test(x.label ?? "") && x.pts.length >= 3);
             let well: { l: number; w: number } | null = null;
-            if (st && mpp) { const xs = st.pts.map((q) => q[0]), ys = st.pts.map((q) => q[1]); const a1 = (Math.max(...xs) - Math.min(...xs)) * mpp * 1000, b1 = (Math.max(...ys) - Math.min(...ys)) * mpp * 1000; well = { l: Math.round(Math.max(a1, b1)), w: Math.round(Math.min(a1, b1)) }; }
+            if (st && mpp) { const xs = st.pts.map((q) => q[0]), ys = st.pts.map((q) => q[1]); const a1 = (maxOf(xs) - minOf(xs)) * mpp * 1000, b1 = (maxOf(ys) - minOf(ys)) * mpp * 1000; well = { l: Math.round(Math.max(a1, b1)), w: Math.round(Math.min(a1, b1)) }; }
             return <StairBuilder floorHeightMm={Math.round(t.params.floorHeight * 1000)} well={well} onAdd={(row) => update((p) => ({ ...p, stairs: [...(p.stairs ?? []), { ...row, label: `ST${(p.stairs ?? []).length + 1}` }] }))} />;
           })() : null}
         </Panel>
@@ -1319,12 +1320,12 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
 /* ---------- helpers ---------- */
 function colSize(pts: Pt[], mpp: number) {
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-  return `${Math.round((Math.max(...xs) - Math.min(...xs)) * mpp * 1000)} × ${Math.round((Math.max(...ys) - Math.min(...ys)) * mpp * 1000)} mm`;
+  return `${Math.round((maxOf(xs) - minOf(xs)) * mpp * 1000)} × ${Math.round((maxOf(ys) - minOf(ys)) * mpp * 1000)} mm`;
 }
 function centroid(pts: Pt[]): Pt {
   if (pts.length === 2) return [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2];
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+  return [(minOf(xs) + maxOf(xs)) / 2, (minOf(ys) + maxOf(ys)) / 2];
 }
 function distSeg(p: Pt, a: Pt, b: Pt) {
   const dx = b[0] - a[0], dy = b[1] - a[1]; const l2 = dx * dx + dy * dy;
