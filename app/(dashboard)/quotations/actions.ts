@@ -108,6 +108,7 @@ const quickQuoteSchema = z.object({
   leadId: z.string().uuid().optional(),
   validUntil: z.string().optional(),
   nalcoRatePerKg: z.coerce.number().positive().optional(),
+  ratePerSqm: z.coerce.number().positive().optional(),     // a rate agreed for this job, in place of the company rate
 });
 
 export async function createQuickQuote(formData: FormData): Promise<ActionResult> {
@@ -125,6 +126,7 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
     leadId: formData.get("leadId") || undefined,
     validUntil: formData.get("validUntil") || undefined,
     nalcoRatePerKg: formData.get("nalcoRatePerKg") || undefined,
+    ratePerSqm: formData.get("ratePerSqm") || undefined,
   });
 
   if (!parsed.success) {
@@ -183,6 +185,13 @@ export async function createQuickQuote(formData: FormData): Promise<ActionResult
 
   const extra = contactColumns(contact.data);
   if (Object.keys(extra).length > 0) await supabase.from("quotations").update(extra).eq("id", data as string);
+  // the job's own rate: reprice this quotation with it (the company rate stays as it is for every other quotation)
+  if (parsed.data.ratePerSqm) {
+    const { data: q } = await supabase.from("quotations").select("gst_percentage").eq("id", data as string).maybeSingle();
+    const sub = Math.round(parsed.data.areaSqm * parsed.data.ratePerSqm * 100) / 100;
+    const gst = Number(q?.gst_percentage ?? 18);
+    await supabase.from("quotations").update({ quick_rate_per_sqm: parsed.data.ratePerSqm, total_amount: sub, total_with_gst: Math.round(sub * (1 + gst / 100) * 100) / 100 }).eq("id", data as string);
+  }
 
   // made from the measured blocks of a project → one line per block (and the second wall option, when quoted)
   const blocksRaw = String(formData.get("blocks") ?? "");

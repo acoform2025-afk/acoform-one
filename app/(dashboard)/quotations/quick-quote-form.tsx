@@ -36,7 +36,10 @@ export function QuickQuoteForm({ leads, rates, nextCode, leadId, prefill, areaDe
   const router = useRouter();
 
   const activeRate = rates.find((r) => r.formwork_type === formworkType);
-  const subtotal = activeRate && areaSqm ? Number(areaSqm) * Number(activeRate.rate_per_sqm) : null;
+  // a rate agreed for this job (special panels, a negotiated price) replaces the company rate on this quotation only
+  const [rateOverride, setRateOverride] = useState("");
+  const rateUsed = Number(rateOverride) > 0 ? Number(rateOverride) : activeRate ? Number(activeRate.rate_per_sqm) : null;
+  const subtotal = rateUsed !== null && areaSqm ? Number(areaSqm) * rateUsed : null;
   const gstAmount = subtotal !== null ? subtotal * 0.18 : null;
   const estimatedTotal = subtotal !== null ? subtotal + (gstAmount ?? 0) : null;
 
@@ -105,14 +108,18 @@ export function QuickQuoteForm({ leads, rates, nextCode, leadId, prefill, areaDe
           <input name="areaSqm" type="number" step="0.01" required value={areaSqm} onChange={(e) => { setAreaSqm(e.target.value); setAreaTouched(true); }} placeholder="5000" className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none" />
         </div>
         <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Rate for this quotation (₹/sqm, optional)</label>
+          <input name="ratePerSqm" type="number" step="0.01" min="0" value={rateOverride} onChange={(e) => setRateOverride(e.target.value)} placeholder={activeRate ? `company rate ₹${Number(activeRate.rate_per_sqm).toFixed(0)}` : "e.g. 14000"} className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none" />
+        </div>
+        <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-graphite-400">Nalco rate ref. (₹/kg, optional)</label>
           <input name="nalcoRatePerKg" type="number" step="0.01" placeholder="e.g. 393.85" className="rounded-md border border-graphite-700 bg-graphite-800 px-3.5 py-2.5 text-sm text-graphite-100 focus:border-signal-amber focus:outline-none" />
         </div>
       </div>
 
-      {activeRate ? (
+      {rateUsed !== null ? (
         <div className="mt-3 rounded-md border border-graphite-800 bg-graphite-950 p-3 text-xs">
-          <div className="flex justify-between text-graphite-400"><span>Rate</span><span className="font-mono">₹{Number(activeRate.rate_per_sqm).toFixed(2)}/sqm</span></div>
+          <div className="flex justify-between text-graphite-400"><span>Rate{Number(rateOverride) > 0 ? " (this quotation)" : ""}</span><span className="font-mono">₹{rateUsed.toFixed(2)}/sqm</span></div>
           {subtotal !== null && (
             <>
               <div className="mt-1 flex justify-between text-graphite-400"><span>Subtotal</span><span className="font-mono">₹{subtotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span></div>
