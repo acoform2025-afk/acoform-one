@@ -57,6 +57,11 @@ export function suggestLayerRole(name: string): Role {
   if (/砌块|砖/.test(n) && !/现浇/.test(n)) return "ignore";
   // beam marks / numbers / depth notes and slab arrows are annotation, not beams or slab ("BEAM NOS", "B_NO", "BEAM DEPTH 750", "S-ARO SLAB")
   if (/(^|[^a-z])(nos?|no\.|marks?|tags?|labels?|depth|aro|arrows?)([^a-z]|$)/i.test(name.replace(/^.*\$0\$/, "").replace(/[_]/g, " "))) return "ignore";
+  // structural consultants' layer sets: "S-C3-ABOVE HP TO 20" / "S-C1-UP TO BAS" (column group with its floor range)
+  // and "S_B_300x600" / "S-B-230X750" (beams by size); "S_B_PROJ." (projections), "S_B_SB" (slab bands) stay annotation
+  const bare = name.trim().replace(/^.*\$0\$/, "");
+  if (/^s[-_ ]?c\d{1,2}([-_ ]|$)/i.test(bare)) return "columns";
+  if (/^s[-_ ]?b[-_ ]?\d{3,4}\s*[x×*]\s*\d{3,4}/i.test(bare)) return "beams";
   // a column-schedule layer named by the column size ("C650X1650", "C900X1500", "COL 450x600"): the columns of that size
   if (/^(c|col|column)[-_ ]?\d{3,4}\s*[x×*]\s*\d{3,4}$/i.test(name.trim().replace(/^.*\$0\$/, ""))) return "columns";
   if (/shaft|cut-?out|opening|(^|-)duct|(^|-)lift|stair-?open|洞|管井|风井|电梯井/.test(n)) return "opening";
