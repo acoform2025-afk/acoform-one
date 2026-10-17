@@ -1088,11 +1088,16 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
   let main = -1, best = -1; for (const [g, a] of area) if (a > best) { best = a; main = g; }
   if (main < 0) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size, notes: capNotes };
   const onEl = new Map<DxfPath, boolean>();
+  // the region's own extent: the floor grows beyond the region only within one gap of it (a region drawn a little
+  // tight), never across the sheet to the next plan or the site plan drawn beside it in the same file
+  let rb: [number, number, number, number] | null = null;
+  if (keep) els.forEach((e, i) => { if (find(i) === main && inReg(e)) rb = rb ? [Math.min(rb[0], e.box[0]), Math.min(rb[1], e.box[1]), Math.max(rb[2], e.box[2]), Math.max(rb[3], e.box[3])] : [...e.box]; });
+  const nearReg = (b: [number, number, number, number]) => !rb || (b[0] >= rb[0] - gap && b[2] <= rb[2] + gap && b[1] >= rb[1] - gap && b[3] <= rb[3] + gap);
   let count = 0, dropped = 0;
   // what was left out, grouped by island (one note per island inside the region) — the review screen shows these
   const droppedBy = new Map<number, { box: [number, number, number, number]; n: number }>();
-  els.forEach((e, i) => { if (e.link) return; const g = find(i); const ok = (g === main && (inReg(e) || e.strong)) || forced(e.box); onEl.set(e.p, ok); if (ok) count++; else { dropped++; if (inReg(e)) { const d = droppedBy.get(g); if (d) { d.n++; d.box = [Math.min(d.box[0], e.box[0]), Math.min(d.box[1], e.box[1]), Math.max(d.box[2], e.box[2]), Math.max(d.box[3], e.box[3])]; } else droppedBy.set(g, { box: [...e.box] as [number, number, number, number], n: 1 }); } } });
-  const mainBoxes = els.filter((e, i) => (find(i) === main || forced(e.box)) && !e.link).map((e) => e.box);
+  els.forEach((e, i) => { if (e.link) return; const g = find(i); const ok = (g === main && (inReg(e) || (e.strong && nearReg(e.box)))) || forced(e.box); onEl.set(e.p, ok); if (ok) count++; else { dropped++; if (inReg(e)) { const d = droppedBy.get(g); if (d) { d.n++; d.box = [Math.min(d.box[0], e.box[0]), Math.min(d.box[1], e.box[1]), Math.max(d.box[2], e.box[2]), Math.max(d.box[3], e.box[3])]; } else droppedBy.set(g, { box: [...e.box] as [number, number, number, number], n: 1 }); } } });
+  const mainBoxes = els.filter((e, i) => ((find(i) === main && nearReg(e.box)) || forced(e.box)) && !e.link).map((e) => e.box);
   const near = (pts: Pt[]) => pts.some((q) => mainBoxes.some((b) => q[0] >= b[0] - gap && q[0] <= b[2] + gap && q[1] >= b[1] - gap && q[1] <= b[3] + gap));
   const notes: ReadNote[] = [...capNotes, ...[...droppedBy.values()].map((d) => ({ kind: "dropped" as const, box: d.box, n: d.n }))];
   return { on: (p) => (detail.has(p) && !forced([p.pts[0][0], p.pts[0][1], p.pts[0][0], p.pts[0][1]]) ? false : onEl.get(p)), near, count, dropped: dropped + detail.size, notes };
