@@ -13,7 +13,7 @@ import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type S
 import { minOf, maxOf } from "@/lib/util/minmax";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean; dashed?: boolean };   // dashed: drawn with a broken linetype (hidden / dashed)
-export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole; colStrip?: boolean };   // colStrip: a layer named by a size (750, 1200 …) whose filled outlines are built onto the columns — part of the columns   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
+export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole; colStrip?: boolean; skipped?: number };   // skipped: lines of a door / window / furniture / dimension layer, not drawn (doors and windows are read as openings in the walls)   // colStrip: a layer named by a size (750, 1200 …) whose filled outlines are built onto the columns — part of the columns   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
 /** A hatch boundary (filled area: columns, sunk / raised zones, cut-outs) or a leader line — kept apart from the lines so the reading of walls / beams is not changed by them. */
 export type DxfFill = DxfPath & { kind: "hatch" | "leader" };
 export type DxfText = { text: string; x: number; y: number; h: number; layer?: string; r?: number; al?: "c" | "r"; kind?: "dim" | "attr" };   // r: rotation (radians, drawing axes); kind: a dimension value / a block attribute (grid bubble, tag)
@@ -21,7 +21,7 @@ export type DxfText = { text: string; x: number; y: number; h: number; layer?: s
 export type DxfView = { name: string; box: [number, number, number, number] };
 /** A table pasted from Excel (OLE object): its cells, in its frame (drawing units). */
 export type DxfTable = { layer: string; box: [number, number, number, number]; rows: string[][] };
-export type DxfModel = { tables?: DxfTable[]; fills?: DxfFill[]; texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; unitsGuessed: boolean; bbox: [number, number, number, number] };
+export type DxfModel = { tables?: DxfTable[]; fills?: DxfFill[]; texts?: DxfText[]; views?: DxfView[]; sections?: SectionLevels[]; rails?: DxfPath[]; dw?: (DxfPath & { kind: "door" | "window" })[]; paths: DxfPath[]; layers: DxfLayerInfo[]; units: DxfUnits; truncated?: number; unitsGuessed: boolean; bbox: [number, number, number, number] };
 
 type AnyEnt = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type Xf = { a: number; b: number; c: number; d: number; e: number; f: number }; // x' = a x + c y + e ; y' = b x + d y + f
@@ -349,6 +349,7 @@ export function readDxf(raw: string): DxfModel {
   const sections: SectionLevels[] = [];
   const secRanges = new Map<string, [number, number][]>();
   const noiseCache = new Map<string, boolean>();
+  const skippedBy = new Map<string, number>();   // lines left out per door / window / furniture / dimension layer
   const extentPts: number[] = [];
   const dwCache = new Map<string, "door" | "window" | null>();
   const dw: (DxfPath & { kind: "door" | "window" })[] = [];
@@ -366,9 +367,13 @@ export function readDxf(raw: string): DxfModel {
     if (k === "CONTINUOUS" || k === "BYLAYER" || k === "BYBLOCK") return false;
     return ltDashed[k] ?? LT_NAME.test(lt);
   };
+  // the reading stops only on a huge file (many sheets of a whole project): the drawing is then marked as cut, so the
+  // measuring screen can say so instead of silently missing layers. Counted in points, not paths (a long polyline
+  // weighs more than a line); ~12 million points is far above any one project's drawing set
+  const MAX_POINTS = 12_000_000; let nPoints = 0; let truncated = false;
   const walk = (ents: AnyEnt[], m: Xf, parentLayer: string | null, depth: number, textOnly = false, parentLt?: string) => {
     for (const e of ents) {
-      if (paths.length > 150000) return;
+      if (nPoints > MAX_POINTS) { truncated = true; return; }
       if (textOnly && e.type !== "TEXT" && e.type !== "MTEXT" && e.type !== "INSERT") continue;
       if (e.inPaperSpace) continue;
       const layer: string = (e.layer === "0" || !e.layer) && parentLayer ? parentLayer : (e.layer ?? "0");
@@ -378,7 +383,8 @@ export function readDxf(raw: string): DxfModel {
       const ltName = !e.lt || /^bylayer$/i.test(e.lt) ? layerLt[layer] : /^byblock$/i.test(e.lt) ? parentLt : e.lt;
       const push = (pts: Pt[], closed: boolean) => {
         if (pts.length < 2) return;
-        if (!noise) { paths.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed, ...(isDashed(ltName) ? { dashed: true } : {}) }); return; }
+        if (!noise) { nPoints += pts.length; paths.push({ layer, pts: pts.map(([x, y]) => ap(m, x, y)), closed, ...(isDashed(ltName) ? { dashed: true } : {}) }); return; }
+        skippedBy.set(layer, (skippedBy.get(layer) ?? 0) + 1);
         // door / window lines are kept apart: where they sit inside a wall they mark an opening in it
         const dk = dwCache.get(layer) ?? (dwCache.set(layer, doorWindowKind(layer)), dwCache.get(layer)!);
         if (dk && dw.length < 80_000) dw.push({ layer, kind: dk, pts: pts.map(([x, y]) => ap(m, x, y)), closed });
@@ -514,6 +520,7 @@ export function readDxf(raw: string): DxfModel {
   const byLayer = new Map<string, DxfLayerInfo>();
   const info = (l: string) => byLayer.get(l) ?? (byLayer.set(l, { name: l, count: 0, closed: 0, suggested: suggestRole(l) }), byLayer.get(l)!);
   for (const p of paths) { const li = info(p.layer); li.count++; if (p.closed) li.closed++; }
+  for (const [l, n] of skippedBy) info(l).skipped = n;
   // a layer named as walls / columns that holds only circles (room-type tags, grid bubbles) is not structure
   {
     const circ = new Map<string, number>();
@@ -584,7 +591,7 @@ export function readDxf(raw: string): DxfModel {
     }
   }
 
-  return { tables, fills, texts, views, sections, dw, rails, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count || (b.texts ?? 0) + (b.fills ?? 0) - (a.texts ?? 0) - (a.fills ?? 0)), units, unitsGuessed, bbox: [x0, y0, x1, y1] };
+  return { tables, fills, texts, views, sections, dw, rails, paths, layers: [...byLayer.values()].sort((a, b) => b.count - a.count || (b.texts ?? 0) + (b.fills ?? 0) - (a.texts ?? 0) - (a.fills ?? 0)), units, unitsGuessed, bbox: [x0, y0, x1, y1], ...(truncated ? { truncated: paths.length } : {}) };
 }
 
 /** Picture of the plan: longest side = maxSide px. Returns px → drawing-unit factor. */

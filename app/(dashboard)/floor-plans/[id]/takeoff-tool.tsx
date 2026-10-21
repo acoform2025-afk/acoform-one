@@ -106,6 +106,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
   const [pdfPages, setPdfPages] = useState(1);
   const [layers, setLayers] = useState<DxfModel["layers"]>([]);
   const [unitsGuessed, setUnitsGuessed] = useState(false);
+  const [truncated, setTruncated] = useState<number | null>(null);   // the drawing was cut while reading (huge file)
   const [tool, setTool] = useState<Tool>(canEdit ? "slab" : "pan");
   const [draft, setDraft] = useState<Pt[]>([]);
   const [hover, setHover] = useState<{ pt: Pt; snapped: boolean } | null>(null);
@@ -231,7 +232,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
           const frame = dxfFrame(model, MAX_SIDE); frameRef.current = frame;
           const c = canvasRef.current!; c.width = frame.width; c.height = frame.height;
           drawDxfNow(roles);
-          setLayers(model.layers); setUnitsGuessed(model.unitsGuessed && !saved.dxf?.units);
+          setLayers(model.layers); setUnitsGuessed(model.unitsGuessed && !saved.dxf?.units); setTruncated(model.truncated ?? null);
           // keep everything already saved for the drawing (plan region…) — only units / layer roles are filled in
           setT((p) => ({ ...p, dxf: { ...(p.dxf ?? {}), units, layerRoles: roles, wallsDrawn: p.dxf?.wallsDrawn ?? "faces" }, metersPerPx: frame.unitsPerPx * UNIT_TO_M[units] }));
           dims = { w: frame.width, h: frame.height };
@@ -1003,6 +1004,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
                 </select>
               </Field>
               {unitsGuessed ? <p className="col-span-2 text-xs text-signal-amber">The file doesn&apos;t say its units — we guessed {t.dxf.units}. Check one known dimension.</p> : null}
+              {truncated ? <p className="col-span-2 text-xs text-signal-red">This file is too big to read whole: the reading stopped after {truncated.toLocaleString("en-IN")} lines, so sheets and layers are missing. Save the floor you need as its own DWG and upload that.</p> : null}
             </div>
           ) : (
             <p className="text-xs text-graphite-400">
@@ -1083,7 +1085,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
                       {hidden[l.name] ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                     </button>
                     <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: ROLE_COLOR[role] }} />
-                    <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({[l.count ? `${l.count}` : "", l.texts ? `${l.texts} txt` : "", l.fills ? `${l.fills} hatch` : ""].filter(Boolean).join(" · ") || 0})</span></span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-graphite-200" title={l.name}>{l.name} <span className="text-graphite-500">({[l.count ? `${l.count}` : "", l.texts ? `${l.texts} txt` : "", l.fills ? `${l.fills} hatch` : "", l.skipped ? `${l.skipped} not drawn` : ""].filter(Boolean).join(" · ") || 0})</span>{l.skipped && !l.count ? <span className="ml-1 text-[10px] text-graphite-500" title="Doors, windows, furniture, dimensions and hatches are not formwork: their lines are left out of the picture. Door and window lines inside a wall still mark the opening in it.">· doors / windows / furniture, read as openings only</span> : null}</span>
                     <select value={role} disabled={!canEdit} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-0.5 text-xs text-graphite-100"
                       onChange={(e) => { const r = e.target.value as LayerRole; update((p) => ({ ...p, dxf: { ...p.dxf!, layerRoles: { ...p.dxf!.layerRoles, [l.name]: r } } })); setLayerVersion((v) => v + 1);
                         // remembered for the next drawing with a layer of this name (the company dictionary)
