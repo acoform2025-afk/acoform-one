@@ -10,7 +10,7 @@ import { statedLevels, type Level } from "./building";
 import { columnSchedules, scheduleSummary, type ColumnSchedule } from "./column-schedule";
 import type { SectionLevels } from "./section-read";
 
-export const FACTS_V = 1;
+export const FACTS_V = 2;   // 2: level ladders with dotted marks, sections on sheets, column schedules
 export type BeamSize = { b: number; d: number };
 export type DrawingFacts = {
   v: number; at: string;

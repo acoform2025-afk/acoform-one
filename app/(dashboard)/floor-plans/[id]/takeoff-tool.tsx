@@ -437,7 +437,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     if (levelsDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size || (t.building && (t.building.edited || !t.building.levels.every((l) => l.src === "assumed"))) || t.parentPlan || !t.auto?.done || !parts.length) return;
     levelsDone.current = true;
     const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n);
-    if (b) update((p) => ({ ...p, building: b }));
+    if (b) update((p) => { const n = floorsFrom(b); return { ...p, building: b, ...(n ? { params: { ...p.params, floors: n } } : {}) }; });
   }, [canEdit, isDxf, t.dxf, t.building, t.parentPlan, t.auto?.done, t.params.floors, t.params.floorHeight, t.params.slabMm, size, parts.length, currentPart?.n, readLevels, update]);
   // automatic: pick the typical floor plan (most walls + "typical … plan" title), read floors & floor height from the drawing
   const detect = useCallback((force: boolean) => {
@@ -473,11 +473,12 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     const bld = force || !t.building || !t.building.edited ? readLevels({ floors: floors ?? t.params.floors, floorMm: fh ?? Math.round((t.params.floorHeight || 3) * 1000), slabMm: slabMm ?? t.params.slabMm }, pickedPart?.n) : null;
     if (bld) notes.push(`${bld.levels.length} levels (${bld.note})${bld.questions.length ? ` · ${bld.questions.length} questions for the architect / structure / client` : ""}`);
     const note = notes.length ? notes.join(" · ") + "." : undefined;
+    const nFl = floorsFrom(bld);
     update((pp) => ({
       ...pp,
       ...(bld ? { building: bld } : {}),
       auto: { done: true, note },
-      params: { ...pp.params, ...(floors ? { floors } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}), ...(slabMm ? { slabMm } : {}), ...(beamDepthMm ? { beamDepthMm } : {}) },
+      params: { ...pp.params, ...(floors ? { floors } : nFl ? { floors: nFl } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}), ...(slabMm ? { slabMm } : {}), ...(beamDepthMm ? { beamDepthMm } : {}) },
       // "read again": the layers are set again as the app reads them now (a plan read by an older version keeps no stale layer roles)
       dxf: pp.dxf ? { ...pp.dxf, ...(fresh ? { layerRoles: fresh } : {}), ...(pick ? { region: pick.px } : {}) } : pp.dxf,
     }));
@@ -645,7 +646,10 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
   }
 
   /* ---------- a level's own plan ---------- */
-  const setBuilding = (b: Building) => update((p) => ({ ...p, building: b }));
+  // the number of floors follows the building's level list (formed levels), so "No. of floors" is never left at 1
+  // when the section / level marks have been read
+  const floorsFrom = (b: Building | null | undefined): number | undefined => { if (!b || b.levels.every((l) => l.src === "assumed")) return undefined; const n = b.levels.filter((l) => l.use !== "none").length; return n > 0 ? n : undefined; };
+  const setBuilding = (b: Building) => update((p) => { const n = floorsFrom(b); return { ...p, building: b, ...(n ? { params: { ...p.params, floors: n } } : {}) }; });
   async function makeLevelPlan(g: { keys: string[]; name: string; count: number; floorMm?: number }, part: { px: [number, number, number, number] } | null) {
     const res = await createLevelPlan({ fromId: plan.id, name: `${plan.name} — ${g.name}`, region: part ? part.px : null, floorMm: g.floorMm, floors: g.count });
     if (res.error || !res.data) { setMsg({ error: res.error ?? "Could not make the plan." }); return; }
