@@ -80,7 +80,8 @@ export function parseLevelName(raw: string): { kind: LevelKind; nos: number[]; t
     if (k) kind = k;
   }
   if (kind === "basement" || kind === "service") {
-    const bn = t.match(/\bb-?(\d)\b/i) ?? t.match(/basement\s*-?\s*(\d)\b/i) ?? t.match(/地下\s*(\d|[一二三])\s*层/);
+    // "BASEMENT-1", "BASEMENT - 03", "B-2", "BSMT 2", "地下二层"
+    const bn = t.match(/\bb-?\s?0?(\d)\b/i) ?? t.match(/(?:basement|bsmt|cellar)\s*-?\s*0?(\d)\b/i) ?? t.match(/地下\s*(\d|[一二三])\s*层/);
     const n = bn ? cnNum(bn[1]) ?? +bn[1] : t.match(/^-(\d{1,2})\s/) ? +t.match(/^-(\d{1,2})\s/)![1] : kind === "service" ? 2 : 1;
     return { kind, nos: [n], typical: false, tower };
   }
@@ -146,17 +147,39 @@ function levelTable(texts: DxfText[], unitToM: number): Level[] | null {
 
 /* ---------- reading 2: level marks down a section ---------- */
 /** "LVL +4500", "LVL 00", "FFL +7.830", "EL. -5000", "+3.000 LVL" → the level in mm (a dot = metres, else mm). */
+/** Level-mark prefixes as written on sections: "F.F.L. +10230", "U.F.L. +10150", "FFL+3.580", "LVL +3580", "SSL 3.300",
+ *  "T.O.S.", "R.L. 100.00", "EL. 10.230". Finish-floor marks (FFL/FL) sit a screed above the concrete; structural marks
+ *  (UFL unfinished, SFL/SSL structural slab, TOS/TOC top of slab/concrete) are the concrete top the formwork works to. */
+const MARK_PREFIX = /^(?:lvl|level|lev|ffl|fl|sfl|ssl|ufl|tos|toc|rl|el|ngl|fgl)\b\.?/i;
+const STRUCTURAL_PREFIX = /^(?:ufl|sfl|ssl|tos|toc)\b/i;
+function markNorm(raw: string): string {
+  // "F.F.L." → "FFL", "U.F.L" → "UFL", "T.O.S." → "TOS", "LVL." → "LVL"; the dots inside a prefix carry no meaning
+  return raw.replace(/\\[A-Za-z]/g, "").replace(/\s+/g, " ").trim().replace(/^([a-z])\.\s?([a-z])\.\s?([a-z])\.?/i, "$1$2$3").replace(/^([a-z])\.\s?([a-z])\.?(?=\s*[:+\-\d])/i, "$1$2").replace(/^(lvl|level|lev)\./i, "$1");
+}
 export function levelMark(raw: string): number | undefined {
-  const s = raw.replace(/\\[A-Za-z]/g, "").replace(/\s+/g, " ").trim();
-  const m = s.match(/^(?:lvl|level|lev|ffl|sfl|tos|el\.?)\s*:?\s*([+-]?)\s*(\d{1,6}(?:\.\d{1,3})?)\s*(?:mm|m)?$/i) ?? s.match(/^([+-]?)\s*(\d{1,6}(?:\.\d{1,3})?)\s*(?:lvl|level|ffl|sfl)$/i);
+  const s = markNorm(raw);
+  const m = s.match(/^(?:lvl|level|lev|ffl|fl|sfl|ssl|ufl|tos|toc|rl|el|ngl|fgl)\.?\s*:?\s*([+±-]?)\s*(\d{1,6}(?:\.\d{1,3})?)\s*(?:mm|m)?$/i) ?? s.match(/^([+±-]?)\s*(\d{1,6}(?:\.\d{1,3})?)\s*(?:lvl|level|ffl|sfl|ssl|ufl)$/i);
   if (!m) return undefined;
   const v = m[2].includes(".") ? Math.round(+m[2] * 1000) : +m[2];
   return m[1] === "-" ? -v : v;
+}
+/** true for a structural (concrete top) mark, false for a finish-floor mark, undefined when the text is no mark. */
+export function levelMarkStructural(raw: string): boolean | undefined {
+  const s = markNorm(raw);
+  if (levelMark(raw) == null) return undefined;
+  return STRUCTURAL_PREFIX.test(s) || /(ufl|sfl|ssl)$/i.test(s) ? true : MARK_PREFIX.test(s) || /(ffl|lvl|level)$/i.test(s) ? false : false;
 }
 function levelMarks(texts: DxfText[], unitToM: number): Level[] | null {
   type M = { t: DxfText; mm: number };
   const marks: M[] = [];
   for (const t of texts) { const mm = levelMark(t.text); if (mm != null && Math.abs(mm) < 400000) marks.push({ t, mm }); }
+  // a finish-floor mark (F.F.L.) and a structural mark (U.F.L. / S.F.L.) written for the same level: the structural
+  // one is the concrete top the formwork works to; the finish mark is dropped (so the level is not read twice)
+  const structural = marks.filter((k) => levelMarkStructural(k.t.text) === true);
+  if (structural.length >= 3) {
+    const keep = marks.filter((k) => levelMarkStructural(k.t.text) === true || !structural.some((sk) => Math.abs(sk.mm - k.mm) <= 150 && Math.abs(sk.t.x - k.t.x) * unitToM <= 1.5 && Math.abs(sk.t.y - k.t.y) * unitToM <= 1.5));
+    marks.length = 0; marks.push(...keep);
+  }
   if (marks.length < 4) return null;
   const col = new Map<number, M[]>();
   for (const k of marks) { const c = Math.round((k.t.x * unitToM) / 1.5); col.set(c, [...(col.get(c) ?? []), k]); }
@@ -168,7 +191,7 @@ function levelMarks(texts: DxfText[], unitToM: number): Level[] | null {
     const out: Level[] = [];
     for (const k of c) {
       const h = k.t.h || 1;
-      const name = texts.filter((t) => t !== k.t && !isMark(t) && Math.abs(t.x - k.t.x) <= h * 4 && Math.abs(t.y - k.t.y) <= h * 3 && t.text.trim().length <= 40)
+      const name = texts.filter((t) => t !== k.t && !isMark(t) && Math.abs(t.x - k.t.x) <= h * 4 && Math.abs(t.y - k.t.y) <= h * 5 && t.text.trim().length <= 40)
         .sort((a, b) => Math.abs(a.y - k.t.y) + Math.abs(a.x - k.t.x) * 0.5 - (Math.abs(b.y - k.t.y) + Math.abs(b.x - k.t.x) * 0.5))[0];
       const label = name?.text.trim() ?? "";
       if (/road|ngl|existing\s*ground|water|sump|tank|o\.?h\.?w\.?t|parapet|lintel|sill|beam|footing|raft|pcc/i.test(label) && !/floor|basement|stilt|terrace|plinth/i.test(label)) continue;
@@ -183,6 +206,11 @@ function levelMarks(texts: DxfText[], unitToM: number): Level[] | null {
   const main = read(columns[0]);
   for (const c of columns.slice(1)) for (const l of read(c)) if (!main.some((m) => m.key === l.key)) main.push(l);
   if (main.length < 3) return null;
+  // no ground floor named, but a mark at ±0.00 (a road / plinth / unnamed mark) with floors above it: that is the ground
+  if (!main.some((l) => l.kind === "ground" || l.kind === "stilt") && main.some((l) => l.kind === "floor" && l.elevMm! > 0)) {
+    const zero = columns.flat().filter((k) => Math.abs(k.mm) <= 600).sort((a, b) => Math.abs(a.mm) - Math.abs(b.mm))[0];
+    if (zero) main.push({ key: "g", name: "Ground floor", kind: "ground", elevMm: zero.mm, use: "typical", src: "names" });
+  }
   const ls = dedupe(main);
   // the floor height of each level = the next level mark up
   const up = [...ls].filter((l) => l.elevMm != null).sort((a, b) => a.elevMm! - b.elevMm!);
