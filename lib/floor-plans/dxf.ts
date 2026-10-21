@@ -328,7 +328,8 @@ export function partsSection(model: DxfModel, unitToM: number, parts: DrawingPar
         if (Math.abs(c[0] - a[0]) > 0 && Math.abs(a[1] - c[1]) <= 0.001 * Math.abs(c[0] - a[0])) hl.push({ x0: Math.min(a[0], c[0]), x1: Math.max(a[0], c[0]), y: (a[1] + c[1]) / 2 });
       }
     }
-    const sl = sectionLevels(hl, unitToM, p.title); if (sl) got.push(sl);
+    // two floor bands only (a stair or footing section, a wall detail) are too little to state the building's floor height
+    const sl = sectionLevels(hl, unitToM, p.title); if (sl && sl.floors >= 3) got.push(sl);
   }
   return agreedSection(got);
 }
