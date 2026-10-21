@@ -25,7 +25,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
   const supabase = await createClient();
   const { data: plan } = await supabase
     .from("floor_plans")
-    .select("id, name, source_kind, drawing_type, file_path, original_path, file_name, takeoff, lead_id, updated_at, drawing_facts, leads ( id, lead_code, project_name, customer_name )")
+    .select("id, name, source_kind, drawing_type, file_path, original_path, file_name, takeoff, lead_id, updated_at, drawing_facts, leads ( id, lead_code, project_name, customer_name, num_floors )")
     .eq("id", id).maybeSingle();
   if (!plan) notFound();
   const profile = await getCurrentProfile();
@@ -104,7 +104,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
       <div className="mt-4">
         {fileUrl?.signedUrl ? (
           <TakeoffTool
-            plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, ai_url: aiUrl?.signedUrl ?? null, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}` } : null }}
+            plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, ai_url: aiUrl?.signedUrl ?? null, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}`, floors: (lead as { num_floors?: number | null }).num_floors ?? null } : null }}
             tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules} siblings={siblings} dict={dict} project={project} projectPending={projectPending && !!project?.missing.length}
           />
         ) : <p className="text-sm text-signal-red">The plan file could not be opened.</p>}

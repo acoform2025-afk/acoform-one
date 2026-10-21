@@ -32,7 +32,7 @@ import { SendToDesign, type DesignOption } from "./send-to-design";
 import { minOf, maxOf } from "@/lib/util/minmax";
 
 type Tool = "pan" | "zoom" | "select" | "calibrate" | "measure" | "region" | "slab" | "opening" | "wall" | "column" | "beam" | "door" | "window" | "loft" | "separate";
-type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; ai_url?: string | null; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string } | null };
+type PlanProps = { id: string; name: string; source_kind: "dxf" | "pdf" | "image"; file_url: string; ai_url?: string | null; takeoff: Partial<Takeoff> | null; lead: { id: string; label: string; floors?: number | null } | null };
 
 const MAX_SIDE = 2400;
 const boxA = (b: number[]) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
@@ -423,14 +423,16 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
   // the open questions; what the estimator set by hand (own plans made, questions ticked) is kept across readings
   const readLevels = useCallback((said: { floors?: number; floorMm?: number; slabMm?: number }, typicalPartN?: number): Building | null => {
     if (!modelRef.current || !t.dxf) return null;
-    const bld = readBuilding({ texts: modelRef.current.texts ?? [], unitToM: UNIT_TO_M[t.dxf.units], parts, section: drawingSection(modelRef.current), said, planName: plan.name, typicalPartN,
+    // the drawing states no floors: the number of floors written on the lead stands in (the plan's own figure when it is more than 1)
+    const saidFloors = said.floors && said.floors > 1 ? said.floors : plan.lead?.floors && plan.lead.floors > 1 ? plan.lead.floors : said.floors;
+    const bld = readBuilding({ texts: modelRef.current.texts ?? [], unitToM: UNIT_TO_M[t.dxf.units], parts, section: drawingSection(modelRef.current), said: { ...said, floors: saidFloors }, planName: plan.name, typicalPartN,
       project: project ? { section: project.section, levels: project.levels, from: project.levelsFrom ?? (project.sectionFrom ? `the section of "${project.sectionFrom}"` : undefined) } : undefined });
     if (t.building) {
       for (const l of bld.levels) { const o = t.building.levels.find((x) => x.key === l.key); if (o?.planId) { l.planId = o.planId; l.use = o.use; } }
       for (const q of bld.questions) { const o = t.building.questions.find((x) => x.text === q.text); if (o?.done) q.done = true; }
     }
     return bld;
-  }, [t.dxf, t.building, parts, plan.name, project]);
+  }, [t.dxf, t.building, parts, plan.name, plan.lead?.floors, project]);
   // a plan measured before this existed: its levels are read once, without touching anything else
   const levelsDone = useRef(false);
   useEffect(() => {
