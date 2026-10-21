@@ -560,8 +560,15 @@ export function readDxf(raw: string): DxfModel {
 
   const code = Number((dxf.header ?? {})["$INSUNITS"]);
   let units = INSUNITS[code];
-  const unitsGuessed = !units;
+  let unitsGuessed = !units;
   if (!units) { const span = Math.max(x1 - x0, y1 - y0); units = span > 2000 ? "mm" : span > 300 ? "cm" : "m"; }
+  // a header that says inches / feet / metres on a drawing made in millimetres (a template's leftover setting): the
+  // texts give it away — plan lettering is 100–600 mm tall in the model, never 5 m
+  if (units !== "mm" && texts.length >= 20) {
+    const hs = texts.map((t) => t.h).filter((h) => h > 0).sort((a, b) => a - b);
+    const med = hs[Math.floor(hs.length / 2)] ?? 0;
+    if (med * (UNIT_TO_M_LOCAL[units] ?? 1) > 0.6 && med * 0.001 <= 1.5) { units = "mm"; unitsGuessed = true; }
+  }
 
   // DXF saved from AutoCAD / Revit: section views are in the file as named blocks (often one insert per floor) —
   // their floor lines, gathered by name, give the slab thickness and floor height
@@ -2136,7 +2143,8 @@ export function partKind(t: string): PartKind {
   if (/平面图|深化图|标准层/.test(t)) return "plan";
   if (/site|master|location|key\s*plan|layout\s*plan|parking/i.test(t)) return "site";
   if (/schedule|legend|notes?\b|title/i.test(t)) return "detail";
-  if (/\b\d?\s*bhk\b|\bunit\b|\bflat\b|area (table|statement)/i.test(t) && !/floor\s*plan/i.test(t)) return "detail";
+  // "3 BHK UNIT PLAN" is a flat's detail; "2ND FLOOR LEVEL PLAN (5BHK)" is the floor plan of a 5 BHK bungalow
+  if (/\b\d?\s*bhk\b|\bunit\b|\bflat\b|area (table|statement)/i.test(t) && !/\b(floor|level|lvl|terrace|ground|basement|podium)\b[^]*\bplan\b|\bplan\b[^]*\b(floor|level|lvl)\b/i.test(t)) return "detail";
   if (/plans?\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\blayout\b/i.test(t)) return "plan";
   if (/detail/i.test(t)) return "detail";
   return "other";
