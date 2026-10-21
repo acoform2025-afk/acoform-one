@@ -1431,7 +1431,10 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     if (narrow.length && narrow.length * 2 >= L.length) {
       beamLoops.set(layer, narrow);
       // a few beams drawn closed and the rest as loose edge lines (one layer, both styles): the loose ones are paired too
-      if (!beamSizeFromLayer(layer) && openN >= 20 && openN > 4 * narrow.length) looseBeam.push(...ps.filter((p) => !p.closed));
+      if (openN >= 20 && openN > 4 * narrow.length) {
+        if (!beamSizeFromLayer(layer)) looseBeam.push(...ps.filter((p) => !p.closed));
+        else { const st = pairedWallStrips(ps.filter((p) => !p.closed).map((p) => p.pts), u, 75, 700); const rings = st.strips.filter((r) => r.length >= 3 && Math.abs(polyArea(r)) * u2 > 0.01); if (rings.length) beamLoops.set(layer, [...narrow, ...rings]); }
+      }
     } else if (!beamSizeFromLayer(layer)) looseBeam.push(...ps.filter((p) => !p.closed));
     else {
       // a layer named by the beam size ("S_B_230x575") drawn as loose edge lines: paired into strips of that size
