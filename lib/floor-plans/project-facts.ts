@@ -7,6 +7,7 @@
  */
 import { beamSchedule, drawingParts, drawingSection, floorInfoFromTexts, partsSection, suggestedRoles, type DxfModel, type PartKind } from "./dxf";
 import { statedLevels, type Level } from "./building";
+import { columnSchedules, scheduleSummary, type ColumnSchedule } from "./column-schedule";
 import type { SectionLevels } from "./section-read";
 
 export const FACTS_V = 1;
@@ -18,6 +19,7 @@ export type DrawingFacts = {
   levels?: Level[]; levelsNote?: string;                  // the level list it states (level table / marks / names)
   floors?: number; floorMm?: number; floorNote?: string;  // number of floors / floor height written in its notes
   beams?: Record<string, BeamSize>;                       // its beam schedule: mark → width × depth (mm)
+  columns?: ColumnSchedule[]; columnsNote?: string;       // its column schedule(s): size of every column mark per level
 };
 
 /** What one drawing file states for the whole project. */
@@ -31,12 +33,14 @@ export function drawingFacts(model: DxfModel, unitToM: number): DrawingFacts {
   const info = floorInfoFromTexts(model.texts ?? [], unitToM);
   const beams: Record<string, BeamSize> = {};
   for (const e of beamSchedule(model, unitToM)) if (!beams[e.name]) beams[e.name] = e.sz;
+  const columns = columnSchedules(model.texts ?? [], unitToM).filter((c) => c.rows.some((r) => r.from || r.to));
   return {
     v: FACTS_V, at: new Date().toISOString(), contains,
     ...(section ? { section } : {}),
     ...(st ? { levels: st.levels.map((l) => ({ ...l, partN: undefined, partTitle: undefined, planId: null })), levelsNote: st.note } : {}),
     ...(info.floors ? { floors: info.floors } : {}), ...(info.heightMm ? { floorMm: info.heightMm } : {}), ...(info.source ? { floorNote: info.source } : {}),
     ...(Object.keys(beams).length ? { beams } : {}),
+    ...(columns.length ? { columns, columnsNote: columns.map(scheduleSummary).join("; ") } : {}),
   };
 }
 
@@ -48,6 +52,7 @@ export type ProjectFacts = {
   floors?: number; floorsFrom?: string;
   floorMm?: number; floorMmFrom?: string;
   beams: Record<string, BeamSize>; beamsFrom: Record<string, string>;
+  columns?: ColumnSchedule[]; columnsFrom?: string; columnsNote?: string;   // the column schedule (sizes per level)
   conflicts: string[];                                                      // drawings that disagree — for the architect
   missing: string[];                                                        // drawings of the project not read yet
 };
@@ -109,6 +114,9 @@ export function mergeFacts(others: ProjectDrawing[]): ProjectFacts {
     }
     if (n) give(d, `beam schedule (${n} marks)`);
   }
+  // column schedule: the drawing with the most level rows
+  const cs = read.filter((d) => d.facts.columns?.length).sort((a, b) => Math.max(...b.facts.columns!.map((c) => c.rows.length)) - Math.max(...a.facts.columns!.map((c) => c.rows.length)));
+  if (cs[0]) { out.columns = cs[0].facts.columns; out.columnsFrom = cs[0].name; out.columnsNote = cs[0].facts.columnsNote; give(cs[0], `column schedule (${cs[0].facts.columnsNote})`); }
   out.drawings = others.map((d) => ({ id: d.id, name: d.name, what: d.facts ? containsText(d.facts.contains) : "not read yet", gave: gave.get(d.id) ?? [] }));
   if (out.conflicts.length > 12) out.conflicts = [...out.conflicts.slice(0, 12), `… and ${out.conflicts.length - 12} more`];
   return out;
