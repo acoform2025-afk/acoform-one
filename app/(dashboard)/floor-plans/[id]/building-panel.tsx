@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
-import { buildingTotals, groupLevels, KIND_LABEL, type Building, type Level, type LevelGroup, type LevelUse, type Question } from "@/lib/floor-plans/building";
+import { buildingTotals, groupLevels, KIND_LABEL, type Building, type Level, type LevelGroup, type LevelUse, type Question, type TypicalFigures } from "@/lib/floor-plans/building";
 import { fmtArea } from "@/lib/floor-plans/calc";
 
 export type SiblingPlan = { id: string; name: string; contact: number; quote: number; measured: boolean };
@@ -17,7 +17,7 @@ const USE_LABEL: Record<LevelUse, string> = { typical: "Typical plan", own: "Own
  * client. The whole-building formwork area is the sum over the formed levels.
  */
 export function BuildingPanel({ building, parts, typical, siblings, planId, canEdit, extra = [], onChange, onReread, onMeasure, onMakeAll, onShowPart }: {
-  building: Building; parts: LevelPartInfo[]; typical: { contact: number; quote: number }; siblings: SiblingPlan[]; planId: string; canEdit: boolean;
+  building: Building; parts: LevelPartInfo[]; typical: TypicalFigures; siblings: SiblingPlan[]; planId: string; canEdit: boolean;
   extra?: Question[];      // questions from the measurement itself (slab, beams, openings …) — shown with the level questions, printed on the sheet
   onChange: (b: Building) => void; onReread: () => void;
   onMeasure: (g: LevelGroup, part: LevelPartInfo | null) => Promise<void>;
@@ -75,7 +75,9 @@ export function BuildingPanel({ building, parts, typical, siblings, planId, canE
           {[...groups].reverse().map((g) => {
             const part = g.partN ? parts.find((p) => p.n === g.partN) ?? null : null;
             const sib = g.planId ? siblings.find((s) => s.id === g.planId) : undefined;
-            const per = g.use === "none" ? 0 : g.use === "own" && sib?.measured ? sib.contact : typical.contact;
+            // the level's own figure (height / column sizes applied) — the group's levels share it
+            const lv = tot.levels.find((x) => x.key === g.keys[0]);
+            const per = g.use === "none" ? 0 : lv?.contact ?? (g.use === "own" && sib?.measured ? sib.contact : typical.contact);
             return (
               <tr key={g.keys[0]} className="border-t border-graphite-800 align-top">
                 <td className="py-1 pr-1">
@@ -101,7 +103,7 @@ export function BuildingPanel({ building, parts, typical, siblings, planId, canE
                       ) : null
                   ) : null}
                 </td>
-                <td className="py-1 text-right text-graphite-300">{g.use === "none" ? "—" : `${Math.round(per * g.count).toLocaleString("en-IN")}${g.use === "own" && !sib?.measured ? "*" : ""}`}</td>
+                <td className="py-1 text-right text-graphite-300" title={lv?.adjusted ? `Typical plan scaled: ${lv.adjusted}` : undefined}>{g.use === "none" ? "—" : `${Math.round(per * g.count).toLocaleString("en-IN")}${g.use === "own" && !sib?.measured ? "*" : lv?.adjusted ? "†" : ""}`}</td>
               </tr>
             );
           })}
@@ -113,7 +115,7 @@ export function BuildingPanel({ building, parts, typical, siblings, planId, canE
           </tr>
         </tfoot>
       </table>
-      <p className="mt-1 text-[11px] text-graphite-500">Typical floor {fmtArea(typical.contact)} contact. One set is reused floor by floor; the set size stays the biggest level, the whole-building figure is the concrete contact over all pours{tot.levels.some((l) => l.from === "missing") ? " (* own plan not measured yet — typical figure used)" : ""}.</p>
+      <p className="mt-1 text-[11px] text-graphite-500">{tot.levels.some((l) => l.adjusted) ? "† walls and columns scaled to that level's height / column schedule. " : ""}Typical floor {fmtArea(typical.contact)} contact. One set is reused floor by floor; the set size stays the biggest level, the whole-building figure is the concrete contact over all pours{tot.levels.some((l) => l.from === "missing") ? " (* own plan not measured yet — typical figure used)" : ""}.</p>
 
       <div className="mt-3 flex items-center justify-between">
         <button type="button" onClick={() => setShowQ((v) => !v)} className="text-xs font-medium text-graphite-100">Questions for architect / structure / client ({open.length} open)</button>

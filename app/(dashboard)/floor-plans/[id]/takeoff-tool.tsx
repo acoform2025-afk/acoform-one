@@ -11,7 +11,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { ScopePanel } from "./scope-panel";
 import { BuildingPanel, type SiblingPlan } from "./building-panel";
-import { readBuilding, type Building } from "@/lib/floor-plans/building";
+import { parseLevelName, readBuilding, type Building } from "@/lib/floor-plans/building";
+import { perimeterByLevel } from "@/lib/floor-plans/column-schedule";
 import { EMPTY_DICT, layerKey, learnedRole, type Dictionary } from "@/lib/floor-plans/vocab";
 import type { ProjectFacts } from "@/lib/floor-plans/project-facts";
 import { teachDrawing } from "../dictionary-actions";
@@ -981,7 +982,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
         ) : null}
 
         {isDxf && t.building && !t.parentPlan ? (
-          <BuildingPanel building={t.building} parts={parts.map((q) => ({ n: q.n, title: q.title, px: q.px }))} typical={{ contact: totals.contact_area, quote: totals.quote_area }} siblings={siblings} planId={plan.id} canEdit={canEdit}
+          <BuildingPanel building={t.building} parts={parts.map((q) => ({ n: q.n, title: q.title, px: q.px }))} typical={{ contact: totals.contact_area, quote: totals.quote_area, vertical: totals.vertical_area, column: totals.column_area, clearMm: Math.round(totals.clear_height * 1000), slabMm: Number(t.params.slabMm) || 0, ...(project?.columns?.[0] && t.building ? (() => { const per = perimeterByLevel(project.columns[0], t.building.levels); const pl = parseLevelName(plan.name); const ref = pl.kind === "floor" && pl.nos[0] ? `f${pl.nos[0]}` : t.building.levels.find((l) => l.kind === "floor" && l.use === "typical")?.key; return { colPerimeter: per, refKey: ref }; })() : {}) }} siblings={siblings} planId={plan.id} canEdit={canEdit}
             extra={measureQuestions(t, totals, auto, rules, modelRef.current ? drawingSection(modelRef.current) : null)}
             onMakeAll={makeAllLevelPlans} onChange={setBuilding} onReread={() => { const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n); if (b) setBuilding({ ...b, edited: false }); }} onMeasure={makeLevelPlan} onShowPart={(q) => fitBox(q.px)} />
         ) : null}

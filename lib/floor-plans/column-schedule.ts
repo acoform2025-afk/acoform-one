@@ -113,3 +113,14 @@ export function scheduleSummary(sch: ColumnSchedule): string {
   return `${sch.marks.length} columns, ${rows.length} levels${changes.length ? ` · sizes change at ${changes.join(", ")}` : rows.length ? " · one size throughout" : ""}`;
 }
 const levelWord = (l: { kind: LevelKind; no?: number }) => l.kind === "floor" && l.no != null ? `${l.no}${["th", "st", "nd", "rd"][l.no % 10 > 3 || (l.no % 100 >= 11 && l.no % 100 <= 13) ? 0 : l.no % 10]} floor` : l.kind === "basement" ? `basement ${l.no ?? 1}` : l.kind;
+
+/** Total column perimeter (mm, all marks) at each of the building's levels, by level key — the level's column
+ *  panels grow or shrink with it. Levels the schedule does not cover are left out. */
+export function perimeterByLevel(sch: ColumnSchedule, levels: { key: string; kind: LevelKind; no?: number }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const l of levels) {
+    const sz = sizesAtLevel(sch, l.kind, l.no); if (!sz) continue;
+    out[l.key] = Object.values(sz).reduce((s, c) => s + 2 * (c.b + c.d), 0);
+  }
+  return out;
+}

@@ -429,13 +429,38 @@ export function groupLevels(levels: Level[]): LevelGroup[] {
   return out;
 }
 
+/** The typical plan's figures, with the breakdown that lets a level of another height (or other column sizes) be
+ *  counted from the same plan: walls and columns grow with the clear height, the slab and beams do not. */
+export type TypicalFigures = {
+  contact: number; quote: number;
+  vertical?: number;        // walls + columns contact of the typical floor (m²)
+  column?: number;          // columns alone (m²)
+  clearMm?: number;         // the typical floor's clear height (floor height − slab)
+  slabMm?: number;
+  // the column schedule of the project: total column perimeter per level (mm), by level key ("f5", "g", "b1")
+  colPerimeter?: Record<string, number>; refKey?: string;   // refKey: the level the typical plan was measured at
+};
 /** Whole-building figures: contact area of every formed level (typical plan or its own plan) and the set size. */
-export function buildingTotals(b: Building, typical: { contact: number; quote: number }, own: Record<string, { contact: number; quote: number }>): { contact: number; quote: number; floors: number; levels: { key: string; contact: number; quote: number; from: "typical" | "own" | "missing" }[]; heightMm: number } {
+export function buildingTotals(b: Building, typical: TypicalFigures, own: Record<string, { contact: number; quote: number }>): { contact: number; quote: number; floors: number; levels: { key: string; contact: number; quote: number; from: "typical" | "own" | "missing"; adjusted?: string }[]; heightMm: number } {
   const levels = b.levels.filter((l) => l.use !== "none").map((l) => {
     const o = l.use === "own" && l.planId ? own[l.planId] : undefined;
     const from = l.use === "own" ? (o ? "own" : "missing") : "typical";
     const v = o ?? typical;
-    return { key: l.key, contact: from === "missing" ? typical.contact : v.contact, quote: from === "missing" ? typical.quote : v.quote, from: from as "typical" | "own" | "missing" };
+    let contact = from === "missing" ? typical.contact : v.contact, quote = from === "missing" ? typical.quote : v.quote;
+    // a level counted with the typical plan but of another height / other column sizes: the vertical part scaled
+    const notes: string[] = [];
+    if (from !== "own" && typical.vertical != null && typical.clearMm) {
+      let vert = typical.vertical;
+      const clear = l.floorMm != null ? l.floorMm - (typical.slabMm ?? 0) : null;
+      if (clear && Math.abs(clear - typical.clearMm) >= 5) { vert = vert * (clear / typical.clearMm); notes.push(`height ${l.floorMm} mm`); }
+      const per = typical.colPerimeter, ref = typical.refKey ? per?.[typical.refKey] : undefined;
+      if (per && ref && typical.column != null && per[l.key] != null && Math.abs(per[l.key] - ref) >= 1) {
+        const k = clear && typical.clearMm ? clear / typical.clearMm : 1;
+        vert += typical.column * k * (per[l.key] / ref - 1); notes.push(`columns ${per[l.key] > ref ? "bigger" : "smaller"} per schedule`);
+      }
+      if (notes.length) { const c2 = contact - typical.vertical + vert; quote = contact > 0 ? quote * (c2 / contact) : quote; contact = c2; }
+    }
+    return { key: l.key, contact, quote, from: from as "typical" | "own" | "missing", ...(notes.length ? { adjusted: notes.join(", ") } : {}) };
   });
   const heightMm = b.levels.reduce((s, l) => s + (l.use !== "none" ? (l.floorMm ?? 0) : 0), 0);
   return { contact: levels.reduce((s, l) => s + l.contact, 0), quote: levels.reduce((s, l) => s + l.quote, 0), floors: levels.length, levels, heightMm };
