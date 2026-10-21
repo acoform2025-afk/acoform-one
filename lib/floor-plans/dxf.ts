@@ -308,6 +308,31 @@ const UNIT_TO_M_LOCAL: Record<string, number> = { mm: 0.001, cm: 0.01, m: 1, in:
 /** Slab thickness / floor height from the sections in the drawing (most sections agreeing), or null. */
 export function drawingSection(model: DxfModel): SectionLevels | null { return agreedSection(model.sections ?? []); }
 
+/**
+ * Floor height and slab thickness from the sections drawn on the sheets (a section part found by drawingParts: its
+ * long horizontal lines are the floor tops and soffits, one band per floor). Used when the file carries no section
+ * blocks / markers of its own. unitToM: metres per drawing unit.
+ */
+export function partsSection(model: DxfModel, unitToM: number, parts: DrawingPart[]): SectionLevels | null {
+  const got: SectionLevels[] = [];
+  for (const p of parts) {
+    if (p.kind !== "section") continue;
+    const [bx0, by0, bx1, by1] = p.box;
+    const hl: { x0: number; x1: number; y: number }[] = [];
+    for (const q of model.paths) {
+      if (/lev|grid|axis|anno|dim|text|hral|rail|symb|title|ovhd|hatch|steel|reinf/i.test(q.layer)) continue;
+      const pts = q.closed ? [...q.pts, q.pts[0]] : q.pts;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], c = pts[i];
+        if (a[0] < bx0 || a[0] > bx1 || a[1] < by0 || a[1] > by1) continue;
+        if (Math.abs(c[0] - a[0]) > 0 && Math.abs(a[1] - c[1]) <= 0.001 * Math.abs(c[0] - a[0])) hl.push({ x0: Math.min(a[0], c[0]), x1: Math.max(a[0], c[0]), y: (a[1] + c[1]) / 2 });
+      }
+    }
+    const sl = sectionLevels(hl, unitToM, p.title); if (sl) got.push(sl);
+  }
+  return agreedSection(got);
+}
+
 export function readDxf(raw: string): DxfModel {
   let dxf: { header?: AnyEnt; entities: AnyEnt[]; blocks?: Record<string, AnyEnt>; layerLt?: Record<string, string>; ltDashed?: Record<string, boolean> } | null = null;
   try { dxf = leanParseDxf(raw); } catch { dxf = null; }
@@ -1853,7 +1878,7 @@ export function floorsFromTitle(t: string): number | undefined {
 }
 /** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
 /** Words a drawing title has ("… FLOOR PLAN", "SECTION A-A", "4BHK UNIT", "AREA TABLE") — whole words, so "DRAWING ROOM" is not a "wing". */
-const TITLE_WORDS = /plans?\b|\bsections?\b|\belevations?\b|\blayout\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\bunit\b|\bbhk\b|\barea (table|statement)\b|\bschedule\b|平面图|剖面|立面图|深化图|大样|配模图|布置图|放线图|贴片尺寸|背楞|墙板|飘板|清单/i;
+const TITLE_WORDS = /plans?\b|\bsections?\b|\belevations?\b|\blay[- ]?out\b|\bfloor\b|\bblock\b|\btower\b|\bwing\b|\bunit\b|\bbhk\b|\barea (table|statement)\b|\bschedule\b|平面图|剖面|立面图|深化图|大样|配模图|布置图|放线图|贴片尺寸|背楞|墙板|飘板|清单/i;
 /**
  * The groups of lines inside one sheet frame, the frame and title-block border lines left out (they touch everything
  * near the margin): lines closer than `gap` belong together.
@@ -1897,22 +1922,26 @@ export function isLayoutTitle(t: string): boolean {
   const s = t.trim();
   if (s.length < 8 || s.length > 110 || /^\d+[.)]?\s/.test(s) || NOT_TITLE.test(s)) return false;
   if (/(楼|屋)?(板|梁|结构)(平面)?(布置|配筋|平法)?图/.test(s) && /(层|屋面)/.test(s)) return true;
-  if (!/\b(layout|plans?|framing)\b/i.test(s) || !/\b(slab|floor|roof|framing|beam|level|lvl)\b/i.test(s)) return false;
+  if (!/\b(lay[- ]?out|plans?|framing)\b/i.test(s) || !/\b(slab|floor|roof|framing|beam|level|lvl)\b/i.test(s)) return false;
   return /\b\d{1,2}\s*(st|nd|rd|th)\b|\b(ground|first|second|third|fourth|fifth|terrace|roof|typical|basement|podium|stilt|plinth|refuge)\b|\bg\.?f\.?\b/i.test(s);
 }
 /** Long notes / title-block lines that mention a plan but are not a title. */
-const NOT_TITLE = /^(disclaimer|notes?\b|general notes|e\s*:|email|date\b|for (review|approval|construction)|proposed\b.*\bscheme\b)|^\d{1,2}[.)]?\s+(this|all|the|provide|clear|lap|concrete|conc|use|for|refer|design|building|structure|minimum|unless)\b/i;   // numbered general notes ("2 THIS BUILDING IS DESIGNED FOR …") are not titles
+const NOT_TITLE = /^(disclaimer|notes?\b|general notes|e\s*:|email|date\b|for (review|approval|construction)|proposed\b.*\bscheme\b|please\b|sir\b|kindly\b|thus\b|\*|note\s*:)|\b(please|must be|consider|thus marked|as shown|refer|referred|cfm|fan for|louvers?|cut-?out at)\b|\d+\s*#\s*\d|^\d{1,2}[.)]?\s+(this|all|the|provide|clear|lap|concrete|conc|use|for|refer|design|building|structure|minimum|unless)\b/i;   // numbered general notes ("2 THIS BUILDING IS DESIGNED FOR …") are not titles
+// legend lines ("MIVAN RCC STRUCTURE WALL", "MASONRY WALL") and notes sit on the same title layer: not sheet names
+const onTitleLayerT = (t: DxfText) => /title|sheet[-_ ]?name|drawing[-_ ]?name|dwg[-_ ]?title/i.test(t.layer ?? "") && !/text|note/i.test((t.layer ?? "").replace(/title/i, "")) && !/wall|masonry|plumbing|brick|sill|lvl|level|rcc|note|\*|:/i.test(t.text);
 function titleFor(texts: DxfText[], box: [number, number, number, number], others: number[][] = []): string | undefined {
   const [x0, y0, x1, y1] = box, w = x1 - x0, h = y1 - y0;
   const inOther = (t: DxfText) => others.some((o) => t.x > o[0] && t.x < o[2] && t.y > o[1] && t.y < o[3] && !(t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1));
   const near = texts.filter((t) => t.x >= x0 - w * 0.05 && t.x <= x1 + w * 0.05 && t.y >= y0 - h * 0.4 && t.y <= y1 + h * 0.25 && !inOther(t))
-    .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").trim().slice(0, 80) }))
-    .filter((t) => TITLE_WORDS.test(t.text) && (!/\b(lvl|level|slab|beam)\b/i.test(t.text) || /plans?\b|\bunit\b|bhk/i.test(t.text) || isLayoutTitle(t.text)) && !NOT_TITLE.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
+    .map((t) => ({ ...t, text: t.text.split(/\bscale\b/i)[0].replace(/\\[A-Za-z]/g, "").replace(/\blay[- ]out\b/gi, "LAYOUT").trim().slice(0, 80) }))
+    .filter((t) => (onTitleLayerT(t) || TITLE_WORDS.test(t.text)) && (!/\b(lvl|level|slab|beam)\b/i.test(t.text) || /plans?\b|\bunit\b|bhk/i.test(t.text) || isLayoutTitle(t.text)) && !NOT_TITLE.test(t.text) && !/^回复|说明|问题|建议|仅用于|^\d+[.、]\s?\S/.test(t.text) && t.text.length >= 4 && t.text.length <= 90);
+  // a text on the sheet's title layer ("a-Title-Sheet", "TITLE", "SHEET-NAME") is the sheet's own name: first choice
+  const onTitleLayer = onTitleLayerT;
   const pri = (x: string) => (/plan|section|elevation|layout|平面图|剖面|立面图|深化图|配模图|布置图|放线图/i.test(x) ? 1 : 0);
   // a big title written inside the drawing's own outline wins; otherwise "… PLAN / SECTION / ELEVATION" titles, biggest first
   const maxH = Math.max(0, ...near.map((t) => t.h));
   const own = (t: DxfText) => (t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1 && t.h >= 0.6 * maxH ? 1 : 0);
-  near.sort((a, b) => own(b) - own(a) || pri(b.text) - pri(a.text) || b.h - a.h || (/typical/i.test(b.text) ? 1 : 0) - (/typical/i.test(a.text) ? 1 : 0));
+  near.sort((a, b) => (onTitleLayer(b) ? 1 : 0) - (onTitleLayer(a) ? 1 : 0) || own(b) - own(a) || pri(b.text) - pri(a.text) || b.h - a.h || (/typical/i.test(b.text) ? 1 : 0) - (/typical/i.test(a.text) ? 1 : 0));
   return near[0]?.text;
 }
 /** Floor height (mm) and number of slabs (first floor to terrace) read from the drawing's notes and level marks. */

@@ -61,11 +61,18 @@ export function suggestLayerRole(name: string): Role {
   // and "S_B_300x600" / "S-B-230X750" (beams by size); "S_B_PROJ." (projections), "S_B_SB" (slab bands) stay annotation
   const bare = name.trim().replace(/^.*\$0\$/, "");
   if (/^s[-_ ]?c\d{1,2}([-_ ]|$)/i.test(bare)) return "columns";
-  if (/^s[-_ ]?b[-_ ]?\d{3,4}\s*[x×*]\s*\d{3,4}/i.test(bare)) return "beams";
+  // beams named by their size: "S_B_300x600", "B-230X600.", "BEAM 300X750" (a column size "C450X600" is handled below)
+  if (/^(s[-_ ]?)?b[-_ ]?\d{3,4}\s*[x×*]\s*\d{3,4}/i.test(bare)) return "beams";
+  // AIA / NCS layer names from Revit and US-style offices: A-FLOR-OTLN floor outline (slab edge), A-FLOR-EVTR lift,
+  // S-SLAB-EDGE slab edge, S-DROP drop panels (flat slabs: formed like a beam round the column)
+  if (/^a-flor-otln/i.test(bare)) return "slab";
+  if (/^a-flor-evtr|^a-flor-(open|shft)/i.test(bare)) return "opening";
+  if (/drop[-_ ]?panel|^s-drop\b/i.test(bare)) return "beams";
   // a column-schedule layer named by the column size ("C650X1650", "C900X1500", "COL 450x600"): the columns of that size
   if (/^(c|col|column)[-_ ]?\d{3,4}\s*[x×*]\s*\d{3,4}$/i.test(name.trim().replace(/^.*\$0\$/, ""))) return "columns";
-  if (/shaft|cut-?out|opening|(^|-)duct|(^|-)lift|stair-?open|洞|管井|风井|电梯井/.test(n)) return "opening";
-  if (/(^|[^a-z])(col|cols|clm|column|columns)([^a-z]|$)|column|柱/.test(n)) return "columns";
+  if (/shaft|cut-?out|opening|(^|[^a-z])void([^a-z]|$)|(^|[^a-z])open([^a-z]|$)|(^|-)duct|(^|-)lift|stair-?open|洞|管井|风井|电梯井/.test(n)) return "opening";
+  // "COLUMN", "COLS", "CLM" and the common misspellings "CLOUMN", "COLUM", "COLOUMN", "COLOMN"
+  if (/(^|[^a-z])(col|cols|clm|column|columns)([^a-z]|$)|column|cloumn|coloumn|colomn|(^|[^a-z])colum([^a-z]|$)|柱/.test(n)) return "columns";
   // upstands / planters / kerbs on top of the slab: both faces × their height
   if (/upstand|up-stand|planter|kerb|反坎|翻边/.test(n)) return "upstand";
   // inverted / drop pardi (down-stand walls under the slab) are formed like beams

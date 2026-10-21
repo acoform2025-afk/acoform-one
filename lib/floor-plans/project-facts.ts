@@ -5,7 +5,7 @@
  * kept as that file's "drawing facts", and every other drawing of the same project (lead) uses them where it says
  * nothing itself. What a drawing states about itself always wins over what another drawing says.
  */
-import { beamSchedule, drawingParts, drawingSection, floorInfoFromTexts, suggestedRoles, type DxfModel, type PartKind } from "./dxf";
+import { beamSchedule, drawingParts, drawingSection, floorInfoFromTexts, partsSection, suggestedRoles, type DxfModel, type PartKind } from "./dxf";
 import { statedLevels, type Level } from "./building";
 import type { SectionLevels } from "./section-read";
 
@@ -23,8 +23,10 @@ export type DrawingFacts = {
 /** What one drawing file states for the whole project. */
 export function drawingFacts(model: DxfModel, unitToM: number): DrawingFacts {
   const contains: Partial<Record<PartKind, number>> = {};
-  for (const p of drawingParts(model, unitToM, suggestedRoles(model))) contains[p.kind] = (contains[p.kind] ?? 0) + 1;
-  const section = drawingSection(model);
+  const parts = drawingParts(model, unitToM, suggestedRoles(model));
+  for (const p of parts) contains[p.kind] = (contains[p.kind] ?? 0) + 1;
+  // the file's own section blocks / markers first; else the sections drawn on its sheets
+  const section = drawingSection(model) ?? partsSection(model, unitToM, parts);
   const st = statedLevels(model.texts ?? [], unitToM);
   const info = floorInfoFromTexts(model.texts ?? [], unitToM);
   const beams: Record<string, BeamSize> = {};
