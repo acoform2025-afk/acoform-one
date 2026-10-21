@@ -1095,7 +1095,9 @@ export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
     const box: [number, number, number, number] = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)];
     if (inCaption(box) && !forced(box)) { detail.add(p); continue; }
-    els.push({ p, box, strong: kind !== "beam" || p.closed, wallA: kind === "wall" && p.closed ? Math.abs(polyArea(p.pts)) : kind === "wall" ? L * 0.2 / u : 0 });
+    // weight of the element when choosing the floor's island: wall area first; a column-and-beam layout with no walls
+    // (a slab-and-beam structural drawing) is weighed by its beams, columns and slab edges instead
+    els.push({ p, box, strong: kind !== "beam" || p.closed, wallA: kind === "wall" && p.closed ? Math.abs(polyArea(p.pts)) : kind === "wall" ? L * 0.2 / u : kind === "col" && p.closed ? Math.abs(polyArea(p.pts)) * 0.5 : kind === "beam" || kind === "slab" || kind === "col" ? L * 0.05 / u : 0 });
   }
   const capNotes: ReadNote[] = capBoxes.filter((c) => [...detail].some((p) => p.pts.some((q) => q[0] >= c[0] && q[0] <= c[2] && q[1] >= c[1] && q[1] <= c[3]))).map((c) => ({ kind: "detail", box: c }));
   if (!els.length) return { on: (p) => (detail.has(p) ? false : undefined), near: () => true, count: 0, dropped: detail.size, notes: capNotes };
@@ -1431,7 +1433,14 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       // a few beams drawn closed and the rest as loose edge lines (one layer, both styles): the loose ones are paired too
       if (!beamSizeFromLayer(layer) && openN >= 20 && openN > 4 * narrow.length) looseBeam.push(...ps.filter((p) => !p.closed));
     } else if (!beamSizeFromLayer(layer)) looseBeam.push(...ps.filter((p) => !p.closed));
-    else unsizedLen += ps.reduce((s2, p) => s2 + polyLength(p.pts, p.closed), 0) * u;
+    else {
+      // a layer named by the beam size ("S_B_230x575") drawn as loose edge lines: paired into strips of that size
+      const open = ps.filter((p) => !p.closed);
+      const st = open.length ? pairedWallStrips(open.map((p) => p.pts), u, 75, 700) : { strips: [] as Pt[][] };
+      const rings = st.strips.filter((r) => r.length >= 3 && Math.abs(polyArea(r)) * u2 > 0.01);
+      if (rings.length) beamLoops.set(layer, [...(beamLoops.get(layer) ?? []), ...rings]);
+      for (const p of open) { const mid: Pt = [(p.pts[0][0] + p.pts[p.pts.length - 1][0]) / 2, (p.pts[0][1] + p.pts[p.pts.length - 1][1]) / 2]; if (!rings.length || !nearRings(mid, rings, 0.02 / u)) unsizedLen += polyLength(p.pts, false) * u; }
+    }
   }
   if (looseBeam.length) {
     const st = pairedWallStrips(looseBeam.map((p) => p.pts), u, 75, 700);   // beams up to 700 wide (650 × 900 transfer / frame beams)
@@ -1540,7 +1549,10 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     }
     // an outline is a floor slab only when walls stand inside it (not just along its edge): at least 0.5 m² of wall
     // with its centre inside the outline — an empty box closed by section lines, notes or leaders beside the plan is not
-    const walled = (pts: Pt[]) => { let a = 0; U.rings.forEach((r, i) => { if (U.isHole?.[i]) return; const c: Pt = [r.reduce((x, q) => x + q[0], 0) / r.length, r.reduce((x, q) => x + q[1], 0) / r.length]; if (inside(c, pts)) a += Math.abs(polyArea(r)); }); return a * u2 >= 0.5; };
+    const walled = (pts: Pt[]) => { let a = 0; U.rings.forEach((r, i) => { if (U.isHole?.[i]) return; const c: Pt = [r.reduce((x, q) => x + q[0], 0) / r.length, r.reduce((x, q) => x + q[1], 0) / r.length]; if (inside(c, pts)) a += Math.abs(polyArea(r)); });
+      // a framed floor (columns and beams, no walls): the columns standing inside the outline make it the slab
+      if (a * u2 < 0.5 && !wallPaths.length) for (const c of colAll) { const r = c.p.pts, cc: Pt = [r.reduce((x, q) => x + q[0], 0) / r.length, r.reduce((x, q) => x + q[1], 0) / r.length]; if (inside(cc, pts)) a += Math.abs(polyArea(r)); }
+      return a * u2 >= 0.5; };
     // a small bay with no wall inside it (a balcony or projection closed by beams and the wall line) is slab when its
     // edge runs along walls / beams for most of its length
     const structRings = [...U.rings, ...beamRings];
@@ -2382,10 +2394,13 @@ function nameUntitledPlans(parts: DrawingPart[], model: DxfModel, roles: Record<
   for (const p of parts) {
     if (!/^Drawing \d+$/.test(p.title) && p.kind !== "other") continue;
     const b = p.box; const inB = (x: number, y: number) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3];
-    let walls = 0; for (const q of model.paths) if (roles[q.layer] === "walls" && inB(q.pts[0][0], q.pts[0][1]) && ++walls >= 30) break;
-    if (walls < 30) continue;
+    let walls = 0, beams = 0, cols = 0;
+    for (const q of model.paths) { if (!inB(q.pts[0][0], q.pts[0][1])) continue; const r = roles[q.layer]; if (r === "walls") walls++; else if (r === "beams") beams++; else if (r === "columns") cols++; if (walls >= 30 && beams >= 30) break; }
+    // a structural slab-and-beam layout (beams between columns, no walls, no title) is a plan too
+    const structural = walls < 30 && beams >= 30 && cols >= 4;
+    if (walls < 30 && !structural) continue;
     const tIn = texts.filter((t) => inB(t.x, t.y));
-    if (!tIn.some((t) => { const k = meaningOf(t.text)?.key; return k === "lift" || k === "stair" || k === "lobby"; })) continue;
+    if (!structural && !tIn.some((t) => { const k = meaningOf(t.text)?.key; return k === "lift" || k === "stair" || k === "lobby"; })) continue;
     p.kind = "plan";
     const sets = tIn.map((t) => levelsIn(t.text)).filter((v) => v.length);
     if (!sets.length) continue;

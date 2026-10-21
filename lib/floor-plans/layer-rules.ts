@@ -45,6 +45,8 @@ export function suggestLayerRole(name: string): Role {
   // "WALL-100MM (PROJECTION RCC WALL)": the RCC walls of balconies / projections are cast with the floor — walls, even
   // though "projection" alone (projection lines of upper floors) is annotation
   if (/projection/.test(n) && /wall|(^|[^a-z])rcc([^a-z]|$)/.test(n.replace(/\./g, ""))) return "walls";
+  // longitudinal / cross sections drawn on their own layers ("S-L.S.SLAB LINE", "LONG SECTION", "X-SEC"): not the plan
+  if (/(^|[^a-z])l\.?s\.?[-_ .]|long(itudinal)?[-_ ]?sec|cross[-_ ]?sec|x[-_ ]sec/i.test(n)) return "ignore";
   // site / plot lines are never the slab: plot boundary, property line, setback / margin, parcel, road
   if (/plot|parcel|property|setback|margin|(^|-)road|driveway|compound-?wall|site-?(boundary|plan|layout)/.test(n)) return "ignore";
   if (/parapet|compound|hatch|elev(?!ational)|(^|-)elv|sec(tion)?(-|$)|text|txt|(^|-)dim|furn|door|win(dow)?(-|$)|grid|axis|template|title|border|frame|table|legend|name-?plate|nmplt|revision|slab-?thk|thk-text|projection|leader|steel|reinf|sleeve|(^|-)level|symbol|note|defpoints|drip|mould|企口|文字|标注|轴|图框|说明|标高|门|窗|填充|索引|修改|问题|钢筋|信息|分界/.test(n)) return "ignore";
@@ -61,6 +63,8 @@ export function suggestLayerRole(name: string): Role {
   // and "S_B_300x600" / "S-B-230X750" (beams by size); "S_B_PROJ." (projections), "S_B_SB" (slab bands) stay annotation
   const bare = name.trim().replace(/^.*\$0\$/, "");
   if (/^s[-_ ]?c\d{1,2}([-_ ]|$)/i.test(bare)) return "columns";
+  // "SC-UP TO TER", "SC-UP TO TOP", "S-C-ABOVE PLINTH": column layers named by the floors they run to
+  if (/^s[-_ ]?c[-_ ]?(up|above|to|below|from)\b/i.test(bare)) return "columns";
   // beams named by their size: "S_B_300x600", "B-230X600.", "BEAM 300X750" (a column size "C450X600" is handled below)
   if (/^(s[-_ ]?)?b[-_ ]?\d{3,4}\s*[x×*]\s*\d{3,4}/i.test(bare)) return "beams";
   // AIA / NCS layer names from Revit and US-style offices: A-FLOR-OTLN floor outline (slab edge), A-FLOR-EVTR lift,
