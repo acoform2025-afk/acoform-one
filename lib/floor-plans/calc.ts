@@ -90,6 +90,7 @@ export type Takeoff = {
   shell?: ShellMeta;
   system?: "tierod" | "flattie" | "acoform";   // formwork system for this plan only (unset = company setting)
   building?: Building;                  // every level of the building (read from the drawing) + open questions — on the typical plan
+  questionsOpen?: { id: string; to: string; text: string }[];   // the clarifications still open (levels + measurement), kept for the layout / 3D pages
   parentPlan?: string;                  // this plan is one level's own plan, made from that typical plan
   locked?: { at: string };                // model locked: measurements cannot be changed until it is unlocked
   panelEdits?: Record<string, number[]>;   // wall faces laid out by hand: face code → panel widths (replace the automatic layout)

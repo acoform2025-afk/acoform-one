@@ -47,6 +47,18 @@ export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | nul
   if ((auto?.columns?.length ?? 0) === 0 && (t.columns?.length ?? 0) === 0 && scope !== "vertical") ask("m-cols", "structure", "No columns were found — the building is taken as a shear-wall structure (walls carry the load). Please confirm, or send the column schedule.", "Column panels are a separate set of pieces.");
   if (walls && (totals.wall_length ?? 0) > 0 && p.floorHeight && section && Math.abs(section.floorMm - Math.round(p.floorHeight * 1000)) > 10) ask("m-fh", "architect", `Floor height: the sections show ${section.floorMm} mm but ${Math.round(p.floorHeight * 1000)} mm is used. Which is right?`, "The floor height sets every wall panel height.");
   // what the client must settle
+  // — the designer's checklist before the shell plan / 3D (what ACOFORM's engineers ask on their "Checklist#1" sheets) —
+  // from which level the aluminium formwork starts (stilt / ground / 1st): never assumed
+  ask("m-start", "client", `From which level is the aluminium formwork to start (stilt, ground or 1st floor), and up to which level? The typical plan is taken from the first numbered floor upward meanwhile.`, "The start and end levels decide the number of pours, the set size and the price.");
+  // door openings in RCC walls: their height and the level it is measured from
+  const doors = (auto?.wallOpenings ?? []).filter((o) => o.door).length;
+  if (walls && doors > 0) ask("m-door-h", "architect", `${doors} door opening${doors === 1 ? "" : "s"} found in the RCC walls. Please confirm the opening heights and the level they are measured from (finished floor or slab top): ${p.sillMm != null ? "" : "2100 mm from the slab top is used meanwhile."}`.trim(), "The wall panel above a door is cut to the opening height; the reference level moves it by the floor finish.");
+  // beams with no size on the plan or in the schedule: depth assumed
+  const bs = (auto?.notes ?? []).find((n) => n.kind === "beam-size");
+  if (deck && bs?.n) ask("m-beam-marks", "structure", `${bs.n} beam${bs.n === 1 ? "" : "s"} on the plan ${bs.n === 1 ? "has" : "have"} no size written and no mark in the beam schedule (${bs.text ?? "assumed from the drawn width"}). Please give their width and depth.`, "Beam side and bottom panels are cut to the beam size; a wrong depth changes the panel list.");
+  // inverted / up-stand beams: formed on both faces above the slab, not under it
+  const inv = (auto?.upstands ?? []).length;
+  if (deck && inv > 0) ask("m-inverted", "structure", `${inv} inverted beam${inv === 1 ? "" : "s"} / upstand${inv === 1 ? "" : "s"} found (drawn above the slab). Please confirm their height above the slab and that they are cast with the slab.`, "An inverted beam is formed with two faces above the slab; a beam below the slab with sides and a soffit.");
   ask("m-scope", "client", `Scope used: ${SCOPE_TEXT[scope]}. Confirm, and confirm the number of sets (one set per block, or one set shared between blocks).`, "Scope and sets decide the quoted quantity.");
   if ((totals.quote_area ?? 0) > 0 && (p.extraPct ?? rules.extraPct) > 0) ask("m-extra", "client", `${p.extraPct ?? rules.extraPct} % is added for wastage / specials. Confirm this basis for the quote.`, "Standard allowance on top of the measured contact area.");
   return Q;

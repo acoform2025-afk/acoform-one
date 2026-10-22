@@ -399,6 +399,17 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
   const [choosing, setChoosing] = useState(false);          // user asked to pick another drawing
   const [autoNote, setAutoNote] = useState<string | null>(null);
   const [autoSave, setAutoSave] = useState(false);
+  // the clarifications still open (levels + measurement) are kept on the plan, so the layout / 3D pages can show
+  // what is unresolved before the design is trusted
+  const extraQ = useMemo(() => (isDxf && t.building && !t.parentPlan ? measureQuestions(t, totals, auto, rules, modelRef.current ? drawingSection(modelRef.current) : null) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isDxf, t.building, t.parentPlan, t.params, t.shapes, totals, auto, rules]);
+  useEffect(() => {
+    if (!canEdit || !t.building) return;
+    const saved = t.building.questions;
+    const open = [...saved.filter((q) => !q.done), ...extraQ.filter((q) => !saved.some((x) => x.id === q.id))].map((q) => ({ id: q.id, to: q.to, text: q.text }));
+    if (JSON.stringify(open) !== JSON.stringify(t.questionsOpen ?? [])) update((p) => ({ ...p, questionsOpen: open }));
+  }, [canEdit, t.building, extraQ, t.questionsOpen, update]);
   const autoDone = useRef(false);
   const [waitedProject, setWaitedProject] = useState(false);
   useEffect(() => { if (!projectPending) return; const h = setTimeout(() => setWaitedProject(true), 90_000); return () => clearTimeout(h); }, [projectPending]);
@@ -990,7 +1001,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
 
         {isDxf && t.building && !t.parentPlan ? (
           <BuildingPanel building={t.building} parts={parts.map((q) => ({ n: q.n, title: q.title, px: q.px }))} typical={{ contact: totals.contact_area, quote: totals.quote_area, vertical: totals.vertical_area, column: totals.column_area, clearMm: Math.round(totals.clear_height * 1000), slabMm: Number(t.params.slabMm) || 0, ...(project?.columns?.[0] && t.building ? (() => { const per = perimeterByLevel(project.columns[0], t.building.levels); const pl = parseLevelName(plan.name); const ref = pl.kind === "floor" && pl.nos[0] ? `f${pl.nos[0]}` : t.building.levels.find((l) => l.kind === "floor" && l.use === "typical")?.key; return { colPerimeter: per, refKey: ref }; })() : {}) }} siblings={siblings} planId={plan.id} canEdit={canEdit}
-            extra={measureQuestions(t, totals, auto, rules, modelRef.current ? drawingSection(modelRef.current) : null)}
+            extra={extraQ}
             onMakeAll={makeAllLevelPlans} onChange={setBuilding} onReread={() => { const b = readLevels({ floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, currentPart?.n); if (b) setBuilding({ ...b, edited: false }); }} onMeasure={makeLevelPlan} onShowPart={(q) => fitBox(q.px)} />
         ) : null}
         {t.parentPlan ? <p className="rounded-lg border border-graphite-800 bg-graphite-900 p-3 text-[11px] text-graphite-400">This is one level&apos;s own plan. The whole building is listed on its typical plan: <Link href={`/floor-plans/${t.parentPlan}`} className="text-brand-orange hover:underline">open it</Link>.</p> : null}

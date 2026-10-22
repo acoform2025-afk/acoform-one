@@ -87,6 +87,22 @@ export default async function PanelsPage({ params, searchParams }: { params: Pro
           <a href={`/floor-plans/${id}/panels/export?${qs}&format=pdf`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-brand-orange px-3 py-2 text-xs font-medium text-white hover:opacity-90"><Download className="size-3.5" />BOM PDF</a>
         </div>
       </div>
+      {(() => {
+        const open = (r.t.questionsOpen ?? []).length ? r.t.questionsOpen! : (r.t.building?.questions ?? []).filter((q) => !q.done);
+        const byTo = (to: string) => open.filter((q) => q.to === to).length;
+        return open.length ? (
+          <div className="mt-3 rounded-lg border border-signal-amber/50 bg-signal-amber/10 px-4 py-3 text-xs text-graphite-200">
+            <p className="font-medium text-signal-amber">Before this layout is trusted: {open.length} clarification{open.length === 1 ? "" : "s"} still open{[["architect", byTo("architect")], ["structure", byTo("structure")], ["client", byTo("client")]].filter(([, n]) => n).map(([k, n]) => ` · ${n} for the ${k}`).join("")}.</p>
+            <ul className="mt-1.5 space-y-0.5 text-graphite-300">
+              {open.slice(0, 5).map((q) => <li key={q.id}>— {q.text.length > 160 ? q.text.slice(0, 157) + "…" : q.text}</li>)}
+              {open.length > 5 ? <li className="text-graphite-500">… and {open.length - 5} more</li> : null}
+            </ul>
+            <p className="mt-1.5 text-graphite-400">The layout below uses the assumptions written in each question. Tick them off on the <Link href={`/floor-plans/${id}`} className="text-brand-orange hover:underline">floor plan</Link> as answers come in, or print the <a href={`/floor-plans/${id}/questions`} target="_blank" rel="noreferrer" className="text-brand-orange hover:underline">checklist sheet</a> for the client.</p>
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-signal-green">All clarifications are closed: levels, slab, beams and openings are as confirmed.</p>
+        );
+      })()}
 
       <form className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-graphite-800 bg-graphite-900 p-3 text-xs">
         <label className="flex flex-col gap-1"><span className="uppercase tracking-wide text-graphite-500">Standard wall panel height (mm)</span><input name="h" type="number" defaultValue={opt.stdHeight} className="w-32 rounded border border-graphite-700 bg-graphite-950 px-2 py-1 text-sm text-graphite-100" /></label>
