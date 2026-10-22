@@ -14,6 +14,7 @@ import { BuildingPanel, type SiblingPlan } from "./building-panel";
 import { parseLevelName, readBuilding, type Building } from "@/lib/floor-plans/building";
 import { perimeterByLevel } from "@/lib/floor-plans/column-schedule";
 import { alignFitAuto, linkFor, mergeStructural } from "@/lib/floor-plans/structural-link";
+import { slabFromNotes } from "@/lib/floor-plans/dxf";
 import { EMPTY_DICT, layerKey, learnedRole, type Dictionary } from "@/lib/floor-plans/vocab";
 import type { ProjectFacts } from "@/lib/floor-plans/project-facts";
 import { teachDrawing } from "../dictionary-actions";
@@ -491,7 +492,10 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     const secFrom = ownSec ? "from the sections" : `from the section in "${project?.sectionFrom}"`;
     const fhRead = sec?.floorMm ?? info.heightMm ?? project?.floorMm;
     const fh = fhRead && (force || (Math.round((t.params.floorHeight || 0) * 1000) === 3000 && fhRead !== 3000)) ? fhRead : undefined;
-    const slabMm = sec && (force || (t.params.slabMm ?? 150) === 150) && sec.slabMm !== (t.params.slabMm ?? 150) ? sec.slabMm : undefined;
+    // no section: the structural note ("ALL RCC SLAB 150 THK UNLESS …") of this drawing, else of the project's drawings
+    const noteSlab = sec ? null : slabFromNotes(modelRef.current.texts ?? []) ?? (project?.slabMm ? { mm: project.slabMm, note: `the notes of "${project.slabFrom}"` } : null);
+    const slabRead = sec?.slabMm ?? noteSlab?.mm;
+    const slabMm = slabRead && (force || (t.params.slabMm ?? 150) === 150) && slabRead !== (t.params.slabMm ?? 150) ? slabRead : undefined;
     const beamDepthMm = sec?.beamMm && (force || t.params.beamDepthMm == null) ? sec.beamMm : undefined;
     const fl = pick?.floors ?? info.floors ?? project?.floors;
     const floors = fl && (force || (t.params.floors ?? 1) <= 1) ? fl : undefined;
@@ -500,7 +504,8 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     if (floors) notes.push(`${floors} floors (${pick?.floors ? "from the drawing title" : info.floors ? info.source ?? "from the drawing" : `from "${project?.floorsFrom}"`})`);
     if (fh) notes.push(`floor height ${fh} mm (${sec?.floorMm ? secFrom : info.heightMm ? (info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing") : `from "${project?.floorMmFrom}"`})`);
     if (sec) notes.push(`${ownSec ? "" : `section of "${project?.sectionFrom}" — `}sections: slab ${sec.slabMm} mm concrete${sec.finishMm ? ` (+ ${sec.finishMm} mm floor finish, ${sec.totalMm} mm in all — finish not formed)` : ""}${slabMm ? "" : " — kept the slab you set"}${sec.beamMm ? ` · beams / lintels ${sec.beamMm} mm deep` : ""}`);
-    if (force && !pick && !fh && !floors && !sec) notes.push("nothing new could be read — set the region, floors and floor height by hand");
+    if (!sec && noteSlab) notes.push(`slab ${noteSlab.mm} mm (from ${noteSlab.note})`);
+    if (force && !pick && !fh && !floors && !sec && !noteSlab) notes.push("nothing new could be read — set the region, floors and floor height by hand");
     // the whole building: every level, its drawing and the open questions (kept once the estimator has edited it, unless read again)
     const pickedPart = pick ? parts.find((q) => { const i = boxI(q.px, pick.px); return i > 0.85 * boxA(q.px) && i > 0.6 * boxA(pick.px); }) : currentPart;
     const bld = force || !t.building || !t.building.edited ? readLevels({ floors: floors ?? t.params.floors, floorMm: fh ?? Math.round((t.params.floorHeight || 3) * 1000), slabMm: slabMm ?? t.params.slabMm }, pickedPart?.n) : null;

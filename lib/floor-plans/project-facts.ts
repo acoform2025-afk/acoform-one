@@ -5,12 +5,12 @@
  * kept as that file's "drawing facts", and every other drawing of the same project (lead) uses them where it says
  * nothing itself. What a drawing states about itself always wins over what another drawing says.
  */
-import { beamSchedule, drawingParts, drawingSection, floorInfoFromTexts, partsSection, suggestedRoles, type DxfModel, type PartKind } from "./dxf";
+import { beamSchedule, drawingParts, drawingSection, floorInfoFromTexts, partsSection, slabFromNotes, suggestedRoles, type DxfModel, type PartKind } from "./dxf";
 import { statedLevels, type Level } from "./building";
 import { columnSchedules, scheduleSummary, type ColumnSchedule } from "./column-schedule";
 import type { SectionLevels } from "./section-read";
 
-export const FACTS_V = 2;   // 2: level ladders with dotted marks, sections on sheets, column schedules
+export const FACTS_V = 3;   // 2: level ladders with dotted marks, sections on sheets, column schedules
 export type BeamSize = { b: number; d: number };
 export type DrawingFacts = {
   v: number; at: string;
@@ -20,6 +20,7 @@ export type DrawingFacts = {
   floors?: number; floorMm?: number; floorNote?: string;  // number of floors / floor height written in its notes
   beams?: Record<string, BeamSize>;                       // its beam schedule: mark → width × depth (mm)
   columns?: ColumnSchedule[]; columnsNote?: string;       // its column schedule(s): size of every column mark per level
+  slabMm?: number; slabNote?: string;                     // slab thickness stated in its structural notes
 };
 
 /** What one drawing file states for the whole project. */
@@ -41,6 +42,7 @@ export function drawingFacts(model: DxfModel, unitToM: number): DrawingFacts {
     ...(info.floors ? { floors: info.floors } : {}), ...(info.heightMm ? { floorMm: info.heightMm } : {}), ...(info.source ? { floorNote: info.source } : {}),
     ...(Object.keys(beams).length ? { beams } : {}),
     ...(columns.length ? { columns, columnsNote: columns.map(scheduleSummary).join("; ") } : {}),
+    ...(() => { const sn = slabFromNotes(model.texts ?? []); return sn ? { slabMm: sn.mm, slabNote: sn.note } : {}; })(),
   };
 }
 
@@ -53,6 +55,7 @@ export type ProjectFacts = {
   floorMm?: number; floorMmFrom?: string;
   beams: Record<string, BeamSize>; beamsFrom: Record<string, string>;
   columns?: ColumnSchedule[]; columnsFrom?: string; columnsNote?: string;   // the column schedule (sizes per level)
+  slabMm?: number; slabFrom?: string;                                       // slab thickness from a drawing's structural notes
   conflicts: string[];                                                      // drawings that disagree — for the architect
   missing: string[];                                                        // drawings of the project not read yet
 };
@@ -117,6 +120,8 @@ export function mergeFacts(others: ProjectDrawing[]): ProjectFacts {
   // column schedule: the drawing with the most level rows
   const cs = read.filter((d) => d.facts.columns?.length).sort((a, b) => Math.max(...b.facts.columns!.map((c) => c.rows.length)) - Math.max(...a.facts.columns!.map((c) => c.rows.length)));
   if (cs[0]) { out.columns = cs[0].facts.columns; out.columnsFrom = cs[0].name; out.columnsNote = cs[0].facts.columnsNote; give(cs[0], `column schedule (${cs[0].facts.columnsNote})`); }
+  const sn = read.find((d) => d.facts.slabMm);
+  if (sn) { out.slabMm = sn.facts.slabMm; out.slabFrom = sn.name; give(sn, `slab ${sn.facts.slabMm} mm (notes)`); }
   out.drawings = others.map((d) => ({ id: d.id, name: d.name, what: d.facts ? containsText(d.facts.contains) : "not read yet", gave: gave.get(d.id) ?? [] }));
   if (out.conflicts.length > 12) out.conflicts = [...out.conflicts.slice(0, 12), `… and ${out.conflicts.length - 12} more`];
   return out;

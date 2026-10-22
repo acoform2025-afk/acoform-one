@@ -521,6 +521,12 @@ export function readDxf(raw: string): DxfModel {
   const info = (l: string) => byLayer.get(l) ?? (byLayer.set(l, { name: l, count: 0, closed: 0, suggested: suggestRole(l) }), byLayer.get(l)!);
   for (const p of paths) { const li = info(p.layer); li.count++; if (p.closed) li.closed++; }
   for (const [l, n] of skippedBy) info(l).skipped = n;
+  // a drawing that marks its RCC walls on their own layer ("MIVAN RCC STRUCTURE WALL", "S-RCC WALL", "SHEAR WALL",
+  // "g-r.c.c"): the masonry / AAC block / partition / brick layers beside them are not formwork
+  {
+    const rccWall = [...byLayer.values()].some((l) => l.suggested === "walls" && l.count >= 10 && /r\.?c\.?c|shear|mivan|alu(minium)?\s*form|concrete|struct/i.test(l.name));
+    if (rccWall) for (const l of byLayer.values()) if (l.suggested === "walls" && /masonry|brick|\baac\b|block\s*wall|partition|light\s*weight|siporex/i.test(l.name) && !/r\.?c\.?c|shear|concrete/i.test(l.name)) { l.vetoed = "walls"; l.suggested = "ignore"; }
+  }
   // a layer named as walls / columns that holds only circles (room-type tags, grid bubbles) is not structure
   {
     const circ = new Map<string, number>();
@@ -1726,6 +1732,34 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
         for (const r of closedLoops(ps, tol)) { const a = Math.abs(polyArea(r)) * u2; if (a >= 0.5) out.push({ depth, perimeter: polyLength(r, true) * u, area: a }); }
       }
       for (const x of sunkX) if (!keep || keep({ layer: "", pts: [[(x.box[0] + x.box[2]) / 2, (x.box[1] + x.box[3]) / 2]], closed: false })) out.push({ depth: x.depth, perimeter: x.perimeter, area: x.area });
+      // tags written in the room ("300 SUNK", "150THK 450DN"): the room is the smallest space the walls close round
+      // the tag (a hole of the wall outline); one room counted once, the deepest tag in it
+      if (!out.length) {
+        // the room round a tag: the nearest wall face to the left, right, below and above it (rooms are rectangles
+        // far more often than not) — 0.8 … 60 m², one room counted once
+        const edges: [Pt, Pt][] = []; for (const r of U.rings) for (let i = 0; i < r.length; i++) edges.push([r[i], r[(i + 1) % r.length]]);
+        const reach = 12 / u;
+        const ray = (x: number, y: number, dir: 0 | 1 | 2 | 3) => {
+          let best = reach;
+          for (const [a, b] of edges) {
+            if (dir < 2) { if ((a[1] - y) * (b[1] - y) > 0 || a[1] === b[1]) continue; const xi = a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]); const d = dir === 0 ? x - xi : xi - x; if (d > 0 && d < best) best = d; }
+            else { if ((a[0] - x) * (b[0] - x) > 0 || a[0] === b[0]) continue; const yi = a[1] + ((x - a[0]) * (b[1] - a[1])) / (b[0] - a[0]); const d = dir === 2 ? y - yi : yi - y; if (d > 0 && d < best) best = d; }
+          }
+          return best;
+        };
+        const got = new Map<string, { depth: number; box: [number, number, number, number] }>();
+        for (const tg of sunkTags(model.texts ?? [])) {
+          if (keep && !keep({ layer: "", pts: [[tg.x, tg.y]], closed: false })) continue;
+          if (!onFloor2([[tg.x, tg.y]])) continue;
+          const l = ray(tg.x, tg.y, 0), r = ray(tg.x, tg.y, 1), d = ray(tg.x, tg.y, 2), up = ray(tg.x, tg.y, 3);
+          if ([l, r, d, up].some((v) => v >= reach)) continue;
+          const box: [number, number, number, number] = [tg.x - l, tg.y - d, tg.x + r, tg.y + up];
+          const a = (box[2] - box[0]) * (box[3] - box[1]) * u2; if (a < 0.8 || a > 60) continue;
+          const k = box.map((v) => Math.round(v * u * 10)).join(":");
+          const o = got.get(k); if (!o || o.depth < tg.depth) got.set(k, { depth: tg.depth, box });
+        }
+        for (const { depth, box } of got.values()) out.push({ depth, perimeter: 2 * ((box[2] - box[0]) + (box[3] - box[1])) * u, area: (box[2] - box[0]) * (box[3] - box[1]) * u2 });
+      }
       return out;
     })(),
     wallOpenings: wallOpeningsOf(U.rings, (model.dw ?? []).filter((p) => !keep || keep(p)), u),
@@ -2470,4 +2504,38 @@ function markFormworkScope(parts: DrawingPart[], texts: DxfText[], unitToM: numb
 function keepPart(p: { title: string; w: number; h: number; count: number }) {
   // untitled strips (notes, title blocks, text rows) are not drawings
   return !!p.title || (Math.min(p.w, p.h) >= 4 && p.count >= 40);
+}
+
+/**
+ * Slab thickness stated in the structural notes: "ALL R.C.C. SLAB 150MM THK. UNLESS OTHERWISE SPECIFIED", "ALL SLABS ARE
+ * 125 THK", "SLAB THICKNESS = 150 MM", or, without such a note, the thickness most slab tags give ("175MM THK SLAB",
+ * "SLAB 150 THK"). Thicker marked areas (PT slab 250, drop 500) are not the typical slab.
+ */
+export function slabFromNotes(texts: DxfText[]): { mm: number; note: string } | null {
+  const clean = (s: string) => s.replace(/\\[A-Za-z][^;]*;/g, "").replace(/\\P/g, " ").replace(/[{}]/g, "").replace(/\br\.\s?c\.\s?c\.?/gi, "RCC").replace(/\bthk\./gi, "THK").replace(/\s+/g, " ").trim();
+  const ok = (n: number) => n >= 90 && n <= 400;
+  for (const t of texts) {
+    const s = clean(t.text); if (s.length > 160) continue;
+    const m = s.match(/\ball\b[^.]{0,30}\bslabs?\b[^0-9]{0,25}(\d{2,3})\s*(?:mm)?\s*\.?\s*(?:thk|thick|thickness)?/i) ?? s.match(/\bslab\s*(?:thk|thickness)\s*[:=-]?\s*(\d{2,3})\s*(?:mm)?\b(?![^.]*\bdrop\b)/i);
+    if (m && ok(+m[1]) && !/\bpt\b|post.?tension|drop|cap\b|sunk|down/i.test(s.replace(/unless[^.]*/i, ""))) return { mm: +m[1], note: `"${s.slice(0, 70)}"` };
+  }
+  const c = new Map<number, number>();
+  for (const t of texts) {
+    const s = clean(t.text); if (s.length > 40 || /\bpt\b|drop|cap\b|sunk|\bdn\b|down|wall/i.test(s)) continue;
+    const m = s.match(/^(?:rcc\s*)?(\d{2,3})\s*(?:mm)?\.?\s*(?:thk|thick)\.?\s*(?:rcc\s*)?slab$/i) ?? s.match(/^(?:rcc\s*)?slab\s*(\d{2,3})\s*(?:mm)?\.?\s*(?:thk|thick)\.?$/i);
+    if (m && ok(+m[1])) c.set(+m[1], (c.get(+m[1]) ?? 0) + 1);
+  }
+  const best = [...c.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best ? { mm: best[0], note: `${best[1]} slab tag${best[1] === 1 ? "" : "s"} "${best[0]} THK SLAB"` } : null;
+}
+
+/** Sunk / dropped slab tags written in the plan: "300 SUNK", "SLAB 100 MM SUNK", "150THK 450DN", "SLAB 750 DOWN". */
+export function sunkTags(texts: DxfText[]): { depth: number; x: number; y: number; text: string }[] {
+  const out: { depth: number; x: number; y: number; text: string }[] = [];
+  for (const t of texts) {
+    const s = t.text.replace(/\\[A-Za-z][^;]*;/g, "").replace(/\s+/g, " ").trim(); if (s.length > 40) continue;
+    const m = s.match(/(\d{2,4})\s*(?:mm)?\s*(?:sunk|sunken|depressed)\b/i) ?? s.match(/(?:sunk|sunken)\s*(?:by)?\s*(\d{2,4})/i) ?? s.match(/(\d{2,4})\s*(?:mm)?\s*(?:dn|down)\b/i);
+    if (m && +m[1] >= 25 && +m[1] <= 1500) out.push({ depth: +m[1], x: t.x, y: t.y, text: s });
+  }
+  return out;
 }
