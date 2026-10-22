@@ -76,11 +76,18 @@ export function columnSchedules(textsIn: DxfText[], unitToM: number): ColumnSche
   return out;
 }
 
-/** "13th FLOOR SLAB LVL TO 14th FLOOR SLAB LVL" → from 13th floor to 14th floor; "FOOTING TO PLINTH"; "COLUMN UP TO 3RD FLOOR". */
+/** "13th FLOOR SLAB LVL TO 14th FLOOR SLAB LVL" → from 13th floor to 14th floor; "FOOTING TO PLINTH"; "COLUMN UP TO 3RD FLOOR";
+ *  "(GROUND FL. ROOF SLAB) TO (5th FL. ROOF SLAB)" → from the 1st floor to the 6th (the roof slab of a floor is the floor of the next). */
 export function levelRange(label: string): { from?: ColRow["from"]; to?: ColRow["to"] } {
-  const s = label.replace(/column (above|up to)/gi, " ").replace(/\s+/g, " ").trim();
+  const s = label.replace(/column (above|up to)/gi, " ").replace(/[()]/g, " ").replace(/\bbase\.?(?=\s|$)/gi, "basement ").replace(/\s+/g, " ").trim();
   const parts = s.split(/\bto\b/i).map((p) => p.trim()).filter(Boolean);
-  const one = (p: string) => { const l = parseLevelName(p); return l.kind === "other" && !l.nos.length ? undefined : { kind: l.kind, no: l.nos[0] }; };
+  const one = (p: string) => {
+    // "nth FL. ROOF SLAB" / "GROUND FL. ROOF SLAB": the slab over that floor = the next floor's level
+    const over = /roof\s*slab|ceiling\s*slab/i.test(p) && !/^\s*roof\b|terrace/i.test(p);
+    const l = parseLevelName(over ? p.replace(/roof\s*slab|ceiling\s*slab/gi, "slab") : p); if (l.kind === "other" && !l.nos.length) return undefined;
+    if (over) { if (l.kind === "basement") return l.nos[0] != null && l.nos[0] > 1 ? { kind: "basement" as LevelKind, no: l.nos[0] - 1 } : { kind: "ground" as LevelKind }; if (l.kind === "ground" || l.kind === "stilt") return { kind: "floor" as LevelKind, no: 1 }; if (l.kind === "floor" && l.nos[0] != null) return { kind: "floor" as LevelKind, no: l.nos[0] + 1 }; }
+    return { kind: l.kind, no: l.nos[0] };
+  };
   if (parts.length >= 2) return { from: one(parts[0]), to: one(parts[1]) };
   if (parts.length === 1) return /up to|upto/i.test(label) ? { to: one(parts[0]) } : { from: one(parts[0]) };
   return {};
@@ -91,13 +98,16 @@ export function levelRange(label: string): { from?: ColRow["from"]; to?: ColRow[
 export function sizesAtLevel(sch: ColumnSchedule, kind: LevelKind, no?: number): Record<string, ColSize> | null {
   const rank = (k: LevelKind, n?: number) => k === "basement" || k === "service" ? -(n ?? 1) : k === "ground" || k === "stilt" || k === "podium" ? 0 : k === "floor" ? (n ?? 0) : k === "terrace" ? 999 : k === "headroom" ? 1000 : NaN;
   const r = rank(kind, no); if (!Number.isFinite(r)) return null;
+  // every row whose range holds the level gives the sizes of its marks (a dimensioned schedule has one range per
+  // column, so the rows hold different marks); the first row naming a mark wins
+  let out: Record<string, ColSize> | null = null;
   for (const row of sch.rows) {
     const a = row.from ? rank(row.from.kind, row.from.no) : -Infinity, b = row.to ? rank(row.to.kind, row.to.no) : Infinity;
     if (!Number.isFinite(a) && !Number.isFinite(b)) continue;
     // the row "A slab lvl to B slab lvl" is the column between slab A and slab B: the columns of floor A
-    if (r >= a && r < (Number.isFinite(b) ? b : Infinity)) return row.sizes;
+    if (r >= a && r < (Number.isFinite(b) ? b : Infinity)) { out = out ?? {}; for (const [k, v] of Object.entries(row.sizes)) if (!out[k]) out[k] = v; }
   }
-  return null;
+  return out;
 }
 
 /** One line for the read-out: "28 columns · sizes change at 2nd, 7th and 13th floor". */
@@ -123,4 +133,55 @@ export function perimeterByLevel(sch: ColumnSchedule, levels: { key: string; kin
     out[l.key] = Object.values(sz).reduce((s, c) => s + 2 * (c.b + c.d), 0);
   }
   return out;
+}
+
+/**
+ * Column schedules drawn as sections with DIMENSIONS instead of a written size (one strip per column mark, the mark
+ * under the strip, each level range a cell headed "(GROUND FL. ROOF SLAB) TO (5th FL. ROOF SLAB)" with the column
+ * drawn below it and dimensioned): the column's size is its overall horizontal dimension × overall vertical one.
+ */
+export function dimColumnSchedules(textsIn: DxfText[], unitToM: number): ColumnSchedule[] {
+  const texts = textsIn.map((t) => ({ ...t, text: t.text.replace(/\\[A-Za-z]/g, "").replace(/\s+/g, " ").trim() }));
+  const dims = texts.filter((t) => t.kind === "dim" && /^\d{3,4}$/.test(t.text));
+  if (dims.length < 6) return [];
+  const LV = /(fl\b|fl\.|floor|slab|lvl|level|footing|plinth|foundation|terrace|basement|stilt|ground)/i;
+  const tos = texts.filter((t) => /^to$/i.test(t.text));
+  // cell titles: "<level>" / "TO" / "<level>" stacked (or on one line)
+  type Cell = { x: number; y: number; yLow: number; label: string };
+  const cells: Cell[] = [];
+  for (const t of tos) {
+    const up = texts.filter((o) => LV.test(o.text) && o.text.length <= 50 && Math.abs(o.x - t.x) <= 2 * t.h && o.y > t.y && o.y - t.y <= 4 * t.h).sort((a, b) => a.y - b.y)[0];
+    const dn = texts.filter((o) => LV.test(o.text) && o.text.length <= 50 && Math.abs(o.x - t.x) <= 2 * t.h && o.y < t.y && t.y - o.y <= 4 * t.h).sort((a, b) => b.y - a.y)[0];
+    if (up && dn) cells.push({ x: t.x, y: up.y, yLow: dn.y, label: `${up.text} TO ${dn.text}` });
+  }
+  for (const t of texts) if (/\bto\b/i.test(t.text) && LV.test(t.text) && t.text.length <= 70 && /^\(?.{3,}\bto\b.{3,}$/i.test(t.text)) cells.push({ x: t.x, y: t.y, yLow: t.y, label: t.text });
+  if (cells.length < 3) return [];
+  const marks = texts.filter((t) => MARK.test(t.text));
+  // strip pitch: the usual x gap between neighbouring title columns
+  const xsU = [...new Set(cells.map((c) => Math.round(c.x / 50) * 50))].sort((a, b) => a - b);
+  const gaps = xsU.slice(1).map((x, i) => x - xsU[i]).filter((g) => g > 0.5 / unitToM).sort((a, b) => a - b);
+  const pitch = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 4 / unitToM;
+  const rows = new Map<string, ColRow>(); const markSet = new Set<string>();
+  for (const c of cells) {
+    // the cell's drawing: below its title, down to the next title in the same strip
+    const below = cells.filter((o) => o !== c && Math.abs(o.x - c.x) < pitch * 0.3 && o.y < c.yLow).sort((a, b) => b.y - a.y)[0];
+    const yMin = below ? below.y : c.yLow - pitch;
+    const inC = dims.filter((d) => d.x > c.x - pitch * 0.1 && d.x < c.x + pitch * 0.9 && d.y < c.yLow && d.y > yMin);
+    const vert = inC.filter((d) => Math.abs(Math.abs(d.r ?? 0) - Math.PI / 2) < 0.2).map((d) => +d.text);
+    const hor = inC.filter((d) => Math.abs(d.r ?? 0) < 0.2 || Math.abs(Math.abs(d.r ?? 0) - Math.PI) < 0.2).map((d) => +d.text);
+    if (!vert.length || !hor.length) continue;
+    const b = Math.max(...hor), d = Math.max(...vert);
+    if (b < 150 || d < 150 || b > 4000 || d > 4000) continue;
+    // the strip's mark: below the strip (or above it), nearest in x
+    const mk = marks.filter((m) => m.x > c.x - pitch * 0.1 && m.x < c.x + pitch * 0.9).sort((a, b2) => Math.abs(a.x - (c.x + pitch * 0.4)) - Math.abs(b2.x - (c.x + pitch * 0.4)))[0];
+    if (!mk) continue;
+    const mark = mk.text.toUpperCase().replace(/[-_ ]/g, ""); markSet.add(mark);
+    const key = c.label.toUpperCase().replace(/\s+/g, " ");
+    const row = rows.get(key) ?? { label: c.label, ...levelRange(c.label), sizes: {} };
+    if (!row.sizes[mark]) row.sizes[mark] = { b: Math.min(b, d), d: Math.max(b, d) };
+    rows.set(key, row);
+  }
+  const rk = (r: ColRow) => r.from?.kind === "floor" ? r.from.no ?? 0 : r.from?.kind === "ground" ? 0 : r.from?.kind === "basement" ? -(r.from.no ?? 1) : 500;
+  const out = [...rows.values()].filter((r) => Object.keys(r.sizes).length).sort((a, b) => rk(a) - rk(b));
+  return markSet.size >= 2 && out.length ? [{ marks: [...markSet].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), rows: out, title: "column schedule (dimensioned sections)" }] : [];
 }
