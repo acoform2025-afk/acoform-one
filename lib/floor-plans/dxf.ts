@@ -11,6 +11,7 @@ import { beamSizeFromLayer, doorWindowKind, isNoiseLayer, isRailLayer, suggestLa
 import { meaningOf, type Dictionary } from "./vocab";
 import { agreedSection, parseSectionMarker, SECTION_LAYER, sectionLevels, type SectionLevels } from "./section-read";
 import { minOf, maxOf } from "@/lib/util/minmax";
+import { columnLayerRange, colLayerWords, coversLevel, levelLabel, titleLevels, type ColRange } from "./column-range";
 
 export type DxfPath = { layer: string; pts: Pt[]; closed: boolean; dashed?: boolean };   // dashed: drawn with a broken linetype (hidden / dashed)
 export type DxfLayerInfo = { name: string; count: number; closed: number; suggested: LayerRole; texts?: number; fills?: number; vetoed?: LayerRole; colStrip?: boolean; skipped?: number };   // skipped: lines of a door / window / furniture / dimension layer, not drawn (doors and windows are read as openings in the walls)   // colStrip: a layer named by a size (750, 1200 …) whose filled outlines are built onto the columns — part of the columns   // vetoed: the role the name implies but the drawn content rules out (e.g. a "wall" layer of circles) — never used, also when taught for that name   // count / closed: lines; texts: texts, dimension values, block attributes; fills: hatch / leader outlines
@@ -1232,7 +1233,42 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   const loops = (r: LayerRole, gaps = false) => closedLoops(of(r), tol, gaps).map((pts) => ({ layer: r, pts, closed: true }) as DxfPath);
 
   // columns: small rectangular / round outlines; big or L-shaped ones (shear walls, lift cores) are walls
-  const colAll = outermost(mergeColumnStrips(loops("columns", true).filter((p) => p.pts.length >= 3), tol)).map(({ p }) => {
+  // columns on layers named by their floors ("S-C3-ABOVE HP TO 14", "S-C1-UP TO BAS"): a plan serving one or more
+  // floors keeps only the outlines that stand on those floors (the larger lower-floor outline drawn round the same
+  // column would otherwise hide the size of this floor); outlines kept for some of the plan's floors only are reported
+  let colSrc = of("columns");
+  let colRange: DxfAuto["columnRange"];
+  { const rg = new Map<string, ColRange | null>(); for (const p of colSrc) if (!rg.has(p.layer)) rg.set(p.layer, columnLayerRange(p.layer));
+    if ([...rg.values()].some(Boolean)) {
+      // the plan's title: the biggest text round the floor that names a level ("15TH FLOOR", "2ND TO 13TH FLOOR PLAN")
+      const all = [...colSrc, ...of("walls"), ...of("slab")];
+      const xs = all.flatMap((p) => p.pts.map((q) => q[0])), ys = all.flatMap((p) => p.pts.map((q) => q[1]));
+      const [x0, y0, x1, y1] = [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)], w = x1 - x0, h = y1 - y0;
+      const near = (model.texts ?? []).filter((t) => t.x >= x0 - w * 0.4 && t.x <= x1 + w * 0.15 && t.y >= y0 - h * 0.4 && t.y <= y1 + h * 0.25 && t.text.length <= 70);
+      const maxH = maxOf(near.map((t) => t.h).concat([0]));
+      // a sheet title (title layer) first; otherwise a "… FLOOR / PLAN" text at least half the biggest text's height
+      const cand = near.filter((t) => !NOT_TITLE.test(t.text) && (onTitleLayerT(t) || (/\b(PLAN|FLOOR|FLR|LEVEL|LVL|BASEMENT)\b/i.test(t.text) && t.h >= 0.5 * maxH)))
+        .map((t) => ({ t, lv: titleLevels(t.text) })).filter((c) => c.lv.length)
+        .sort((a2, b2) => (onTitleLayerT(b2.t) ? 1 : 0) - (onTitleLayerT(a2.t) ? 1 : 0) || b2.t.h - a2.t.h);
+      const big = cand[0], title = big?.t.text.replace(/\\[A-Za-z]/g, "").trim();
+      const lv = big?.lv ?? [];
+      if (lv.length) {
+        const dropped = new Map<string, number>(), partial = new Map<string, { n: number; missing: number[] }>();
+        const cnt = (p: DxfPath) => (p.closed ? 1 : 0);
+        const keepP = colSrc.filter((p) => { const r = rg.get(p.layer); if (!r) return true;
+          const on = lv.filter((l) => coversLevel(r, l));
+          if (!on.length) { dropped.set(p.layer, (dropped.get(p.layer) ?? 0) + cnt(p)); return false; }
+          if (on.length < lv.length) { const e = partial.get(p.layer) ?? { n: 0, missing: lv.filter((l) => !coversLevel(r, l)) }; e.n += cnt(p); partial.set(p.layer, e); }
+          return true; });
+        if (keepP.some((p) => p.closed)) {
+          colSrc = keepP;
+          const dl = [...dropped].filter(([, n]) => n > 0), pl = [...partial].filter(([, e]) => e.n > 0);
+          if (dl.length || pl.length) colRange = { title: title ?? "", levels: lv, dropped: dl.map(([layer, n]) => ({ layer, n, range: colLayerWords(layer) })), partial: pl.map(([layer, e]) => ({ layer, n: e.n, range: colLayerWords(layer), missing: e.missing.map(levelLabel) })) };
+        }
+      }
+    } }
+  const colPaths = closedLoops(colSrc, tol, true).map((pts) => ({ layer: "columns", pts, closed: true }) as DxfPath).filter((p) => p.pts.length >= 3);
+  const colAll = outermost(mergeColumnStrips(colPaths, tol)).map(({ p }) => {
     const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]);
     const w = (maxOf(xs) - minOf(xs)) * u, d = (maxOf(ys) - minOf(ys)) * u, area = polyArea(p.pts) * u2;
     // round: many points, as wide as deep and about π/4 of its box; anything else that is not a rectangle is a wall
@@ -1722,6 +1758,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     })(),
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     ...(projUsed.size ? { projectBeamsUsed: [...projUsed].sort() } : {}),
+    ...(colRange ? { columnRange: colRange } : {}),
     ...(marksMissing.size ? { beamMarksMissing: [...marksMissing].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) } : {}),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose.filter((l) => onFloor2(l)),

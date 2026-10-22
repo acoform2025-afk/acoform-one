@@ -59,6 +59,10 @@ export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | nul
   // beam marks on the plan that the beam schedule leaves out (ACOFORM checklist: "beam depth of BK1, BK2 missing")
   const miss = auto?.beamMarksMissing ?? [];
   if (deck && miss.length) ask("m-beam-sched", "structure", `Beam${miss.length === 1 ? "" : "s"} ${miss.slice(0, 12).join(", ")}${miss.length > 12 ? ` and ${miss.length - 12} more` : ""} ${miss.length === 1 ? "is" : "are"} marked on the plan but not in the beam schedule. Please give their width and depth.`, "Beam side and bottom panels are cut to the beam size; the drawn width and the usual depth are used meanwhile.");
+  // columns that end (or start) between the floors one plan serves (Mivan: no column panels where the column is not)
+  const cr = auto?.columnRange;
+  if (cr?.partial.length) { const n = cr.partial.reduce((a, x) => a + x.n, 0); const miss = [...new Set(cr.partial.flatMap((x) => x.missing))];
+    ask("m-col-range", "structure", `The plan "${cr.title}" serves ${cr.levels.length} floors, but ${n} column${n === 1 ? "" : "s"} on it ${n === 1 ? "runs" : "run"} only ${cr.partial.map((x) => `${x.range} (${x.n})`).join(", ")} — so ${n === 1 ? "it is" : "they are"} not there on the ${miss.join(", ")} floor${miss.length === 1 ? "" : "s"}. Please confirm which columns (and sizes) stand on those floors.`, "Column panels are made for the columns on each floor; a column that stops or changes size changes the set."); }
   // inverted / up-stand beams: formed on both faces above the slab, not under it
   const inv = (auto?.upstands ?? []).length;
   if (deck && inv > 0) ask("m-inverted", "structure", `${inv} inverted beam${inv === 1 ? "" : "s"} / upstand${inv === 1 ? "" : "s"} found (drawn above the slab). Please confirm their height above the slab and that they are cast with the slab.`, "An inverted beam is formed with two faces above the slab; a beam below the slab with sides and a soffit.");

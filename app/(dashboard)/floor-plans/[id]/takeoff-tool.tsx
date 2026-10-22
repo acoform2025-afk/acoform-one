@@ -508,6 +508,10 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     const dh = doorHeightFromTexts(modelRef.current.texts ?? []);
     const doorHMm = dh && (force || t.params.doorHMm == null) ? dh.mm : undefined;
     if (doorHMm) notes.push(`door openings ${doorHMm} mm high (${dh!.note})`);
+    // columns on floor-named layers (S-C3-ABOVE HP TO 14 …): outlines of other floors left out of this plan
+    const cr = ownAuto?.columnRange;
+    if (cr?.dropped.length) { const n = cr.dropped.reduce((a, x) => a + x.n, 0); notes.push(`${n} column outline${n === 1 ? "" : "s"} for other floors left out (${cr.dropped.map((x) => `${x.range}: ${x.n}`).join(", ")})`); }
+    if (cr?.partial.length) { const n = cr.partial.reduce((a, x) => a + x.n, 0); notes.push(`${n} column${n === 1 ? "" : "s"} not on every floor of this plan (${cr.partial.map((x) => `${x.range}: ${x.n}`).join(", ")}) — asked the structural consultant`); }
     if (force && !pick && !fh && !floors && !sec && !noteSlab) notes.push("nothing new could be read — set the region, floors and floor height by hand");
     // the whole building: every level, its drawing and the open questions (kept once the estimator has edited it, unless read again)
     const pickedPart = pick ? parts.find((q) => { const i = boxI(q.px, pick.px); return i > 0.85 * boxA(q.px) && i > 0.6 * boxA(pick.px); }) : currentPart;
@@ -527,7 +531,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     setAutoNote(note ?? null);
     if (note) setAutoSave(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, parts, currentPart, readLevels, t.dxf, t.building, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update, dict, project]);
+  }, [candidates, parts, currentPart, readLevels, t.dxf, t.building, t.params.floorHeight, t.params.floors, t.params.slabMm, t.params.beamDepthMm, plan.name, plan.lead?.label, update, dict, project, ownAuto]);
   useEffect(() => {
     // the project's other drawings are being read: the first reading waits for them (their section, levels …), 90 s at most
     if (autoDone.current || !canEdit || !isDxf || !t.dxf || !modelRef.current || !size || (projectPending && !waitedProject)) return;
