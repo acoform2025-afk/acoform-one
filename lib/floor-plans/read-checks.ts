@@ -11,7 +11,7 @@ export type ReadBox = [number, number, number, number];
 export type ReadFix = { kind: "include" | "exclude"; box: ReadBox; label: string };
 export type ReadCheck = { id: string; sev: "error" | "warn" | "info"; title: string; detail: string; box: ReadBox; fixes: ReadFix[] };
 
-type Note = { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size"; box: ReadBox; n?: number; text?: string };
+type Note = { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size" | "beam-step"; box: ReadBox; n?: number; text?: string };
 type Face = { code: string; panels: number[]; filler: number; geo?: { a: Pt; b: Pt } };
 
 const m2 = (b: ReadBox) => (b[2] - b[0]) * (b[3] - b[1]);
@@ -61,6 +61,9 @@ export function readChecks(o: { notes: Note[]; zoneWalls: Pt[][]; zones: Zone[];
         break;
       case "beam-size":
         out.push({ id: id(), sev: "warn", title: `${n.n ?? 0} beam${(n.n ?? 0) === 1 ? "" : "s"} with no size on the drawing — depth assumed`, detail: `These beams have no size in a label or in the beam schedule: their width is taken as drawn and their depth from the schedule beams of the same width (${n.text ?? ""}). Ask the structural engineer for the beam schedule if these depths matter.`, box: n.box, fixes: [] });
+        break;
+      case "beam-step":
+        out.push({ id: id(), sev: "warn", title: `${n.n ?? 1} beam depth step${(n.n ?? 1) === 1 ? "" : "s"} away from a column or wall`, detail: `At ${w}: one beam line changes size between two labels (${n.text ?? ""} deeper) with no support at the change. The step is formed with an end panel under the shallower beam; ask the structural engineer where the change is if it matters.`, box: n.box, fixes: [] });
         break;
       case "unwalled":
         out.push({ id: id(), sev: "warn", title: `Slab area with no wall inside it (${size})`, detail: `An outline at ${w} closed by beams and the wall line, with no wall standing inside it: read as slab because its edge runs along structure. If it is an open area (a court, a void, a box drawn for a note), leave it out.`, box: n.box, fixes: [{ kind: "exclude", box: pad(n.box, 0.05), label: "Not slab — leave it out" }] });

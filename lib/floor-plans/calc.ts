@@ -110,7 +110,7 @@ export const UNIT_TO_M: Record<DxfUnits, number> = { mm: 0.001, cm: 0.01, m: 1, 
 /** Areas/lengths the DXF reader found automatically (already in metres). */
 export type DxfAuto = {
   onFloor?: (p: { pts: Pt[]; layer: string; closed: boolean }) => boolean;   // the floor island: is this drawing path part of the floor read (region + connected structure)?
-  notes?: { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size"; box: [number, number, number, number]; n?: number; text?: string }[];   // what the reader decided on its own (drawing units) — for the review screen
+  notes?: { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size" | "beam-step"; box: [number, number, number, number]; n?: number; text?: string }[];   // what the reader decided on its own (drawing units) — for the review screen
   slabArea: number; slabPerimeter: number;
   openingArea: number; openingPerimeter: number;
   wallLineLength: number;                           // total length of lines on wall layers
@@ -136,6 +136,7 @@ export type DxfAuto = {
   wetRooms?: { label: string; area: number; perimeter: number; box: [number, number, number, number] }[];   // toilets / kitchens / balconies found by their names (m², m)
   projectBeamsUsed?: string[];                      // beam marks sized from the beam schedule of another drawing of the project
   columnRange?: { title: string; levels: number[]; dropped: { layer: string; n: number; range: string }[]; partial: { layer: string; n: number; range: string; missing: string[] }[] };   // column outlines on floor-named layers: left out (other floors) / kept but absent on some of the plan's floors
+  beamSteps?: { n: number; free: number; area: number };   // beams changing depth along their line: steps found, those not on a support, their end (step) panel area m²
   beamMarksMissing?: string[];                      // beam marks on the floor that the beam schedule does not size
   stairsMeasured?: { box: [number, number, number, number]; flights: { width: number; treads: number; tread: number }[]; landingM2: number }[];   // flights read from the tread lines (mm)
   beamRingDepth?: number[];                         // mm, depth of each beam ring
@@ -413,6 +414,10 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
         ? `${n2(g.inner ?? 0)} m inner faces × ${n3(h)}${g.outer ? ` + ${n2(g.outer)} m outer faces × ${n3(g.d / 1000)}` : ""}${g.lintel ? ` + 2 × ${n2(g.lintel)} m lintels × ${n3(h)}` : ""} m · bottom ${n2(g.bottom)} m² in the slab`
         : `2 × ${n2(g.len)} m × (${n3(g.d / 1000)} − ${n3(slab)}) m · bottom ${n2(g.bottom)} m² in the slab`;
       items.push({ code: code("B"), group: "beam", label: `Beams ${g.b}×${g.d} (${g.count} on the drawing)`, calc, area: a });
+    }
+    if (auto.beamSteps?.free && auto.beamSteps.area > 0) {
+      beamArea += auto.beamSteps.area;
+      items.push({ code: code("B"), group: "beam", label: `Beam depth steps away from a support (${auto.beamSteps.free})`, calc: `end panels b × depth difference = ${n2(auto.beamSteps.area)} m²`, area: auto.beamSteps.area });
     }
     if (auto.beamLineLength) {
       const dMm = Number(t.params.beamDepthMm) || 600, a = auto.beamLineLength * Math.max(0, dMm / 1000 - slab);

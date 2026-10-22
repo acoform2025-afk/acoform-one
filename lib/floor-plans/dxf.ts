@@ -1085,7 +1085,7 @@ const SLAB_EDGE_HINT = /parapet|railing|balcon|chajja|slab.?edge/i;
  * floor. `on(p)` answers for an element path (true / false), undefined for anything else (texts, generic lines);
  * `near(pts)` tells whether a point set lies within a metre of the floor's elements.
  */
-export type ReadNote = { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size"; box: [number, number, number, number]; n?: number; text?: string };
+export type ReadNote = { kind: "dropped" | "detail" | "cloud" | "wall-column" | "label-stair" | "bay" | "unwalled" | "beam-size" | "beam-step"; box: [number, number, number, number]; n?: number; text?: string };
 export function floorIsland(model: DxfModel, roles: Record<string, LayerRole>, u: number, keep?: (p: DxfPath) => boolean, force: [number, number, number, number][] = []): { on: (p: DxfPath) => boolean | undefined; near: (pts: Pt[]) => boolean; count: number; dropped: number; notes: ReadNote[] } {
   const forced = (b: [number, number, number, number]) => force.some((f) => b[0] >= f[0] - 1 && b[2] <= f[2] + 1 && b[1] >= f[1] - 1 && b[3] <= f[3] + 1);
   const gap = 3 / u, axisTol = 0.02;            // 3 m: a doorway, a stairwell, a lift opening or a balcony between two walls still joins them
@@ -1438,7 +1438,8 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   const beamParts: { k: string; b: number; d: number; ring: Pt[]; polys: Pt[][]; bb: number[] }[] = [];
   let unsizedLen = 0, loneBeamLen = 0;
   // a size written next to the beam ("B:125X750H", "IVP:100X375H", "B1 230x450") when the layer has none
-  const sizeTexts: { t: DxfText; sz: { b: number; d: number } | null }[] = (model.texts ?? []).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
+  // (column sizes written on a column-size layer — "230x450" on "Column_Size" — are not beam sizes)
+  const sizeTexts: { t: DxfText; sz: { b: number; d: number } | null }[] = (model.texts ?? []).filter((t) => !/col(u|o)?mn|\bcol\b|cloumn|pier|stub/i.test(t.layer ?? "") && !/^\s*(C|COL|SC)[-_ ]?\d/i.test(t.text)).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
   const projUsed = new Set<string>();     // beam marks sized from another drawing of the project
   const marksMissing = new Set<string>(); // beam marks on this floor that no schedule sizes (and no size is written next to them)
   // a beam schedule (this drawing's own, else the one in another drawing of the project) — every "B12A" label on the
@@ -1534,13 +1535,56 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   // stair flights drawn on the beam layer: their tread lines pair up like beams — not beams
   const treadBoxes = framing ? treadFlightBoxes(beamPaths, u) : [];
   const onTreads = (r: Pt[]) => { const cx = r.reduce((a2, q) => a2 + q[0], 0) / r.length, cy = r.reduce((a2, q) => a2 + q[1], 0) / r.length; return treadBoxes.some((b) => cx >= b[0] && cx <= b[2] && cy >= b[1] && cy <= b[3]); };
+  // DEPTH STEPS: one beam strip drawn through several spans, each span labelled with its own size ("B1 230x600" …
+  // "B2 230x750"): cut into pieces at the support between differently sized labels (a column / wall the strip crosses;
+  // else half-way between the labels), each piece with its label's size. A step not at a support leaves the end of
+  // the deeper beam exposed below the shallower one's soffit: formed with an end (step) panel of b × (d − d').
+  const steps: { at: Pt; b: number; dd: number; support: boolean }[] = [];
+  const inSolid = (q: Pt) => solidU.some((poly) => inside(q, poly[0] as Pt[]) && !poly.slice(1).some((h) => inside(q, h as Pt[])));
+  const splitBySize = (r: Pt[], wEst: number): { ring: Pt[]; sz: { b: number; d: number } }[] | null => {
+    if (sizeTexts.length < 2) return null;
+    // axis of the strip: its longest edge
+    let ax: Pt = [1, 0], best = 0;
+    for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L > best) { best = L; ax = [(b[0] - a[0]) / L, (b[1] - a[1]) / L]; } }
+    const nx: Pt = [-ax[1], ax[0]];
+    const S = (q: Pt) => q[0] * ax[0] + q[1] * ax[1], T = (q: Pt) => q[0] * nx[0] + q[1] * nx[1];
+    const ss = r.map(S), ts = r.map(T), s0 = minOf(ss), s1 = maxOf(ss), t0 = minOf(ts), t1 = maxOf(ts);
+    if ((s1 - s0) * u < 3) return null;                         // one span
+    const band = 0.8 / u;
+    const lab = sizeTexts.filter((x) => { const q: Pt = [x.t.x, x.t.y], sq = S(q), tq = T(q); return sq >= s0 && sq <= s1 && tq >= t0 - band && tq <= t1 + band && Math.abs(x.sz!.b - wEst) <= 0.5 * x.sz!.b; })
+      .map((x) => ({ s: S([x.t.x, x.t.y]), sz: x.sz! })).sort((a, b) => a.s - b.s);
+    if (new Set(lab.map((x) => `${x.sz.b}x${x.sz.d}`)).size < 2) return null;
+    // runs of the same size along the strip
+    const runs: { s0: number; s1: number; sz: { b: number; d: number } }[] = [];
+    for (const x of lab) { const l = runs[runs.length - 1]; if (l && l.sz.b === x.sz.b && l.sz.d === x.sz.d) l.s1 = x.s; else runs.push({ s0: x.s, s1: x.s, sz: x.sz }); }
+    const tm = (t0 + t1) / 2, at = (sv: number): Pt => [ax[0] * sv + nx[0] * tm, ax[1] * sv + nx[1] * tm];
+    const cuts: number[] = [];
+    for (let i = 1; i < runs.length; i++) {
+      const a = runs[i - 1].s1, b = runs[i].s0, mid = (a + b) / 2;
+      // the support between the two labels nearest the middle (the step sits on a column / wall)
+      let cut = mid, sup = false, bestD = Infinity;
+      const n = Math.max(2, Math.ceil(((b - a) * u) / 0.1));
+      for (let k = 1; k < n; k++) { const sv = a + ((b - a) * k) / n; if (inSolid(at(sv)) && Math.abs(sv - mid) < bestD) { bestD = Math.abs(sv - mid); cut = sv; sup = true; } }
+      cuts.push(cut);
+      if (runs[i].sz.d !== runs[i - 1].sz.d) steps.push({ at: at(cut), b: Math.min(runs[i].sz.b, runs[i - 1].sz.b), dd: Math.abs(runs[i].sz.d - runs[i - 1].sz.d), support: sup });
+    }
+    const edges = [s0 - 1 / u, ...cuts, s1 + 1 / u], out: { ring: Pt[]; sz: { b: number; d: number } }[] = [];
+    const lo = t0 - 1 / u, hi = t1 + 1 / u, P = (sv: number, tv: number): [number, number] => [ax[0] * sv + nx[0] * tv, ax[1] * sv + nx[1] * tv];
+    for (let i = 0; i < runs.length; i++) {
+      const box = [[P(edges[i], lo), P(edges[i + 1], lo), P(edges[i + 1], hi), P(edges[i], hi), P(edges[i], lo)]] as Polygon;
+      try { for (const poly of polygonClipping.intersection([closeRing(r)] as Polygon, box)) { const ring = poly[0].slice(0, -1) as Pt[]; if (ring.length >= 3 && Math.abs(polyArea(ring)) * u2 > 0.005) out.push({ ring, sz: runs[i].sz }); } } catch { return null; }
+    }
+    return out.length >= 2 ? out : null;
+  };
   for (const [layer, L] of beamLoops) {
     const lsz = beamSizeFromLayer(layer);
-    for (const r of L) {
+    const pieces: { r: Pt[]; fixed?: { b: number; d: number } }[] = [];
+    for (const r of L) { const sp = lsz || onTreads(r) ? null : splitBySize(r, stripWidth(r) * 1000); if (sp) for (const x of sp) pieces.push({ r: x.ring, fixed: x.sz }); else pieces.push({ r }); }
+    for (const { r, fixed } of pieces) {
       if (onTreads(r)) continue;
       // a beam outline is a narrow strip about as wide as the beam (not a room enclosed by chained beam lines)
       const wEst = stripWidth(r) * 1000;
-      let sz = lsz ?? sizeNear(r, wEst);
+      let sz = fixed ?? lsz ?? sizeNear(r, wEst);
       // only at a width the schedule has: a strip between a beam face and a sunk / cut-out box line is not a beam
       if ((!sz || wEst < 0.4 * sz.b || wEst > 1.8 * sz.b) && framing && wEst >= 150 && wEst <= 700 && widthsOk.some((w) => Math.abs(w - wEst) <= 15)) {
         const bw = widthsOk.reduce((a2, w) => (Math.abs(w - wEst) < Math.abs(a2 - wEst) ? w : a2), widthsOk[0]);
@@ -1558,6 +1602,10 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       g.len += clearA / (sz.b / 1000); g.bottom += clearA; g.count++; sized.set(k, g);
     }
   }
+  // depth steps away from a support: the deeper beam's end below the shallower soffit is formed (step panel)
+  const stepFree = steps.filter((x) => !x.support);
+  const beamSteps = steps.length ? { n: steps.length, free: stepFree.length, area: stepFree.reduce((a2, x) => a2 + (x.b * x.dd) / 1e6, 0) } : undefined;
+  if (stepFree.length) { const xs = stepFree.map((x) => x.at[0]), ys = stepFree.map((x) => x.at[1]); notes.push({ kind: "beam-step", box: [minOf(xs) - 0.5 / u, minOf(ys) - 0.5 / u, maxOf(xs) + 0.5 / u, maxOf(ys) + 0.5 / u], n: stepFree.length, text: stepFree.map((x) => `${x.dd} mm`).join(", ") }); }
   // single beam-layer lines with no partner: in a framing plan they are slab panel edges, sunk / cut-out boxes — not beams
   if (!framing) unsizedLen += loneBeamLen;
   if (assumedBeams.length) {
@@ -1759,6 +1807,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     ...(projUsed.size ? { projectBeamsUsed: [...projUsed].sort() } : {}),
     ...(colRange ? { columnRange: colRange } : {}),
+    ...(beamSteps ? { beamSteps } : {}),
     ...(marksMissing.size ? { beamMarksMissing: [...marksMissing].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) } : {}),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose.filter((l) => onFloor2(l)),
