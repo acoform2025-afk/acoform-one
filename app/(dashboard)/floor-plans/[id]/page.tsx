@@ -46,6 +46,9 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
   const lead = Array.isArray(plan.leads) ? plan.leads[0] : plan.leads;
   // other plans made from the same drawing file (the levels' own plans, other blocks): their measured areas feed the whole-building figure
   const { data: sibRows } = await supabase.from("floor_plans").select("id, name, totals, takeoff").eq("file_path", plan.file_path).neq("id", plan.id).limit(100);
+  // every other measured plan of the lead: one of them may be the structural layout of this floor
+  const { data: leadRows } = plan.lead_id ? await supabase.from("floor_plans").select("id, name, takeoff").eq("lead_id", plan.lead_id).neq("id", plan.id).order("created_at").limit(100) : { data: [] as { id: string; name: string; takeoff: unknown }[] };
+  const leadPlans = (leadRows ?? []).filter((r) => { const tk = r.takeoff as { dxf?: { region?: unknown } } | null; return !!tk?.dxf; }).map((r) => ({ id: r.id, name: r.name }));
   const siblings = (sibRows ?? []).map((r) => {
     const tt = (r.totals && typeof r.totals === "object" ? r.totals : null) as { contact_area?: number; quote_area?: number } | null;
     const tk = (r.takeoff && typeof r.takeoff === "object" ? r.takeoff : null) as { shapes?: unknown[]; dxf?: { region?: unknown } } | null;
@@ -105,7 +108,7 @@ export default async function FloorPlanPage({ params, searchParams }: { params: 
         {fileUrl?.signedUrl ? (
           <TakeoffTool
             plan={{ id: plan.id, name: plan.name, source_kind: plan.source_kind as "dxf" | "pdf" | "image", file_url: fileUrl.signedUrl, ai_url: aiUrl?.signedUrl ?? null, takeoff: plan.takeoff as Partial<Takeoff>, lead: lead ? { id: lead.id, label: `${lead.lead_code} · ${lead.project_name ?? lead.customer_name}`, floors: (lead as { num_floors?: number | null }).num_floors ?? null } : null }}
-            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules} siblings={siblings} dict={dict} project={project} projectPending={projectPending && !!project?.missing.length}
+            tenantId={profile!.tenant_id} canEdit={canEdit} quotes={quotes} designs={designs} rules={rules} siblings={siblings} leadPlans={leadPlans} dict={dict} project={project} projectPending={projectPending && !!project?.missing.length}
           />
         ) : <p className="text-sm text-signal-red">The plan file could not be opened.</p>}
       </div>

@@ -4,7 +4,8 @@ import { drawingParts, drawingSection, dxfFrame, readDxf, type DxfModel } from "
 import { readBuilding } from "./building";
 import { loadProjectFacts } from "./project-load";
 import { UNIT_TO_M } from "./calc";
-import { panelInputs } from "./panel-input";
+import { panelInputs, readAutoOf } from "./panel-input";
+import type { MeasureRules } from "./rules";
 import { loadRules } from "./rules";
 import type { Takeoff } from "./calc";
 import { layoutFloor, type CatPanel, type PanelOptions } from "@/lib/design-engine/floor-panels";
@@ -25,6 +26,18 @@ export function readOptions(q: PanelQuery, rules: LayoutRules = DEFAULT_LAYOUT_R
 const modelCache = new Map<string, DxfModel | null>();
 const runCache = new Map<string, unknown>();
 const remember = <T,>(m: Map<string, T>, k: string, v: T, max: number) => { m.delete(k); m.set(k, v); while (m.size > max) m.delete(m.keys().next().value as string); return v; };
+
+/** The structural layout linked to a plan (t.structural): that plan's own automatic reading, for the merge.
+ *  Null when there is no link, the plan is gone, or its drawing cannot be read. */
+export async function structuralOf(supabase: Supa, t: Takeoff, rules: MeasureRules, projectBeams?: Record<string, { b: number; d: number }>): Promise<{ auto: ReturnType<typeof readAutoOf> & object; unitToM: number; name: string } | null> {
+  const id = t.structural?.planId; if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const { data: sp } = await supabase.from("floor_plans").select("id, name, source_kind, file_path, takeoff, tenant_id, updated_at").eq("id", id).maybeSingle();
+  if (!sp) return null;
+  const ts = sp.takeoff as unknown as Takeoff; if (!ts?.dxf) return null;
+  const model = await loadModel(supabase, sp); if (!model) return null;
+  const auto = readAutoOf(ts, model, rules, projectBeams); if (!auto) return null;
+  return { auto, unitToM: UNIT_TO_M[ts.dxf.units], name: sp.name };
+}
 
 /** Loads a floor plan and runs the panel layout. Returns null when the plan is missing or not measured. */
 export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
@@ -60,7 +73,8 @@ export async function runPanels(supabase: Supa, id: string, q: PanelQuery) {
       t.building = readBuilding({ texts: model.texts ?? [], unitToM: u, parts, section: drawingSection(model), said: { floors: t.params.floors, floorMm: Math.round((t.params.floorHeight || 3) * 1000), slabMm: t.params.slabMm }, planName: plan.name, typicalPartN: typ?.n, project: project ? { section: project.section, levels: project.levels, from: project.levelsFrom ?? project.sectionFrom } : undefined });
     } catch { /* no levels */ }
   }
-  const inp = panelInputs(t, model, rules, { projectBeams: project?.beams });
+  const structural = t.structural ? await structuralOf(supabase, t, rules, project?.beams) : null;
+  const inp = panelInputs(t, model, rules, { projectBeams: project?.beams, ...(structural ? { structural: { auto: structural.auto, unitToM: structural.unitToM } } : {}) });
   const o: PanelOptions = { ...opt, faceEdits: t.panelEdits, extCorners: inp.extCorners, upstands: inp.upstands, sunk: inp.sunk, rules: layoutRules, tieH: Number(eng?.tie_spacing_h_mm) || 800, tieV: Number(eng?.tie_spacing_v_mm) || 800, deckLen: 1200, soffitArea: inp.totals.slab_soffit, slabMm: t.params.slabMm, openings: inp.openings, columns: inp.columns, stairSets: inp.stairSets, stairs: inp.stairs };
   const zones = buildZones(inp, (catalog ?? []) as unknown as CatPanel[], layoutRules);
   o.zoneDeck = zones.length ? { panels: zones.flatMap((z) => z.panels.map((p) => ({ code: p.code, w: p.w, L: p.L, custom: p.custom }))), specialArea: zones.reduce((a, z) => a + z.specialArea, 0), area: zones.reduce((a, z) => a + z.area, 0), zones: zones.length } : undefined;

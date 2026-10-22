@@ -13,6 +13,7 @@ import { ScopePanel } from "./scope-panel";
 import { BuildingPanel, type SiblingPlan } from "./building-panel";
 import { parseLevelName, readBuilding, type Building } from "@/lib/floor-plans/building";
 import { perimeterByLevel } from "@/lib/floor-plans/column-schedule";
+import { alignFit, linkFor, mergeStructural } from "@/lib/floor-plans/structural-link";
 import { EMPTY_DICT, layerKey, learnedRole, type Dictionary } from "@/lib/floor-plans/vocab";
 import type { ProjectFacts } from "@/lib/floor-plans/project-facts";
 import { teachDrawing } from "../dictionary-actions";
@@ -88,7 +89,7 @@ function normalise(t: Partial<Takeoff> | null): Takeoff {
   };
 }
 
-export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, designs, rules = DEFAULT_RULES, siblings = [], dict = EMPTY_DICT, project = null, projectPending = false }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[]; dict?: Dictionary; project?: ProjectFacts | null; projectPending?: boolean }) {
+export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, designs, rules = DEFAULT_RULES, siblings = [], leadPlans = [], dict = EMPTY_DICT, project = null, projectPending = false }: { plan: PlanProps; tenantId: string; canEdit: boolean; quotes: QuoteOption[]; designs: DesignOption[] | null; rules?: MeasureRules; siblings?: SiblingPlan[]; leadPlans?: { id: string; name: string }[]; dict?: Dictionary; project?: ProjectFacts | null; projectPending?: boolean }) {
   const router = useRouter();
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -337,15 +338,30 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     setSize(dims); fit(dims.w, dims.h);
   }
 
+  /* ---------- the structural layout linked to this plan ---------- */
+  const [structural, setStructural] = useState<{ planId: string; auto: DxfAuto; unitToM: number; name: string; summary: string } | null>(null);
+  const [structuralErr, setStructuralErr] = useState<string | null>(null);
+  useEffect(() => {
+    const pid = t.structural?.planId;
+    if (!pid) { setStructural(null); setStructuralErr(null); return; }
+    if (structural?.planId === pid) return;
+    let alive = true;
+    fetch(`/floor-plans/${plan.id}/structural?plan=${pid}`).then(async (r) => { const j = await r.json(); if (!alive) return; if (!r.ok) { setStructural(null); setStructuralErr(j.error ?? "Could not read the structural plan."); return; } setStructural({ planId: pid, auto: j.auto, unitToM: j.unitToM, name: j.name, summary: j.summary }); setStructuralErr(null); }).catch(() => { if (alive) setStructuralErr("Could not read the structural plan."); });
+    return () => { alive = false; };
+  }, [t.structural?.planId, plan.id, structural?.planId]);
+
   /* ---------- quantities ---------- */
   const auto: DxfAuto | null = useMemo(() => {
     if (!isDxf || !modelRef.current || !t.dxf) return null;
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0, dict, projectBeams: project?.beams });
+    const own = dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0, dict, projectBeams: project?.beams });
+    // the structural layout's beams, columns, sunk slabs and cut-outs merged onto this floor
+    if (structural && t.structural?.planId === structural.planId) return mergeStructural(own, structural.auto, linkFor(t, own, structural, UNIT_TO_M[t.dxf.units]), UNIT_TO_M[t.dxf.units]);
+    return own;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|"), project]);
+  }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|"), project, structural, t.structural?.planId, t.structural?.dx, t.structural?.dy, t.structural?.auto]);
   const totals: Totals = useMemo(() => computeTotals(t, auto, rules), [t, auto, rules]);
   // the other wall option (all walls concrete ⇄ thin walls in block), shown next to the chosen one
   const altMin = (Number(t.params.minWallMm) || 0) > 75 ? 0 : 125;
@@ -999,6 +1015,19 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
           </Panel>
         ) : null}
 
+        {isDxf && !t.parentPlan && leadPlans.length ? (
+          <div className="rounded-lg border border-graphite-800 bg-graphite-900 p-3 text-[11px]">
+            <p className="text-xs font-medium text-graphite-200">Structural layout of this floor</p>
+            <p className="mt-0.5 text-graphite-500">The architect&apos;s plan gives the walls and openings; the consultant&apos;s layout of the slab above gives the beams, columns, sunk slabs and cut-outs. Pick that plan (another plan of this lead) and the two are read as one floor.</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <select value={t.structural?.planId ?? ""} disabled={!canEdit} onChange={(e) => { const id = e.target.value; const lp = leadPlans.find((x) => x.id === id); update((p) => ({ ...p, structural: id ? { planId: id, name: lp?.name, dx: 0, dy: 0, scale: 0, auto: true } : undefined })); }} className="rounded border border-graphite-700 bg-graphite-950 px-1.5 py-1 text-[11px] text-graphite-100 disabled:opacity-60">
+                <option value="">— none (this drawing only) —</option>
+                {leadPlans.map((lp) => <option key={lp.id} value={lp.id}>{lp.name}</option>)}
+              </select>
+              {t.structural?.planId ? (structuralErr ? <span className="text-signal-red">{structuralErr}</span> : structural ? (() => { const fit = structural && auto ? alignFit(auto.slabLoops ?? [], structural.auto.slabLoops ?? [], (t.structural?.scale || structural.unitToM / UNIT_TO_M[t.dxf!.units])) : null; return <span className={fit && !fit.ok ? "text-signal-amber" : "text-signal-green"}>Merged: {structural.summary}{fit ? ` · ${fit.note}` : ""}</span>; })() : <span className="text-graphite-400">reading…</span>) : null}
+            </div>
+          </div>
+        ) : null}
         {isDxf && t.building && !t.parentPlan ? (
           <BuildingPanel building={t.building} parts={parts.map((q) => ({ n: q.n, title: q.title, px: q.px }))} typical={{ contact: totals.contact_area, quote: totals.quote_area, vertical: totals.vertical_area, column: totals.column_area, clearMm: Math.round(totals.clear_height * 1000), slabMm: Number(t.params.slabMm) || 0, ...(project?.columns?.[0] && t.building ? (() => { const per = perimeterByLevel(project.columns[0], t.building.levels); const pl = parseLevelName(plan.name); const ref = pl.kind === "floor" && pl.nos[0] ? `f${pl.nos[0]}` : t.building.levels.find((l) => l.kind === "floor" && l.use === "typical")?.key; return { colPerimeter: per, refKey: ref }; })() : {}) }} siblings={siblings} planId={plan.id} canEdit={canEdit}
             extra={extraQ}

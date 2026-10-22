@@ -6,6 +6,8 @@ import { loadRules } from "@/lib/floor-plans/rules";
 import { drawingSection, dxfAuto, dxfFrame, readDxf, separateAreas, type DxfModel } from "@/lib/floor-plans/dxf";
 import { buildingTotals, groupLevels } from "@/lib/floor-plans/building";
 import { measureQuestions } from "@/lib/floor-plans/questions";
+import { structuralOf } from "@/lib/floor-plans/run-panels";
+import { linkFor, mergeStructural } from "@/lib/floor-plans/structural-link";
 import { QuestionsDocument } from "@/lib/pdf/questions-document";
 
 export const runtime = "nodejs";
@@ -40,6 +42,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
   const section = model ? drawingSection(model) : null;
   model = null;
+  // the structural layout linked to this plan: merged in, as on the measuring screen
+  if (auto && t.structural && t.dxf) { const st = await structuralOf(supabase, t, rules); if (st) auto = mergeStructural(auto, st.auto, linkFor(t, auto, st, UNIT_TO_M[t.dxf.units]), UNIT_TO_M[t.dxf.units]); }
   const totals = computeTotals(t, auto, rules);
   const saved = t.building?.questions ?? [];
   const questions = [...saved, ...measureQuestions(t, totals, auto, rules, section).filter((q) => !saved.some((s) => s.id === q.id))];

@@ -11,6 +11,7 @@ import { buildShell } from "./shell";
 import { faceFrames } from "@/lib/design-engine/design-check";
 import type { BeamRun, ColumnRun, DeckPoly, Face, OpeningCut, StairGeo } from "@/lib/design-engine/floor-panels";
 import { minOf, maxOf } from "@/lib/util/minmax";
+import { linkFor, mergeStructural } from "./structural-link";
 
 /** Point inside the wall outlines (even–odd, metres). */
 const inRingsM = (q: Pt, rings: Pt[][]) => {
@@ -25,7 +26,19 @@ const angleAt = (a: Pt, b: Pt, c: Pt) => {
   return (Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (l1 * l2)))) * 180) / Math.PI;
 };
 
-export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRules = DEFAULT_RULES, ctx: { projectBeams?: Record<string, { b: number; d: number }> } = {}) {
+/** The automatic reading of a plan's drawing (its region, excludes and includes applied) — the same reading the
+ *  measuring screen makes. For a plan used as the structural layout of another plan. */
+export function readAutoOf(t: Takeoff, model: DxfModel, rules: MeasureRules = DEFAULT_RULES, projectBeams?: Record<string, { b: number; d: number }>): ReturnType<typeof dxfAuto> | null {
+  if (!t.dxf) return null;
+  const f = dxfFrame(model, 2400), reg = t.dxf.region, mpp = t.metersPerPx ?? f.unitsPerPx * UNIT_TO_M[t.dxf.units];
+  const exM = t.dxf.excludeM ?? [], inM = t.dxf.includeM ?? [];
+  const inEx = (x: number, y: number) => exM.some((b) => x * mpp >= b[0] && x * mpp <= b[2] && y * mpp >= b[1] && y * mpp <= b[3]);
+  const keep = reg || exM.length ? (p: { pts: [number, number][] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return (!reg || (x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3])) && !inEx(x, y); }) : undefined;
+  const force = inM.map((b) => { const a = f.fromPx([b[0] / mpp, b[1] / mpp]), c = f.fromPx([b[2] / mpp, b[3] / mpp]); return [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.max(a[0], c[0]), Math.max(a[1], c[1])] as [number, number, number, number]; });
+  return dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0, force, beamDepthMm: Number(t.params.beamDepthMm) || undefined, projectBeams });
+}
+
+export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRules = DEFAULT_RULES, ctx: { projectBeams?: Record<string, { b: number; d: number }>; structural?: { auto: ReturnType<typeof dxfAuto>; unitToM: number } } = {}) {
   const g = buildShell(t, model);
   const mpp = g.mpp;
   const H = Math.max(0, t.params.floorHeight - t.params.slabMm / 1000) * 1000;
@@ -55,6 +68,8 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     // "part of this floor" boxes in drawing units for the reader
     const force = inM.map((b) => { const a = f.fromPx([b[0] / mpp, b[1] / mpp]), c = f.fromPx([b[2] / mpp, b[3] / mpp]); return [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.max(a[0], c[0]), Math.max(a[1], c[1])] as [number, number, number, number]; });
     auto = dxfAuto(model, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2, separateAreas(t.shapes, f), { minWallMm: Number(t.params.minWallMm) || 0, force, beamDepthMm: Number(t.params.beamDepthMm) || undefined, projectBeams: ctx.projectBeams });
+    // the structural layout linked to this plan: its beams, columns, sunk slabs and cut-outs on this floor
+    if (ctx.structural && auto && t.structural) auto = mergeStructural(auto, ctx.structural.auto, linkFor(t, auto, ctx.structural, UNIT_TO_M[t.dxf.units]), UNIT_TO_M[t.dxf.units]);
     // architecture around the formwork, for the 3D model only: balcony railings, parapet walls, sunshades / projections
     const roles = effectiveRoles(model, t.dxf.layerRoles ?? {});
     const kindOf = (layer: string): "rail" | "parapet" | "proj" | null => {
