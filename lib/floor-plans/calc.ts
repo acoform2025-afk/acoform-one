@@ -135,6 +135,7 @@ export type DxfAuto = {
   stairBoxes?: [number, number, number, number][];  // drawing units
   wetRooms?: { label: string; area: number; perimeter: number; box: [number, number, number, number] }[];   // toilets / kitchens / balconies found by their names (m², m)
   projectBeamsUsed?: string[];                      // beam marks sized from the beam schedule of another drawing of the project
+  beamMarksMissing?: string[];                      // beam marks on the floor that the beam schedule does not size
   stairsMeasured?: { box: [number, number, number, number]; flights: { width: number; treads: number; tread: number }[]; landingM2: number }[];   // flights read from the tread lines (mm)
   beamRingDepth?: number[];                         // mm, depth of each beam ring
   upstands?: { label: string; h: number; length: number; parapet?: boolean }[];   // upstand / planter walls on the slab: h mm, face length m (both faces)

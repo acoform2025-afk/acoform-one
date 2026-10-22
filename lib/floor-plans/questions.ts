@@ -56,6 +56,9 @@ export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | nul
   // beams with no size on the plan or in the schedule: depth assumed
   const bs = (auto?.notes ?? []).find((n) => n.kind === "beam-size");
   if (deck && bs?.n) ask("m-beam-marks", "structure", `${bs.n} beam${bs.n === 1 ? "" : "s"} on the plan ${bs.n === 1 ? "has" : "have"} no size written and no mark in the beam schedule (${bs.text ?? "assumed from the drawn width"}). Please give their width and depth.`, "Beam side and bottom panels are cut to the beam size; a wrong depth changes the panel list.");
+  // beam marks on the plan that the beam schedule leaves out (ACOFORM checklist: "beam depth of BK1, BK2 missing")
+  const miss = auto?.beamMarksMissing ?? [];
+  if (deck && miss.length) ask("m-beam-sched", "structure", `Beam${miss.length === 1 ? "" : "s"} ${miss.slice(0, 12).join(", ")}${miss.length > 12 ? ` and ${miss.length - 12} more` : ""} ${miss.length === 1 ? "is" : "are"} marked on the plan but not in the beam schedule. Please give their width and depth.`, "Beam side and bottom panels are cut to the beam size; the drawn width and the usual depth are used meanwhile.");
   // inverted / up-stand beams: formed on both faces above the slab, not under it
   const inv = (auto?.upstands ?? []).length;
   if (deck && inv > 0) ask("m-inverted", "structure", `${inv} inverted beam${inv === 1 ? "" : "s"} / upstand${inv === 1 ? "" : "s"} found (drawn above the slab). Please confirm their height above the slab and that they are cast with the slab.`, "An inverted beam is formed with two faces above the slab; a beam below the slab with sides and a soffit.");

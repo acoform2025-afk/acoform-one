@@ -1404,6 +1404,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   // a size written next to the beam ("B:125X750H", "IVP:100X375H", "B1 230x450") when the layer has none
   const sizeTexts: { t: DxfText; sz: { b: number; d: number } | null }[] = (model.texts ?? []).map((t) => ({ t, sz: beamSizeFromLayer(t.text) })).filter((x) => x.sz);
   const projUsed = new Set<string>();     // beam marks sized from another drawing of the project
+  const marksMissing = new Set<string>(); // beam marks on this floor that no schedule sizes (and no size is written next to them)
   // a beam schedule (this drawing's own, else the one in another drawing of the project) — every "B12A" label on the
   // plan then carries that size (several schedules in one file: the nearest one)
   {
@@ -1420,6 +1421,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
         const e = sched.filter((x) => x.name === k).sort((a, b) => Math.hypot(a.x - n.x, a.y - n.y) - Math.hypot(b.x - n.x, b.y - n.y))[0];
         if (e) sizeTexts.push({ t: n, sz: e.sz });
         else if (proj[k]) { sizeTexts.push({ t: n, sz: proj[k] }); projUsed.add(k); }
+        else if (!/col|slab\s*no|grid|axis/i.test(n.layer ?? "") && (!keep || keep({ layer: "", pts: [[n.x, n.y]], closed: false })) && !all.some((o) => o !== n && Math.hypot(o.x - n.x, o.y - n.y) <= 3 * (n.h || 100) && beamSizeFromLayer(o.text))) marksMissing.add(k);
       }
     }
   }
@@ -1720,6 +1722,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     })(),
     columns: cols.map(({ w, d, perimeter, area, round }) => ({ w, d, perimeter, area, round })), columnRings: cols.map((c) => c.pts),
     ...(projUsed.size ? { projectBeamsUsed: [...projUsed].sort() } : {}),
+    ...(marksMissing.size ? { beamMarksMissing: [...marksMissing].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) } : {}),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose.filter((l) => onFloor2(l)),
     // sunk slabs (toilets, balconies): their edge is formed with drop (suspended) formwork
