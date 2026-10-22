@@ -66,6 +66,14 @@ export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | nul
   // double-height / open-to-below rooms: no slab on this floor, the walls round them run two floors high
   const vd = auto?.voids;
   if (vd?.n) ask("m-dbl", "architect", `${vd.n} double-height / open space${vd.n === 1 ? "" : "s"} (${vd.names.slice(0, 4).map((x) => `"${x}"`).join(", ")}, ${vd.area.toFixed(1)} m²) left out of the slab on this floor. Please confirm no slab is cast over ${vd.n === 1 ? "it" : "them"} here, and the wall height round ${vd.n === 1 ? "it" : "them"} on the floor below (two floors high: walls formed in two lifts).`, "No deck panels over the void; the walls round it need panels for the double height and a slab-edge end at the void.");
+  // architect's plan vs structural layout (linked): what the two drawings do not agree on
+  const lc = auto?.linkCheck;
+  if (lc) {
+    if (lc.colsOff.length) ask("m-x-cols", "structure", `${lc.colsOff.length} column${lc.colsOff.length === 1 ? "" : "s"} of the structural layout ${lc.colsOff.length === 1 ? "stands" : "stand"} where the architect's plan has no wall or column. Please confirm ${lc.colsOff.length === 1 ? "its" : "their"} position (and whether the architect's plan is the latest).`, "Column panels go where the structural drawing puts the column; a column in a room changes the rooms' wall and slab panels.");
+    if (lc.archOnly.length) ask("m-x-arch", "structure", `${lc.archOnly.length} column${lc.archOnly.length === 1 ? "" : "s"} on the architect's plan ${lc.archOnly.length === 1 ? "is" : "are"} not on the structural layout. Are ${lc.archOnly.length === 1 ? "it" : "they"} RCC (to be formed) or architectural / block?`, "Only RCC columns are formed.");
+    if (lc.sizeDiff.length) ask("m-x-size", "structure", `${lc.sizeDiff.length} column${lc.sizeDiff.length === 1 ? "" : "s"} differ in size between the drawings (e.g. architect ${lc.sizeDiff[0].arch} vs structure ${lc.sizeDiff[0].str} mm). The structural size is used — please confirm.`, "Column panels are cut to the column size.");
+    if (lc.slabDiff) ask("m-x-slab", "architect", `The slab area differs between the drawings: ${lc.slabDiff.arch.toFixed(1)} m² on the architect's plan, ${lc.slabDiff.str.toFixed(1)} m² on the structural layout. Please confirm the slab outline (balconies, projections, cut-outs).`, "The deck panels and the quoted area follow the slab outline.");
+  }
   // inverted / up-stand beams: formed on both faces above the slab, not under it
   const inv = (auto?.upstands ?? []).length;
   if (deck && inv > 0) ask("m-inverted", "structure", `${inv} inverted beam${inv === 1 ? "" : "s"} / upstand${inv === 1 ? "" : "s"} found (drawn above the slab). Please confirm their height above the slab and that they are cast with the slab.`, "An inverted beam is formed with two faces above the slab; a beam below the slab with sides and a soffit.");

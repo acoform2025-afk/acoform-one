@@ -70,9 +70,37 @@ export function mergeStructural(arch: DxfAuto, str: DxfAuto, link: { dx: number;
     out.openingArea = (arch.openingArea ?? 0) + added.reduce((s, r) => s + polyArea(r) * u2, 0);
     out.openingPerimeter = (arch.openingPerimeter ?? 0) + added.reduce((s, r) => s + polyLen(r) * unitToM, 0);
   }
+  // ARCHITECT vs STRUCTURE: where the two drawings do not agree (Mivan rule A2–A4) — asked before the layout is trusted
+  out.linkCheck = compareDrawings(arch, str, T, unitToM);
   // the reader's notes of the structural drawing, moved onto this plan
   out.notes = [...(arch.notes ?? []), ...(str.notes ?? []).map((n) => ({ ...n, box: [n.box[0] * link.scale + link.dx, n.box[1] * link.scale + link.dy, n.box[2] * link.scale + link.dx, n.box[3] * link.scale + link.dy] as [number, number, number, number] }))];
   return out;
+}
+
+type Box = [number, number, number, number];
+const boxOf = (r: Pt[]): Box => { const xs = r.map((p) => p[0]), ys = r.map((p) => p[1]); return [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]; };
+/** Differences between the architect's plan and the structural layout moved onto it:
+ *  structural columns standing on no wall / column of the architect (a column in a room, or a wall moved),
+ *  architect's columns the structure does not have, column sizes that differ, and slab areas that differ. */
+export function compareDrawings(arch: DxfAuto, str: DxfAuto, T: (p: Pt) => Pt, unitToM: number): NonNullable<DxfAuto["linkCheck"]> {
+  const mm = 0.001 / unitToM, tol = 100 * mm;
+  const A = [...(arch.wallRings ?? []), ...(arch.columnRings ?? [])].map(boxOf);
+  const on = (p: Pt, bs: Box[], t = tol) => bs.some((b) => p[0] >= b[0] - t && p[0] <= b[2] + t && p[1] >= b[1] - t && p[1] <= b[3] + t);
+  const sCols = (str.columnRings ?? []).map((r) => boxOf(r.map(T)));
+  const aCols = (arch.columnRings ?? []).map(boxOf);
+  const mid = (b: Box): Pt => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+  const colsOff = A.length ? sCols.filter((b) => !on(mid(b), A)) : [];
+  const archOnly = sCols.length ? aCols.filter((b) => !on(mid(b), sCols, 150 * mm)) : [];
+  // same column in both, sizes (sorted sides) differing by more than 50 mm
+  const sizeDiff: { box: Box; arch: string; str: string }[] = [];
+  for (const a of aCols) {
+    const s2 = sCols.find((b) => on(mid(a), [b], 150 * mm)); if (!s2) continue;
+    const da = [(a[2] - a[0]) / mm, (a[3] - a[1]) / mm].sort((x, y) => x - y), ds = [(s2[2] - s2[0]) / mm, (s2[3] - s2[1]) / mm].sort((x, y) => x - y);
+    if (Math.abs(da[0] - ds[0]) > 50 || Math.abs(da[1] - ds[1]) > 50) sizeDiff.push({ box: a, arch: `${Math.round(da[0] / 5) * 5}×${Math.round(da[1] / 5) * 5}`, str: `${Math.round(ds[0] / 5) * 5}×${Math.round(ds[1] / 5) * 5}` });
+  }
+  const sa = arch.slabArea ?? 0, ss = str.slabArea ?? 0;
+  const slabDiff = sa > 20 && ss > 20 && Math.abs(sa - ss) > 0.05 * Math.max(sa, ss) ? { arch: sa, str: ss } : undefined;
+  return { colsOff, archOnly, sizeDiff, ...(slabDiff ? { slabDiff } : {}) };
 }
 
 /** What the merge brought in, for the screen. */
