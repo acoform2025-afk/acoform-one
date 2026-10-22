@@ -13,7 +13,7 @@ import { ScopePanel } from "./scope-panel";
 import { BuildingPanel, type SiblingPlan } from "./building-panel";
 import { parseLevelName, readBuilding, type Building } from "@/lib/floor-plans/building";
 import { perimeterByLevel } from "@/lib/floor-plans/column-schedule";
-import { alignFit, linkFor, mergeStructural } from "@/lib/floor-plans/structural-link";
+import { alignFitAuto, linkFor, mergeStructural } from "@/lib/floor-plans/structural-link";
 import { EMPTY_DICT, layerKey, learnedRole, type Dictionary } from "@/lib/floor-plans/vocab";
 import type { ProjectFacts } from "@/lib/floor-plans/project-facts";
 import { teachDrawing } from "../dictionary-actions";
@@ -351,17 +351,20 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
   }, [t.structural?.planId, plan.id, structural?.planId]);
 
   /* ---------- quantities ---------- */
-  const auto: DxfAuto | null = useMemo(() => {
+  const ownAuto: DxfAuto | null = useMemo(() => {
     if (!isDxf || !modelRef.current || !t.dxf) return null;
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    const own = dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0, dict, projectBeams: project?.beams });
-    // the structural layout's beams, columns, sunk slabs and cut-outs merged onto this floor
-    if (structural && t.structural?.planId === structural.planId) return mergeStructural(own, structural.auto, linkFor(t, own, structural, UNIT_TO_M[t.dxf.units]), UNIT_TO_M[t.dxf.units]);
-    return own;
+    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: Number(t.params.minWallMm) || 0, dict, projectBeams: project?.beams });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|"), project, structural, t.structural?.planId, t.structural?.dx, t.structural?.dy, t.structural?.auto]);
+  }, [isDxf, t.dxf, size, t.params.minOpeningM2, t.params.minWallMm, rules.minOpeningM2, t.shapes.filter((s) => s.kind === "separate").map((s) => s.pts.join(";")).join("|"), project]);
+  // the structural layout's beams, columns, sunk slabs and cut-outs merged onto this floor
+  const auto: DxfAuto | null = useMemo(() => {
+    if (!ownAuto || !t.dxf || !structural || t.structural?.planId !== structural.planId) return ownAuto;
+    return mergeStructural(ownAuto, structural.auto, linkFor(t, ownAuto, structural, UNIT_TO_M[t.dxf.units]), UNIT_TO_M[t.dxf.units]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownAuto, structural, t.dxf, t.structural?.planId, t.structural?.dx, t.structural?.dy, t.structural?.auto, t.structural?.scale]);
   const totals: Totals = useMemo(() => computeTotals(t, auto, rules), [t, auto, rules]);
   // the other wall option (all walls concrete ⇄ thin walls in block), shown next to the chosen one
   const altMin = (Number(t.params.minWallMm) || 0) > 75 ? 0 : 125;
@@ -370,7 +373,8 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     const reg = t.dxf.region, f = frameRef.current;
     const keep = reg && f ? (p: { pts: Pt[] }) => p.pts.every((q) => { const [x, y] = f.toPx(q); return x >= reg[0] && x <= reg[2] && y >= reg[1] && y <= reg[3]; }) : undefined;
     const mo = t.params.minOpeningM2 != null && String(t.params.minOpeningM2) !== "" ? Number(t.params.minOpeningM2) : rules.minOpeningM2;
-    return dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: altMin, dict, projectBeams: project?.beams });
+    const alt = dxfAuto(modelRef.current, t.dxf.layerRoles, UNIT_TO_M[t.dxf.units], keep, mo, f ? separateAreas(t.shapes, f) : [], { minWallMm: altMin, dict, projectBeams: project?.beams });
+    return structural && t.structural?.planId === structural.planId ? mergeStructural(alt, structural.auto, linkFor(t, alt, structural, UNIT_TO_M[t.dxf.units]), UNIT_TO_M[t.dxf.units]) : alt;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, altMin]);
   const totalsAlt: Totals | null = useMemo(() => (autoAlt ? computeTotals({ ...t, params: { ...t.params, minWallMm: altMin || undefined } }, autoAlt, rules) : null), [t, autoAlt, altMin, rules]);
@@ -1024,7 +1028,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
                 <option value="">— none (this drawing only) —</option>
                 {leadPlans.map((lp) => <option key={lp.id} value={lp.id}>{lp.name}</option>)}
               </select>
-              {t.structural?.planId ? (structuralErr ? <span className="text-signal-red">{structuralErr}</span> : structural ? (() => { const fit = structural && auto ? alignFit(auto.slabLoops ?? [], structural.auto.slabLoops ?? [], (t.structural?.scale || structural.unitToM / UNIT_TO_M[t.dxf!.units])) : null; return <span className={fit && !fit.ok ? "text-signal-amber" : "text-signal-green"}>Merged: {structural.summary}{fit ? ` · ${fit.note}` : ""}</span>; })() : <span className="text-graphite-400">reading…</span>) : null}
+              {t.structural?.planId ? (structuralErr ? <span className="text-signal-red">{structuralErr}</span> : structural ? (() => { const fit = structural && ownAuto ? alignFitAuto(ownAuto, structural.auto, (t.structural?.scale || structural.unitToM / UNIT_TO_M[t.dxf!.units]), 0.001 / UNIT_TO_M[t.dxf!.units]) : null; return <span className={fit && !fit.ok ? "text-signal-amber" : "text-signal-green"}>Merged: {structural.summary}{fit ? ` · ${fit.note}` : ""}</span>; })() : <span className="text-graphite-400">reading…</span>) : null}
             </div>
           </div>
         ) : null}

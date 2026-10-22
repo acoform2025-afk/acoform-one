@@ -28,6 +28,12 @@ export function alignByOutline(arch: Pt[][], str: Pt[][], scale = 1): { dx: numb
 }
 
 /** How well the two outlines agree after the shift: width / height of the two boxes within 5 %. */
+export function alignFitAuto(arch: DxfAuto, str: DxfAuto, scale: number, unitPerMm: number): { ok: boolean; note: string } {
+  const s2 = alignByStructure(arch, str, scale, unitPerMm);
+  if (s2 && s2.hits >= Math.max(3, 0.5 * s2.of)) return { ok: true, note: `aligned on the structure: ${s2.hits} of ${s2.of} columns / beams sit on walls or columns` };
+  const f = alignFit(arch.slabLoops ?? [], str.slabLoops ?? [], scale);
+  return { ok: f.ok, note: `${f.note}${s2 ? ` · only ${s2.hits} of ${s2.of} columns / beams meet a wall — check the region of either plan` : ""}` };
+}
 export function alignFit(arch: Pt[][], str: Pt[][], scale = 1): { ok: boolean; note: string } {
   const a = bbox(arch), s = bbox(str); if (!a || !s) return { ok: false, note: "no slab outline to align with" };
   const aw = a[2] - a[0], ah = a[3] - a[1], sw = (s[2] - s[0]) * scale, sh = (s[3] - s[1]) * scale;
@@ -83,6 +89,40 @@ export function mergeSummary(str: DxfAuto): string {
 export function linkFor(t: { structural?: { dx: number; dy: number; scale: number; auto?: boolean } }, arch: DxfAuto, str: { auto: DxfAuto; unitToM: number }, archUnitToM?: number): { dx: number; dy: number; scale: number } {
   const L = t.structural!;
   const scale = L.scale || (archUnitToM ? str.unitToM / archUnitToM : 1);
-  if (L.auto !== false) { const a = alignByOutline(arch.slabLoops ?? [], str.auto.slabLoops ?? [], scale); if (a) return { ...a, scale }; }
+  if (L.auto !== false) {
+    const unitPerMm = archUnitToM ? 0.001 / archUnitToM : 1;
+    const s2 = alignByStructure(arch, str.auto, scale, unitPerMm);
+    if (s2 && s2.hits >= Math.max(3, 0.5 * s2.of)) return { dx: s2.dx, dy: s2.dy, scale };
+    const a = alignByOutline(arch.slabLoops ?? [], str.auto.slabLoops ?? [], scale); if (a) return { ...a, scale };
+  }
   return { dx: L.dx, dy: L.dy, scale };
+}
+
+/**
+ * Exact alignment from the structure itself: the structural layout's columns (or beam strips when it has no
+ * columns) must sit on the architect's walls and columns. Every pair (structural point, architectural element centre)
+ * proposes a shift; the shifts vote (50 mm cells), and the best few are scored by how many structural points land on
+ * an architectural wall or column. The outline-centre shift is one of the candidates, so this never does worse.
+ * unitPerMm: drawing units per mm of the architectural plan.
+ */
+export function alignByStructure(arch: DxfAuto, str: DxfAuto, scale: number, unitPerMm: number): { dx: number; dy: number; hits: number; of: number } | null {
+  const ringsA = [...(arch.wallRings ?? []), ...(arch.columnRings ?? [])];
+  if (!ringsA.length) return null;
+  const S0 = (str.columnRings?.length ? str.columnRings : str.beamRings ?? []).map((r) => centre(r).map((v) => v * scale) as Pt);
+  if (S0.length < 3) return null;
+  const step = Math.max(1, Math.floor(S0.length / 40)), S = S0.filter((_, i) => i % step === 0);
+  const boxes = ringsA.map((r) => { const xs = r.map((p) => p[0]), ys = r.map((p) => p[1]); return [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)] as [number, number, number, number]; });
+  const tol = 60 * unitPerMm;
+  const score = (dx: number, dy: number) => { let n = 0; for (const p of S) { const x = p[0] + dx, y = p[1] + dy; if (boxes.some((b) => x >= b[0] - tol && x <= b[2] + tol && y >= b[1] - tol && y <= b[3] + tol)) n++; } return n; };
+  const cell = 50 * unitPerMm, votes = new Map<string, { n: number; dx: number; dy: number }>();
+  const A = ringsA.map(centre); const stepA = Math.max(1, Math.floor(A.length / 400));
+  for (let i = 0; i < A.length; i += stepA) for (const p of S) {
+    const dx = A[i][0] - p[0], dy = A[i][1] - p[1], k = `${Math.round(dx / cell)}:${Math.round(dy / cell)}`;
+    const v = votes.get(k); if (v) v.n++; else votes.set(k, { n: 1, dx, dy });
+  }
+  const cands = [...votes.values()].sort((a, b) => b.n - a.n).slice(0, 8);
+  const outline = alignByOutline(arch.slabLoops ?? [], (str.slabLoops ?? []), scale); if (outline) cands.push({ n: 0, ...outline });
+  let best: { dx: number; dy: number; hits: number } | null = null;
+  for (const c of cands) { const h = score(c.dx, c.dy); if (!best || h > best.hits) best = { dx: c.dx, dy: c.dy, hits: h }; }
+  return best ? { ...best, of: S.length } : null;
 }
