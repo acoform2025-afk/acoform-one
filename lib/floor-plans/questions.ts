@@ -63,6 +63,9 @@ export function measureQuestions(t: Takeoff, totals: Totals, auto: DxfAuto | nul
   const cr = auto?.columnRange;
   if (cr?.partial.length) { const n = cr.partial.reduce((a, x) => a + x.n, 0); const miss = [...new Set(cr.partial.flatMap((x) => x.missing))];
     ask("m-col-range", "structure", `The plan "${cr.title}" serves ${cr.levels.length} floors, but ${n} column${n === 1 ? "" : "s"} on it ${n === 1 ? "runs" : "run"} only ${cr.partial.map((x) => `${x.range} (${x.n})`).join(", ")} — so ${n === 1 ? "it is" : "they are"} not there on the ${miss.join(", ")} floor${miss.length === 1 ? "" : "s"}. Please confirm which columns (and sizes) stand on those floors.`, "Column panels are made for the columns on each floor; a column that stops or changes size changes the set."); }
+  // double-height / open-to-below rooms: no slab on this floor, the walls round them run two floors high
+  const vd = auto?.voids;
+  if (vd?.n) ask("m-dbl", "architect", `${vd.n} double-height / open space${vd.n === 1 ? "" : "s"} (${vd.names.slice(0, 4).map((x) => `"${x}"`).join(", ")}, ${vd.area.toFixed(1)} m²) left out of the slab on this floor. Please confirm no slab is cast over ${vd.n === 1 ? "it" : "them"} here, and the wall height round ${vd.n === 1 ? "it" : "them"} on the floor below (two floors high: walls formed in two lifts).`, "No deck panels over the void; the walls round it need panels for the double height and a slab-edge end at the void.");
   // inverted / up-stand beams: formed on both faces above the slab, not under it
   const inv = (auto?.upstands ?? []).length;
   if (deck && inv > 0) ask("m-inverted", "structure", `${inv} inverted beam${inv === 1 ? "" : "s"} / upstand${inv === 1 ? "" : "s"} found (drawn above the slab). Please confirm their height above the slab and that they are cast with the slab.`, "An inverted beam is formed with two faces above the slab; a beam below the slab with sides and a soffit.");

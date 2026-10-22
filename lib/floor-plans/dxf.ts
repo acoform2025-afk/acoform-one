@@ -864,6 +864,8 @@ function isOpeningLabel(text: string, dict?: Dictionary): boolean {
   return m ? OPENING_KEYS.has(m.key) : SHAFT_TXT.test(text);
 }
 const OPENING_KEYS = new Set(["lift", "duct", "cutout", "ots"]);
+/** A room left open over the floor below / to the sky (no slab on this floor; the walls round it run two floors high). */
+const DOUBLE_H = /double\s*-?\s*h(eigh)?t|dbl\.?\s*h(eigh)?t|d\/h\b|open\s*(to\s*)?below|open\s*to\s*sky|(^|[^a-z])o\.?t\.?s\.?([^a-z]|$)|light\s*well|(^|[^a-z])void([^a-z]|$)/i;
 const SHAFT_TXT = /(^|[^a-z])(p\.?|s\.?|pass(enger)?\.?|serv(ice)?\.?|fire\.?)?\s*lift|elevator|lift\s*well|shaft|(^|[^a-z])duct|cut\s*-?out|(^|[^a-z])o\.?t\.?s\.?([^a-z]|$)|open\s*to\s*sky|void/i;
 
 /** Staircases: stair-layer lines grouped (1 m apart), groups at least 2 × 2 m. Boxes in drawing units. */
@@ -1364,6 +1366,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
   // lifts, shafts, ducts, cut-outs named on the plan (P.LIFT, S.LIFT, SHAFT, DUCT, OTS …): the space round the name,
   // bounded by the walls; boxes with an X on the generic layers — both are holes in the slab
   const extraOpen: Pt[][] = [];
+  const voids: { area: number; text: string }[] = [];     // double-height / open-to-below / open-to-sky rooms (no slab on this floor)
   const sunkX: { depth: number; perimeter: number; area: number; box: [number, number, number, number] }[] = [];   // sunk slabs marked with a dashed X
   {
     const tx = (model.texts ?? []).filter((t) => isOpeningLabel(t.text, opts.dict) && t.text.length <= 30 && (!keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false })));
@@ -1371,15 +1374,30 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     // lines across the shaft front) close it too
     if (tx.length && U.rings.length) {
       const bounds = [...loose, ...misc.map((p) => (p.closed ? [...p.pts, p.pts[0]] : p.pts))];
+      const diag = (q: Pt[]) => q.length === 2 && Math.min(Math.abs(q[1][0] - q[0][0]), Math.abs(q[1][1] - q[0][1])) > 0.2 * Math.max(Math.abs(q[1][0] - q[0][0]), Math.abs(q[1][1] - q[0][1]));
+      const openRingsEarly = closedLoops(of("opening"), tol, true).filter((r) => r.length >= 3);
+      const openBoxes = of("opening").filter((p) => !p.closed && diag(p.pts.length === 2 ? p.pts : [p.pts[0], p.pts[p.pts.length - 1]])).map((p) => { const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]); return [minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]; }).filter((b) => { const a2 = (b[2] - b[0]) * (b[3] - b[1]) * u2; return a2 >= 1 && a2 <= 200; });
+      const boundsStraight = bounds.filter((q) => !diag(q));
       for (const t of tx) {
         // Indian plans write the size with the name ("LIFT - 01 2000 X 2500", "DUCT 1615 X 1030"): the hole is that size.
         // When the space found round the label leaks through a lift door or a gap into the lobby / a room, the size wins.
         const sz = t.text.match(/(\d{3,5})\s*[xX×]\s*(\d{3,5})/); const want = sz ? (Number(sz[1]) / 1000) * (Number(sz[2]) / 1000) : 0;
-        const sp = labelledSpaces(U.rings, bounds, [[t.x, t.y]], u, 20, 0.65)[0];
+        const dbl = DOUBLE_H.test(t.text);
+        // a void already drawn as a cut-out (opening layer) round the label: it is cut there already — only reported
+        if (dbl) {
+          const own = openRingsEarly.find((r) => inside([t.x, t.y], r));
+          // or crossed by the cut-out's X (its diagonals' box holds the label)
+          const xb = own ? null : openBoxes.filter((b) => t.x >= b[0] && t.x <= b[2] && t.y >= b[1] && t.y <= b[3]).sort((a2, b2) => (a2[2] - a2[0]) * (a2[3] - a2[1]) - (b2[2] - b2[0]) * (b2[3] - b2[1]))[0];
+          if (own || xb) { voids.push({ area: own ? Math.abs(polyArea(own)) * u2 : (xb![2] - xb![0]) * (xb![3] - xb![1]) * u2, text: t.text.replace(/\\[A-Za-z]/g, "").trim().slice(0, 30) }); continue; }
+        }
+        // (a void is drawn crossed by diagonals: those lines do not bound it)
+        const sp = labelledSpaces(U.rings, dbl ? boundsStraight : bounds, [[t.x, t.y]], u, dbl ? 150 : 20, 0.65)[0];
         // the space found is a ROOM (its own name + size is written in it, e.g. "ATT.BATH 2675 X 2650") when the duct /
         // shaft label sits at its edge and the shaft is open to it: not a hole
         const roomOf = (b: [number, number, number, number]) => (model.texts ?? []).some((o) => o !== t && o.x >= b[0] && o.x <= b[2] && o.y >= b[1] && o.y <= b[3] && !isOpeningLabel(o.text, opts.dict) && (() => { const z = o.text.match(/(\d{3,5})\s*[xX×]\s*(\d{3,5})/); if (!z) return false; const A = (Number(z[1]) / 1000) * (Number(z[2]) / 1000); return sp!.area >= 0.6 * A && sp!.area <= 1.4 * A; })());
-        const ok = sp && sp.area >= 0.5 && sp.area <= 20 && (!want || (sp.area >= 0.5 * want && sp.area <= 1.8 * want)) && !roomOf(sp.box);
+        // a double-height / open-to-below / open-to-sky space is a whole room left without slab (up to 150 m²), not a shaft
+        const ok = sp && sp.area >= 0.5 && sp.area <= (dbl ? 150 : 20) && (!want || (sp.area >= 0.5 * want && sp.area <= 1.8 * want)) && (dbl || !roomOf(sp.box));
+        if (ok && dbl) voids.push({ area: sp.area, text: t.text.replace(/\\[A-Za-z]/g, "").trim().slice(0, 30) });
         const same = (b: Pt[]) => extraOpen.some((e) => e.every((q, i) => Math.abs(q[0] - b[i][0]) < 0.05 / u && Math.abs(q[1] - b[i][1]) < 0.05 / u));
         if (ok) { const [x0, y0, x1, y1] = sp.box; const b: Pt[] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]; if (!same(b)) extraOpen.push(b); continue; }
         if (want >= 0.5 && want <= 20) {
@@ -1808,6 +1826,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     ...(projUsed.size ? { projectBeamsUsed: [...projUsed].sort() } : {}),
     ...(colRange ? { columnRange: colRange } : {}),
     ...(beamSteps ? { beamSteps } : {}),
+    ...(voids.length ? { voids: { n: voids.length, area: voids.reduce((a2, v) => a2 + v.area, 0), names: [...new Set(voids.map((v) => v.text))] } } : {}),
     ...(marksMissing.size ? { beamMarksMissing: [...marksMissing].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) } : {}),
     slabFromWalls, slabLoops: slab.map((x) => x.p.pts), openingLoops: openL.map((x) => x.p.pts),
     wallRings: U.rings, wallLoose: loose.filter((l) => onFloor2(l)),
