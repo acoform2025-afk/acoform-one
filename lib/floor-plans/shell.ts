@@ -99,7 +99,7 @@ export function buildShell(t: Takeoff, model: DxfModel | null): ShellGeometry {
       tags.push({ at: mid(s.pts), text: `${s.code} ${b}×${d}`, kind: "beam" });
     } else if (s.kind === "door" || s.kind === "window") {
       const isDoor = s.kind === "door";
-      const h = s.h ?? (isDoor ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH);
+      const h = s.h ?? (isDoor ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowH);
       const sill = isDoor ? 0 : s.sill ?? OPENING_DEFAULTS.windowSill;
       sch.openings.push({ code: s.code, kind: isDoor ? "Door" : "Window", w: mm(m.length), h, sill, lintel: sill + h });
       tags.push({ at: mid(s.pts), text: `${s.code} ${mm(m.length)}×${h}${isDoor ? "" : ` SILL ${sill}`}`, kind: s.kind });

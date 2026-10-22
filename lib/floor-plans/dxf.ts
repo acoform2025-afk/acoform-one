@@ -1681,7 +1681,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
     return !slab.some((x) => inside([cx, cy], x.p.pts) || [[m, 0], [-m, 0], [0, m], [0, -m]].some(([dx, dy]) => inside([cx + dx, cy + dy], x.p.pts)));
   };
   const cols = colAll.filter((c) => c.isCol && !sepCols.includes(c) && !inWallOutline(c) && !offSlab(c)).map(({ w, d, perimeter, area, p, round }) => ({ w, d, perimeter, area, round, pts: p.pts }));
-  return {
+  const res: DxfAuto = {
     slabArea: slab.reduce((s, x) => s + x.a, 0) * u2,
     slabPerimeter: slab.reduce((s, x) => s + polyLength(x.p.pts, true), 0) * u,
     openingArea: openL.reduce((s, x) => s + x.a, 0) * u2,
@@ -1907,6 +1907,7 @@ export function dxfAuto(model: DxfModel, rolesIn: Record<string, LayerRole>, uni
       };
     })(),
   };
+  return lowWallsFromTags(res, model.texts ?? [], keep, u);
 }
 
 /**
@@ -2538,4 +2539,71 @@ export function sunkTags(texts: DxfText[]): { depth: number; x: number; y: numbe
     if (m && +m[1] >= 25 && +m[1] <= 1500) out.push({ depth: +m[1], x: t.x, y: t.y, text: s });
   }
   return out;
+}
+
+/** Height tags of low walls written beside them: "1150 MM HT. SILL WALL", "600 MM HT SILL WALL", "UPSTAND 300 HT",
+ *  "300MM HIGH KERB", "PARAPET 1050 HT", "1200 HT. PARAPET". */
+export function heightTags(texts: DxfText[]): { h: number; kind: "sill" | "upstand" | "parapet"; x: number; y: number; text: string }[] {
+  const out: { h: number; kind: "sill" | "upstand" | "parapet"; x: number; y: number; text: string }[] = [];
+  for (const t of texts) {
+    const s = t.text.replace(/\\[A-Za-z][^;]*;/g, "").replace(/\s+/g, " ").trim(); if (s.length > 50) continue;
+    const kind = /sill/i.test(s) ? "sill" : /parapet/i.test(s) ? "parapet" : /upstand|up-stand|kerb|curb|planter|low\s*wall/i.test(s) ? "upstand" : null;
+    if (!kind) continue;
+    const m = s.match(/(\d{3,4})\s*(?:mm)?\s*\.?\s*(?:ht|high|height|h)\b/i) ?? s.match(/(?:ht|height)\.?\s*[:=]?\s*(\d{3,4})/i) ?? s.match(/\b(\d{3,4})\s*(?:mm)?\b/);
+    if (!m) continue; const h = +m[1]; if (h < 100 || h > 1800) continue;
+    out.push({ h, kind, x: t.x, y: t.y, text: s });
+  }
+  return out;
+}
+
+/**
+ * Walls the drawing marks as low (sill walls under windows, upstands, kerbs, parapets with their height written beside
+ * them) are formed as upstands of that height on the slab — both faces × height — not as full-height walls. Only a wall
+ * piece standing on its own (≤ 3 m² in plan) within 1.5 m of the tag is taken: a sill wall merged into a full wall
+ * cannot be told apart from it and stays a wall.
+ */
+function lowWallsFromTags(a: DxfAuto, texts: DxfText[], keep: ((p: DxfPath) => boolean) | undefined, u: number): DxfAuto {
+  const rings = a.wallRings ?? [];
+  if (!rings.length) return a;
+  const tags = heightTags(texts).filter((t) => !keep || keep({ layer: "", pts: [[t.x, t.y]], closed: false }));
+  if (!tags.length) return a;
+  const u2 = u * u, reach = 1.5 / u;
+  const segD = (p: Pt, q1: Pt, q2: Pt) => { const dx = q2[0] - q1[0], dy = q2[1] - q1[1], L = dx * dx + dy * dy; const k = L ? Math.max(0, Math.min(1, ((p[0] - q1[0]) * dx + (p[1] - q1[1]) * dy) / L)) : 0; return Math.hypot(p[0] - q1[0] - k * dx, p[1] - q1[1] - k * dy); };
+  const dist = (p: Pt, r: Pt[]) => { if (inside(p, r)) return 0; let d = Infinity; for (let i = 0; i < r.length; i++) d = Math.min(d, segD(p, r[i], r[(i + 1) % r.length])); return d; };
+  const low = new Map<number, { h: number; kind: string; text: string }>();
+  for (const tg of tags) {
+    let best = -1, bd = reach;
+    rings.forEach((r, i) => { const A = Math.abs(polyArea(r)) * u2; if (A > 3 || A < 0.02) return; const d = dist([tg.x, tg.y], r); if (d < bd) { bd = d; best = i; } });
+    if (best >= 0 && !low.has(best)) low.set(best, { h: tg.h, kind: tg.kind, text: tg.text });
+  }
+  if (!low.size) return a;
+  const map = new Map<number, number>(); let n = 0; rings.forEach((_, i) => { if (!low.has(i)) map.set(i, n++); });
+  let per = 0, area = 0; const ups: NonNullable<DxfAuto["upstands"]> = [];
+  for (const [i, v] of low) { const p = polyLength(rings[i], true) * u; per += p; area += Math.abs(polyArea(rings[i])) * u2; ups.push({ label: `${v.kind === "sill" ? "Sill wall" : v.kind === "parapet" ? "Parapet" : "Upstand"} ${v.h} mm ("${v.text}")`, h: v.h, length: p }); }
+  return {
+    ...a,
+    wallRings: rings.filter((_, i) => !low.has(i)),
+    wallLineLength: Math.max(0, a.wallLineLength - per),
+    wallTopArea: a.wallTopArea != null ? Math.max(0, a.wallTopArea - area) : a.wallTopArea,
+    wallOpenings: (a.wallOpenings ?? []).filter((o) => !low.has(o.ring)).map((o) => ({ ...o, ring: map.get(o.ring)! })),
+    columnWallEdges: (a.columnWallEdges ?? []).filter((k) => !low.has(Number(k.split(":")[0]))).map((k) => { const [i, e] = k.split(":"); return `${map.get(Number(i))}:${e}`; }),
+    wallSeparate: (a.wallSeparate ?? []).filter((i) => !low.has(i)).map((i) => map.get(i)!),
+    upstands: [...(a.upstands ?? []), ...ups],
+  };
+}
+
+/** Door opening height stated on the drawing: "1050X2300 DOOR OPENING", "DOOR OPENING OF 2300MM HEIGHT", a door
+ *  schedule's "D1 1000X2100", "DOOR HT. 2100". The height most of them give (1900 … 2700 mm). */
+export function doorHeightFromTexts(texts: DxfText[]): { mm: number; note: string } | null {
+  const c = new Map<number, number>();
+  for (const t of texts) {
+    const s = t.text.replace(/\\[A-Za-z][^;]*;/g, "").replace(/\s+/g, " ").trim(); if (s.length > 80) continue;
+    const isDoor = /\bdoor|\bd\d{1,2}\b|^d\s?-?\d/i.test(s); if (!isDoor || /window|\bw\d/i.test(s)) continue;
+    let h: number | null = null;
+    const wh = s.match(/(\d{3,4})\s*(?:mm)?\s*[xX×*]\s*(\d{4})/); if (wh) h = +wh[2];
+    const hh = s.match(/(\d{4})\s*(?:mm)?\s*(?:ht|high|height)\b/i) ?? s.match(/(?:ht|height)\.?\s*(?:of)?\s*[:=]?\s*(\d{4})/i); if (!h && hh) h = +hh[1];
+    if (h && h >= 1900 && h <= 2700) c.set(h, (c.get(h) ?? 0) + 1);
+  }
+  const best = [...c.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+  return best ? { mm: best[0], note: `${best[1]} door tag${best[1] === 1 ? "" : "s"} giving ${best[0]} mm` } : null;
 }

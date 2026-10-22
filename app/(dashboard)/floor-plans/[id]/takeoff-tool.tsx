@@ -14,7 +14,7 @@ import { BuildingPanel, type SiblingPlan } from "./building-panel";
 import { parseLevelName, readBuilding, type Building } from "@/lib/floor-plans/building";
 import { perimeterByLevel } from "@/lib/floor-plans/column-schedule";
 import { alignFitAuto, linkFor, mergeStructural } from "@/lib/floor-plans/structural-link";
-import { slabFromNotes } from "@/lib/floor-plans/dxf";
+import { doorHeightFromTexts, slabFromNotes } from "@/lib/floor-plans/dxf";
 import { EMPTY_DICT, layerKey, learnedRole, type Dictionary } from "@/lib/floor-plans/vocab";
 import type { ProjectFacts } from "@/lib/floor-plans/project-facts";
 import { teachDrawing } from "../dictionary-actions";
@@ -505,6 +505,9 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     if (fh) notes.push(`floor height ${fh} mm (${sec?.floorMm ? secFrom : info.heightMm ? (info.source && /level/.test(info.source) ? "from the level marks" : "from the drawing") : `from "${project?.floorMmFrom}"`})`);
     if (sec) notes.push(`${ownSec ? "" : `section of "${project?.sectionFrom}" — `}sections: slab ${sec.slabMm} mm concrete${sec.finishMm ? ` (+ ${sec.finishMm} mm floor finish, ${sec.totalMm} mm in all — finish not formed)` : ""}${slabMm ? "" : " — kept the slab you set"}${sec.beamMm ? ` · beams / lintels ${sec.beamMm} mm deep` : ""}`);
     if (!sec && noteSlab) notes.push(`slab ${noteSlab.mm} mm (from ${noteSlab.note})`);
+    const dh = doorHeightFromTexts(modelRef.current.texts ?? []);
+    const doorHMm = dh && (force || t.params.doorHMm == null) ? dh.mm : undefined;
+    if (doorHMm) notes.push(`door openings ${doorHMm} mm high (${dh!.note})`);
     if (force && !pick && !fh && !floors && !sec && !noteSlab) notes.push("nothing new could be read — set the region, floors and floor height by hand");
     // the whole building: every level, its drawing and the open questions (kept once the estimator has edited it, unless read again)
     const pickedPart = pick ? parts.find((q) => { const i = boxI(q.px, pick.px); return i > 0.85 * boxA(q.px) && i > 0.6 * boxA(pick.px); }) : currentPart;
@@ -516,7 +519,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
       ...pp,
       ...(bld ? { building: bld } : {}),
       auto: { done: true, note },
-      params: { ...pp.params, ...(floors ? { floors } : nFl ? { floors: nFl } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}), ...(slabMm ? { slabMm } : {}), ...(beamDepthMm ? { beamDepthMm } : {}) },
+      params: { ...pp.params, ...(doorHMm ? { doorHMm } : {}), ...(floors ? { floors } : nFl ? { floors: nFl } : {}), ...(fh ? { floorHeight: fh / 1000 } : {}), ...(slabMm ? { slabMm } : {}), ...(beamDepthMm ? { beamDepthMm } : {}) },
       // "read again": the layers are set again as the app reads them now (a plan read by an older version keeps no stale layer roles)
       dxf: pp.dxf ? { ...pp.dxf, ...(fresh ? { layerRoles: fresh } : {}), ...(pick ? { region: pick.px } : {}) } : pp.dxf,
     }));
@@ -1100,6 +1103,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Field label="Balcony parapet height (mm)"><NumInput value={t.params.parapetMm ?? 900} step={50} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, parapetMm: v } }))} /></Field>
               <Field label="Window sill height (mm)"><NumInput value={t.params.sillMm ?? 900} step={50} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, sillMm: v } }))} /></Field>
+              <Field label="Door opening height (mm)"><NumInput value={t.params.doorHMm ?? 2100} step={50} disabled={!canEdit} onChange={(v) => update((p) => ({ ...p, params: { ...p.params, doorHMm: v } }))} /></Field>
               <label className="col-span-2 flex items-center gap-2 text-xs text-graphite-300">
                 <input type="checkbox" disabled={!canEdit} checked={t.params.autoEdgeBeams !== false} onChange={(e) => update((p) => ({ ...p, params: { ...p.params, autoEdgeBeams: e.target.checked } }))} />
                 Edge beams at slab edges without a wall (balcony fronts) — depth = beam depth

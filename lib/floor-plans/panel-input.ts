@@ -146,7 +146,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
         cuts.forEach((c, ci) => {
           piece(pos, c.f0);
           const w = (c.f1 - Math.max(pos, c.f0)) * L;
-          const head = c.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, sill = c.door ? 0 : OPENING_DEFAULTS.windowSill;
+          const head = c.door ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, sill = c.door ? 0 : OPENING_DEFAULTS.windowSill;
           if (w > 0) {
             const g3 = (z0: number) => ({ a: at(Math.max(pos, c.f0)), b: at(c.f1), off: side, z0 });
             if (H - head >= 50) faces.push({ code: `F${n}-O${ci + 1}H`, length: w, height: H - head, part: "above", geo3: g3(head) });
@@ -154,7 +154,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
           }
           if (!dwSeen.some((d) => Math.hypot(d.mid[0] - c.mid[0], d.mid[1] - c.mid[1]) * uM * 1000 <= Math.max(d.thk, c.thk) + 100)) {
             dwSeen.push({ mid: c.mid, thk: c.thk });
-            openings.push({ kind: c.door ? "door" : "window", w: (c.f1 - c.f0) * L, h: c.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH, t: c.thk || (t.params.wallThkMm ?? 150) });
+            openings.push({ kind: c.door ? "door" : "window", w: (c.f1 - c.f0) * L, h: c.door ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowH, t: c.thk || (t.params.wallThkMm ?? 150) });
           }
           pos = Math.max(pos, c.f1);
         });
@@ -190,7 +190,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
   // doors / windows: cut them out of the faces they sit on
   const ops = g.shapes.filter((s) => (s.kind === "door" || s.kind === "window") && s.pts.length >= 2).map((s) => {
     const isDoor = s.kind === "door";
-    const h = s.h ?? (isDoor ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH);
+    const h = s.h ?? (isDoor ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowH);
     const sill = isDoor ? 0 : s.sill ?? OPENING_DEFAULTS.windowSill;
     return { s, isDoor, h, sill, p: s.pts[0], q: s.pts[s.pts.length - 1], t: s.t ?? t.params.wallThkMm ?? 150, used: false };
   });
@@ -386,7 +386,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     if (!zoneWalls.length || !inRingsM([mid[0] + nx * thk * 0.5, mid[1] + ny * thk * 0.5], zoneWalls)) { nx = -nx; ny = -ny; }
     // both faces of one wall carry the same opening: once
     if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 - mid[0], (z.a[1] + z.b[1]) / 2 - mid[1]) <= Math.max(z.thk, thk) + 0.05)) continue;
-    zoneOpenings.push({ a: pa, b: pb, n: [nx, ny], thk, door: op.door, sill: op.door ? 0 : OPENING_DEFAULTS.windowSill, head: op.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH });
+    zoneOpenings.push({ a: pa, b: pb, n: [nx, ny], thk, door: op.door, sill: op.door ? 0 : OPENING_DEFAULTS.windowSill, head: op.door ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH });
   }
   // hand-drawn doors / windows (a line along the wall): the opening across the wall, as in the DXF reading
   if (mpp > 0) for (const x of g.shapes) {
@@ -398,7 +398,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     const mid: Pt = [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2];
     if (!zoneWalls.length || !inRingsM([mid[0] + nx * thk * 0.5, mid[1] + ny * thk * 0.5], zoneWalls)) { nx = -nx; ny = -ny; }
     const sill = door ? 0 : (x.sill ?? OPENING_DEFAULTS.windowSill);
-    zoneOpenings.push({ a: pa, b: pb, n: [nx, ny], thk, door, sill, head: door ? OPENING_DEFAULTS.doorH : sill + OPENING_DEFAULTS.windowH });
+    zoneOpenings.push({ a: pa, b: pb, n: [nx, ny], thk, door, sill, head: door ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : sill + OPENING_DEFAULTS.windowH });
   }
   // doors / windows in a break of the wall: the opening across the gap (the face line on one side)
   if (frame) for (const dg of auto?.dwGaps ?? []) {
@@ -407,7 +407,7 @@ export function panelInputs(t: Takeoff, model: DxfModel | null, rules: MeasureRu
     const nx = -dy / L, ny = dx / L, h = dg.thk / 2;
     const mid: Pt = [(ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2];
     if (zoneOpenings.some((z) => Math.hypot((z.a[0] + z.b[0]) / 2 + z.n[0] * z.thk / 2 - mid[0], (z.a[1] + z.b[1]) / 2 + z.n[1] * z.thk / 2 - mid[1]) < 0.3)) continue;
-    zoneOpenings.push({ a: [ca[0] - nx * h, ca[1] - ny * h], b: [cb[0] - nx * h, cb[1] - ny * h], n: [nx, ny], thk: dg.thk, door: dg.door, sill: dg.door ? 0 : OPENING_DEFAULTS.windowSill, head: dg.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, gap: true, ...(dg.free ? { free: true } : {}) });
+    zoneOpenings.push({ a: [ca[0] - nx * h, ca[1] - ny * h], b: [cb[0] - nx * h, cb[1] - ny * h], n: [nx, ny], thk: dg.thk, door: dg.door, sill: dg.door ? 0 : OPENING_DEFAULTS.windowSill, head: dg.door ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowSill + OPENING_DEFAULTS.windowH, gap: true, ...(dg.free ? { free: true } : {}) });
   }
   // what the reader decided on its own, in plan metres, for the review screen
   const readNotes = frame && auto?.notes ? auto.notes.map((n) => { const a = toM(frame!.toPx([n.box[0], n.box[1]])), b = toM(frame!.toPx([n.box[2], n.box[3]])); return { ...n, box: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] as [number, number, number, number] }; }) : [];

@@ -53,6 +53,7 @@ export type Params = {
   autoLintels?: boolean;
   autoEdgeBeams?: boolean;  // edge beams under slab edges without a wall (balcony fronts) — default on when the drawing has no beam layers
   parapetMm?: number;       // balcony parapet height (walls with a railing on them), default 900
+  doorHMm?: number;         // door opening height (mm above the slab), from the drawing's door tags / schedule; default 2100
   sillMm?: number;          // window sill height (sill wall under windows found in wall openings), default 900    // beams / lintels over wall openings found on the drawing (default on)
   stdHeightMm?: number;     // standard wall-panel height for this plan (mm), overrides the company rule
   wallThkMm?: number;       // default thickness of drawn walls (3D view, wall tops)
@@ -309,7 +310,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
       } else if (s.kind === "door" || s.kind === "window") {
         // opening in a drawn wall: both faces come off the wall; the concrete reveals (sides, top, sill) are added
         const isDoor = s.kind === "door";
-        const w = m.length, h = (s.h && s.h > 0 ? s.h : isDoor ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH) / 1000;
+        const w = m.length, h = (s.h && s.h > 0 ? s.h : isDoor ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowH) / 1000;
         const thk = (s.t && s.t > 0 ? s.t : Number(t.params.wallThkMm) || 150) / 1000;
         if (w * h < minOpen) continue;                                   // small opening: not deducted, sides not added (IS 1200-5)
         const faces = 2 * w * h, reveal = (2 * h + w * (isDoor ? 1 : 2)) * thk;
@@ -340,7 +341,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     const uM = UNIT_TO_M[t.dxf?.units ?? "mm"] ?? 0.001;
     let dN = 0, dLen = 0, dFace = 0, dRev = 0, wN = 0, wLen = 0, wFace = 0, wRev = 0;
     for (const o of auto.wallOpenings ?? []) {
-      const w = (o.t1 - o.t0) * uM, h = (o.door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH) / 1000, thk = (o.thk || Number(t.params.wallThkMm) || 150) / 1000;
+      const w = (o.t1 - o.t0) * uM, h = (o.door ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowH) / 1000, thk = (o.thk || Number(t.params.wallThkMm) || 150) / 1000;
       if (w * h < minOpen) continue;
       const rev = rules.reveals ? 0.5 * (2 * h + w * (o.door ? 1 : 2)) * thk : 0;
       if (o.door) { dN++; dLen += w; dFace += w * h; dRev += rev; } else { wN++; wLen += w; wFace += w * h; wRev += rev; }
@@ -348,7 +349,7 @@ export function computeTotals(t: Takeoff, auto?: DxfAuto | null, companyRules?: 
     for (const [door, n, len, face, rev] of [[true, dN, dLen, dFace, dRev], [false, wN, wLen, wFace, wRev]] as const) {
       if (!n) continue;
       wallArea -= face;
-      items.push({ code: code(door ? "DR" : "WN"), group: "opening", label: `${door ? "Doors" : "Windows"} in walls (drawing, ${Math.round(n / 2)}) − faces`, calc: `− ${n2(len)} m of faces × ${n3((door ? OPENING_DEFAULTS.doorH : OPENING_DEFAULTS.windowH) / 1000)} m`, area: -face });
+      items.push({ code: code(door ? "DR" : "WN"), group: "opening", label: `${door ? "Doors" : "Windows"} in walls (drawing, ${Math.round(n / 2)}) − faces`, calc: `− ${n2(len)} m of faces × ${n3((door ? (Number(t.params.doorHMm) || OPENING_DEFAULTS.doorH) : OPENING_DEFAULTS.windowH) / 1000)} m`, area: -face });
       if (rev > 0) { wallArea += rev; items.push({ code: code(door ? "DR" : "WN"), group: "opening", label: `${door ? "Door" : "Window"} reveals`, calc: "sides, head" + (door ? "" : ", sill") + " × wall thickness", area: rev }); }
     }
     if (auto.separateWall && (auto.separateWall.faces > 0 || auto.separateWall.cols > 0)) {
