@@ -7,7 +7,7 @@
  */
 import { beamSchedule, drawingParts, drawingSection, floorInfoFromTexts, partsSection, slabFromNotes, suggestedRoles, type DxfModel, type PartKind } from "./dxf";
 import { statedLevels, type Level } from "./building";
-import { columnSchedules, dimColumnSchedules, scheduleSummary, type ColumnSchedule } from "./column-schedule";
+import { columnSchedules, dimColumnSchedules, dimGridSchedules, scheduleSummary, type ColumnSchedule } from "./column-schedule";
 import type { SectionLevels } from "./section-read";
 
 export const FACTS_V = 3;   // 2: level ladders with dotted marks, sections on sheets, column schedules
@@ -37,6 +37,7 @@ export function drawingFacts(model: DxfModel, unitToM: number): DrawingFacts {
   let columns = columnSchedules(model.texts ?? [], unitToM).filter((c) => c.rows.some((r) => r.from || r.to));
   // schedules drawn as dimensioned column sections (no size written)
   if (!columns.length) columns = dimColumnSchedules(model.texts ?? [], unitToM).filter((c) => c.rows.some((r) => r.from || r.to));
+  if (!columns.length) columns = dimGridSchedules(model.texts ?? [], unitToM).filter((c) => c.rows.some((r) => r.from || r.to));
   return {
     v: FACTS_V, at: new Date().toISOString(), contains,
     ...(section ? { section } : {}),

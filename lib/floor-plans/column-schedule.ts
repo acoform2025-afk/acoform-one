@@ -107,6 +107,12 @@ export function sizesAtLevel(sch: ColumnSchedule, kind: LevelKind, no?: number):
     // the row "A slab lvl to B slab lvl" is the column between slab A and slab B: the columns of floor A
     if (r >= a && r < (Number.isFinite(b) ? b : Infinity)) { out = out ?? {}; for (const [k, v] of Object.entries(row.sizes)) if (!out[k]) out[k] = v; }
   }
+  // a level the schedule skips (its row not read, or "same as below"): the nearest row below it, up to 3 levels down
+  if (!out) {
+    const below = sch.rows.filter((row) => row.from && Number.isFinite(rank(row.from.kind, row.from.no)) && rank(row.from.kind, row.from.no) <= r && r - rank(row.from.kind, row.from.no) <= 3)
+      .sort((x, y) => rank(y.from!.kind, y.from!.no) - rank(x.from!.kind, x.from!.no))[0];
+    if (below) out = { ...below.sizes };
+  }
   return out;
 }
 
@@ -184,4 +190,63 @@ export function dimColumnSchedules(textsIn: DxfText[], unitToM: number): ColumnS
   const rk = (r: ColRow) => r.from?.kind === "floor" ? r.from.no ?? 0 : r.from?.kind === "ground" ? 0 : r.from?.kind === "basement" ? -(r.from.no ?? 1) : 500;
   const out = [...rows.values()].filter((r) => Object.keys(r.sizes).length).sort((a, b) => rk(a) - rk(b));
   return markSet.size >= 2 && out.length ? [{ marks: [...markSet].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), rows: out, title: "column schedule (dimensioned sections)" }] : [];
+}
+
+/**
+ * Column schedules drawn as a GRID of dimensioned sections: a row of marks (C1 C2 … C15) under every level's row of
+ * column sections, the level written at the left ("3RD BASEMENT ROOF SLAB LEVEL" — the storey under that slab), the
+ * size of each section from its overall horizontal × vertical dimension.
+ */
+export function dimGridSchedules(textsIn: DxfText[], unitToM: number): ColumnSchedule[] {
+  const texts = textsIn.map((t) => ({ ...t, text: t.text.replace(/\\[A-Za-z]/g, "").replace(/\s+/g, " ").trim() }));
+  const dims = texts.filter((t) => t.kind === "dim" && /^\d{3,4}$/.test(t.text));
+  if (dims.length < 10) return [];
+  const marks = texts.filter((t) => MARK.test(t.text) && t.h > 0);
+  const byY = new Map<number, typeof marks>();
+  for (const t of marks) { const k = Math.round(t.y / Math.max(1, t.h * 2)); byY.set(k, [...(byY.get(k) ?? []), t]); }
+  const rowsM = [...byY.values()].filter((r) => r.length >= 5).map((r) => r.sort((a, b) => a.x - b.x));
+  if (rowsM.length < 2) return [];
+  // stacks of mark rows sharing their x span = one schedule
+  const stacks: (typeof rowsM)[] = [];
+  for (const r of rowsM.sort((a, b) => a[0].x - b[0].x || a[0].y - b[0].y)) {
+    const st = stacks.find((S) => Math.abs(S[0][0].x - r[0].x) < 3 * r[0].h * 10 && Math.abs(S[0][S[0].length - 1].x - r[r.length - 1].x) < 30 * r[0].h);
+    if (st) st.push(r); else stacks.push([r]);
+  }
+  const LV = /(floor|slab|lvl|level|basement|basemnet|footing|foundation|plinth|terrace|stilt|podium)/i;
+  const out: ColumnSchedule[] = [];
+  for (const S of stacks) {
+    if (S.length < 2) continue;
+    S.sort((a, b) => a[0].y - b[0].y);                          // bottom row first
+    const x0 = minOf(S.flatMap((r) => r.map((t) => t.x))), x1 = maxOf(S.flatMap((r) => r.map((t) => t.x)));
+    const pitch = (x1 - x0) / Math.max(1, S[0].length - 1);
+    const rows: ColRow[] = []; const markSet = new Set<string>();
+    for (let i = 0; i < S.length; i++) {
+      const yb = S[i][0].y - S[i][0].h, yt = i + 1 < S.length ? S[i + 1][0].y - S[i + 1][0].h : S[i][0].y + 3 * pitch;
+      // the level written left of the row (most often within the band)
+      const labs = texts.filter((t) => LV.test(t.text) && t.text.length <= 50 && t.x < x0 - pitch * 0.3 && t.x > x0 - pitch * 6 && t.y >= yb && t.y <= yt);
+      const cnt = new Map<string, number>(); for (const t of labs) cnt.set(t.text.toUpperCase(), (cnt.get(t.text.toUpperCase()) ?? 0) + 1);
+      const name = [...cnt].sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (!name) continue;
+      // "X ROOF SLAB LEVEL": the storey X (from X to the slab over it)
+      const base = name.replace(/basemnet/gi, "basement").replace(/\b(roof\s*)?slab\s*(level|lvl\.?)?/gi, " ").replace(/\s+/g, " ").trim();
+      const l = parseLevelName(base);
+      if (l.kind === "other" && !l.nos.length) continue;
+      if (l.kind === "basement") { const bn = base.match(/(\d)\s*(?:st|nd|rd|th)?\s*basement|basement\s*-?\s*(\d)/i); if (bn) l.nos = [+(bn[1] ?? bn[2])]; }
+      const from = { kind: l.kind, no: l.nos[0] };
+      const to = l.kind === "basement" ? ((l.nos[0] ?? 1) > 1 ? { kind: "basement" as LevelKind, no: (l.nos[0] ?? 1) - 1 } : { kind: "ground" as LevelKind }) : l.kind === "ground" || l.kind === "stilt" ? { kind: "floor" as LevelKind, no: 1 } : l.kind === "floor" && l.nos[0] != null ? { kind: "floor" as LevelKind, no: l.nos[0] + 1 } : undefined;
+      const sizes: Record<string, ColSize> = {};
+      for (const mk of S[i]) {
+        const inC = dims.filter((d) => Math.abs(d.x - mk.x) <= pitch * 0.5 && d.y > yb && d.y < yt);
+        const vert = inC.filter((d) => Math.abs(Math.abs(d.r ?? 0) - Math.PI / 2) < 0.2).map((d) => +d.text);
+        const hor = inC.filter((d) => Math.abs(d.r ?? 0) < 0.2 || Math.abs(Math.abs(d.r ?? 0) - Math.PI) < 0.2).map((d) => +d.text);
+        if (!vert.length || !hor.length) continue;
+        const b = maxOf(hor), d = maxOf(vert); if (b < 150 || d < 150 || b > 4000 || d > 4000) continue;
+        const mark = mk.text.toUpperCase().replace(/[-_ ]/g, ""); markSet.add(mark);
+        sizes[mark] = { b: Math.min(b, d), d: Math.max(b, d) };
+      }
+      if (Object.keys(sizes).length) rows.push({ label: name, from, to, sizes });
+    }
+    if (rows.length >= 3 && markSet.size >= 3) out.push({ marks: [...markSet].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), rows, title: "column schedule (dimensioned grid)" });
+  }
+  return out;
 }
