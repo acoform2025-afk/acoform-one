@@ -23,7 +23,7 @@ import {
   computeTotals, emptyTakeoff, fmtArea, fmtLen, polyArea, shapeMeasure, stairBreakdown, UNIT_TO_M, type StairRow,
   type DxfAuto, type DxfUnits, type LayerRole, type Pt, type Shape, type ShapeKind, type Takeoff, type Totals,
 } from "@/lib/floor-plans/calc";
-import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, floorsFromTitle, isLayoutTitle, planCandidates, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
+import { drawingParts, dxfAuto, dxfFrame, drawDxf, drawingSection, floorInfoFromTexts, planCandidates, typicalPart, readDxf, ROLE_COLOR, separateAreas, snapPoints, type DxfModel, type PartKind } from "@/lib/floor-plans/dxf";
 import { createAllLevelPlans, createLevelPlan, saveTakeoff, setPlanLock } from "../actions";
 import { parseFloorsLabel } from "@/lib/floor-plans/floors-label";
 import { designStair, type StairType } from "@/lib/floor-plans/stair-calc";
@@ -480,8 +480,7 @@ export function TakeoffTool({ plan, tenantId, canEdit: canEditProp, quotes, desi
     // that stands for the most floors ("SLAB OVER 17TH TO 26TH FLOOR"), drawn exactly as its title frames it
     let fresh: Record<string, LayerRole> | null = null;
     if (force && modelRef.current) { fresh = {}; for (const l of modelRef.current.layers) { const lr = learnedRole(l.name, dict); fresh[l.name] = lr != null && lr !== l.vetoed ? lr : l.suggested; } }
-    const lays = parts.filter((q) => q.kind === "plan" && isLayoutTitle(q.title));
-    const lp = lays.length >= 2 ? [...lays].sort((a, b) => (floorsFromTitle(b.title) ?? 1) - (floorsFromTitle(a.title) ?? 1) || b.count - a.count)[0] : null;
+    const lp = typicalPart(parts);
     const pick = lp ? { n: lp.n, w: lp.w, h: lp.h, title: lp.title, floors: undefined as number | undefined, px: lp.px } : candidates.length >= 2 ? candidates[0] : null;
     const info = floorInfoFromTexts(modelRef.current.texts ?? [], UNIT_TO_M[t.dxf.units], [plan.name, plan.lead?.label ?? ""]);
     // first time: floor height / floors only replace the untouched defaults (3000 mm, 1 floor); "read again" replaces them

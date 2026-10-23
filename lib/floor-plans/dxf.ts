@@ -2040,14 +2040,29 @@ function formworkCaptionBoxes(texts: DxfText[], boxes: [number, number, number, 
 const BAD_TITLE = /section|elevation|site|roof|terrace|parking|basement|stilt|podium|detail|stair|lift|key\s*plan|location|schedule|foundation|footing|column\s*layout|centre\s*line|center\s*line|剖面|立面|屋面|地下|详图|大样|楼梯|总平面/i;
 /** Floors from a title like "TYPICAL 1ST TO 14TH FLOOR PLAN" or "2nd-12th floor". */
 export function floorsFromTitle(t: string): number | undefined {
-  const m = t.match(/(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor\s*)?(?:to|-|–|upto|up to)\s*(\d{1,3})\s*(?:st|nd|rd|th)?/i);
-  if (m) { const a = +m[1], b = +m[2]; if (b > a && b - a < 200) return b - a + 1; }
-  // a list of floors: "2ND,6TH,10TH,14TH & 18TH FLOOR PLAN" → 5
+  // (not a unit / drawing number: "TYP-A1-102", "A-101-105")
+  const m = t.match(/(?<![A-Za-z\d-])(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:floor\s*)?(?:to|-|–|upto|up to)\s*(\d{1,3})\s*(?:st|nd|rd|th)?(?![\d-])/i);
+  if (m) { const a = +m[1], b = +m[2]; if (b > a && b <= 120 && b - a < 120) return b - a + 1; }
+  // a list of floors: "2ND,6TH,10TH,14TH & 18TH FLOOR PLAN" → 5; "05, 07,11, 16, 20TH FLOOR PLAN" → 5
   const ords = t.match(/\b\d{1,3}\s*(?:st|nd|rd|th)\b/gi);
   if (ords && ords.length >= 2) return ords.length;
+  const list = t.match(/((?:\b\d{1,3}\s*(?:st|nd|rd|th)?\s*(?:,|&|\band\b)\s*)+\d{1,3}\s*(?:st|nd|rd|th)?)\s*(?:floor|flr|fl\b|level|lvl)/i);
+  if (list) { const n = list[1].match(/\d{1,3}/g)?.length ?? 0; if (n >= 2) return n; }
   const n = t.match(/\((\d{1,3})\s*(?:nos|floors?)\)/i) ?? t.match(/(\d{1,3})\s*(?:nos\.?|floors)\b/i);
   if (n && +n[1] > 0 && +n[1] < 200) return +n[1];
   return undefined;
+}
+/** The typical floor among the file's drawings: the floor plan / slab layout standing for the most floors
+ *  ("2ND TO 13TH FLOOR" over "05, 07, 11, 16, 20TH FLOOR (REFUGE)"); refuge / service / transfer floors, basements,
+ *  podiums, terraces, sections are never the typical floor. Ties: a title that says FLOOR, then the most drawn. */
+export function typicalPart<T extends { kind: string; title: string; count: number; w?: number; h?: number }>(parts: T[]): T | null {
+  // (a floor, not a schedule cell or a detail headed with floors: at least 8 m each way)
+  const ok = parts.filter((q) => q.kind === "plan" && (q.w == null || q.w >= 8) && (q.h == null || q.h >= 8) && !/refuge|service\s*(floor|lvl|level)|transfer/i.test(q.title) && !BAD_TITLE.test(q.title.replace(/(floor|fl\.?|flr)\s*roof\s*slab/gi, "$1 slab")));   // "17TH FLOOR ROOF SLAB" is a floor slab, not the roof
+  const multi = ok.filter((q) => (floorsFromTitle(q.title) ?? 1) >= 2);
+  const lays = ok.filter((q) => isLayoutTitle(q.title));
+  const pool = multi.length ? multi : lays.length >= 2 ? lays : [];
+  if (!pool.length) return null;
+  return [...pool].sort((a, b) => (floorsFromTitle(b.title) ?? 1) - (floorsFromTitle(a.title) ?? 1) || (/\bfloor\b/i.test(b.title) ? 1 : 0) - (/\bfloor\b/i.test(a.title) ? 1 : 0) || b.count - a.count)[0];
 }
 /** Title of a drawing: the biggest text inside or just below/above its box that reads like a drawing title. */
 /** Words a drawing title has ("… FLOOR PLAN", "SECTION A-A", "4BHK UNIT", "AREA TABLE") — whole words, so "DRAWING ROOM" is not a "wing". */
@@ -2253,6 +2268,7 @@ export function planCandidates(model: DxfModel, roles: Record<string, LayerRole>
     if (title) {
       if (/typical/i.test(title)) f = 4;
       else if (BAD_TITLE.test(title)) f = 0.25;
+      else if (/refuge|service\s*(floor|lvl|level)|transfer\s*(floor|slab)/i.test(title)) f = 0.6;   // refuge / service / transfer floors are special floors, not the typical one
       else if (/floor\s*plan|plan|block|tower|wing/i.test(title) || isLayoutTitle(title)) f = 1.5;
       o.floors = floorsFromTitle(title);
       // of several floor layouts, the one that stands for the most floors is the typical one ("3RD TO 7TH" over "2ND")
